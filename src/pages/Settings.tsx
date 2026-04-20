@@ -40,6 +40,14 @@ export default function Settings() {
                 toast.error("Couldn't update account.");
               }
             }}
+            onDailyReset={async () => {
+              try {
+                await updateAccount({ startOfDayEquity: account.equity });
+                toast.success(`Day reset · start-of-day = $${account.equity.toFixed(2)}.`);
+              } catch {
+                toast.error("Couldn't reset the day.");
+              }
+            }}
           />
         </Section>
       )}
@@ -154,12 +162,14 @@ function AccountControls({
   startOfDayEquity,
   balanceFloor,
   onSave,
+  onDailyReset,
 }: {
   equity: number;
   cash: number;
   startOfDayEquity: number;
   balanceFloor: number;
   onSave: (patch: { equity?: number; cash?: number; startOfDayEquity?: number; balanceFloor?: number }) => void;
+  onDailyReset: () => void;
 }) {
   const [eq, setEq] = useState(String(equity));
   const [csh, setCsh] = useState(String(cash));
@@ -169,8 +179,11 @@ function AccountControls({
   const dirty =
     Number(eq) !== equity || Number(csh) !== cash || Number(sod) !== startOfDayEquity || Number(floor) !== balanceFloor;
 
+  const dailyPnl = equity - startOfDayEquity;
+  const dailyPnlPct = startOfDayEquity > 0 ? (dailyPnl / startOfDayEquity) * 100 : 0;
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <NumField label="Equity" value={eq} onChange={setEq} />
         <NumField label="Cash" value={csh} onChange={setCsh} />
@@ -187,6 +200,20 @@ function AccountControls({
           onClick={() => onSave({ equity: Number(eq), cash: Number(csh), startOfDayEquity: Number(sod), balanceFloor: Number(floor) })}
         >
           Save
+        </Button>
+      </div>
+
+      <div className="rounded-md border border-border/60 bg-muted/20 p-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-foreground">Daily reset</div>
+          <div className="text-xs text-muted-foreground">
+            Snapshots current equity into <span className="tabular">start-of-day</span> so today's PnL starts at zero.
+            Currently <span className="tabular">{dailyPnl >= 0 ? "+" : ""}${dailyPnl.toFixed(2)}</span>{" "}
+            ({dailyPnlPct >= 0 ? "+" : ""}{dailyPnlPct.toFixed(2)}%) on the day.
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={onDailyReset} className="shrink-0">
+          Reset day
         </Button>
       </div>
     </div>
