@@ -1,4 +1,4 @@
-import { Bell, HelpCircle, LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
+import { Bell, LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -12,7 +12,6 @@ import { StatusBadge } from "./StatusBadge";
 import { Explain } from "./Explain";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-import { useHelpMode } from "@/contexts/HelpModeContext";
 import { toast } from "sonner";
 import type { SystemMode } from "@/lib/domain-types";
 import { useSystemState } from "@/hooks/useSystemState";
@@ -43,7 +42,6 @@ export function TopBar() {
   const { user, profile, signOut } = useAuth();
   const { data: s } = useSystemState();
   const { alerts } = useAlerts();
-  const { enabled: helpOn, toggle: toggleHelp } = useHelpMode();
   const handleSignOut = async () => {
     await signOut();
     toast.success("Signed out. Stay disciplined.");
@@ -109,22 +107,6 @@ export function TopBar() {
           </StatusBadge>
         </Explain>
       )}
-
-      <button
-        type="button"
-        onClick={toggleHelp}
-        aria-pressed={helpOn}
-        aria-label={helpOn ? "Turn off What's this? mode" : "Turn on What's this? mode"}
-        title={helpOn ? "What's this? mode: ON — click to turn off" : "What's this? mode: OFF — click for tooltips on everything"}
-        className={cn(
-          "h-8 w-8 rounded-md flex items-center justify-center transition-colors",
-          helpOn
-            ? "bg-primary/15 text-primary ring-1 ring-primary/40"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )}
-      >
-        <HelpCircle className="h-4 w-4" />
-      </button>
 
       <button
         type="button"
