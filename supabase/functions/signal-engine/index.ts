@@ -297,7 +297,7 @@ async function runTickForUser(
   // Sweep expired across all symbols first
   const expiredCount = await expirePendingSignals(admin, userId);
 
-  const [{ data: sys }, { data: acct }, { data: rails }, { data: openTrades }, { data: pendingSignals }, { data: recentSignals }] =
+  const [{ data: sys }, { data: acct }, { data: rails }, { data: openTrades }, { data: pendingSignals }, { data: recentSignals }, patternMemory] =
     await Promise.all([
       admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
       admin.from("account_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -315,6 +315,7 @@ async function runTickForUser(
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(15),
+      buildPatternMemory(admin, userId),
     ]);
 
   if (!sys) return { userId, tick: "no_system_state", expiredCount, perSymbol: [] };
