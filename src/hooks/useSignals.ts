@@ -1,0 +1,73 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import type { TradeSignal, SignalStatus, SignalDecidedBy, TradeSide } from "@/lib/domain-types";
+
+function mapRow(r: any): TradeSignal {
+  return {
+    id: r.id,
+    symbol: r.symbol,
+    side: r.side as TradeSide,
+    confidence: Number(r.confidence),
+    setupScore: Number(r.setup_score),
+    regime: r.regime,
+    proposedEntry: Number(r.proposed_entry),
+    proposedStop: r.proposed_stop !== null ? Number(r.proposed_stop) : null,
+    proposedTarget: r.proposed_target !== null ? Number(r.proposed_target) : null,
+    sizeUsd: Number(r.size_usd),
+    sizePct: Number(r.size_pct),
+    aiReasoning: r.ai_reasoning ?? "",
+    aiModel: r.ai_model ?? "",
+    contextSnapshot: r.context_snapshot ?? {},
+    status: r.status as SignalStatus,
+    decidedBy: (r.decided_by ?? null) as SignalDecidedBy | null,
+    decisionReason: r.decision_reason ?? null,
+    executedTradeId: r.executed_trade_id ?? null,
+    expiresAt: r.expires_at,
+    decidedAt: r.decided_at,
+    createdAt: r.created_at,
+  };
+}
+
+export function useSignals() {
+  const { user } = useAuth();
+  const [signals, setSignals] = useState<TradeSignal[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("trade_signals")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    setSignals((data ?? []).map(mapRow));
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    refetch();
+    const channel = supabase
+      .channel(`signals:${user.id}:${Math.random().toString(36).slice(2)}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "trade_signals", filter: `user_id=eq.${user.id}` },
+        () => refetch(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  const now = Date.now();
+  const pending = signals.filter((s) => s.status === "pending" && new Date(s.expiresAt).getTime() > now);
+  const history = signals.filter((s) => s.status !== "pending" || new Date(s.expiresAt).getTime() <= now);
+
+  return { signals, pending, history, loading, refetch };
+}

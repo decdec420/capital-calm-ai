@@ -36,6 +36,7 @@ export interface SystemState {
   uptimeHours: number;
   lastHeartbeat: string;
   latencyMs: number;
+  autonomyLevel: "manual" | "assisted" | "autonomous";
 }
 
 export interface AccountState {
@@ -163,4 +164,33 @@ export interface Candle {
   l: number;
   c: number;
   v: number;
+}
+
+export type AutonomyLevel = "manual" | "assisted" | "autonomous";
+
+export type SignalStatus = "pending" | "approved" | "rejected" | "expired" | "executed" | "halted";
+export type SignalDecidedBy = "user" | "auto" | "expired" | "system";
+
+export interface TradeSignal {
+  id: string;
+  symbol: string;
+  side: TradeSide;
+  confidence: number; // 0..1
+  setupScore: number; // 0..1
+  regime: string;
+  proposedEntry: number;
+  proposedStop: number | null;
+  proposedTarget: number | null;
+  sizeUsd: number;
+  sizePct: number;
+  aiReasoning: string;
+  aiModel: string;
+  contextSnapshot: Record<string, unknown>;
+  status: SignalStatus;
+  decidedBy: SignalDecidedBy | null;
+  decisionReason: string | null;
+  executedTradeId: string | null;
+  expiresAt: string;
+  decidedAt: string | null;
+  createdAt: string;
 }

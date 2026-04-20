@@ -1,0 +1,59 @@
+import { useState } from "react";
+import { toast } from "sonner";
+import { useSystemState } from "@/hooks/useSystemState";
+import type { AutonomyLevel } from "@/lib/domain-types";
+import { cn } from "@/lib/utils";
+
+const LEVELS: { value: AutonomyLevel; label: string; hint: string }[] = [
+  { value: "manual", label: "Manual", hint: "Every signal needs your tap." },
+  { value: "assisted", label: "Assisted", hint: "Auto-approve when confidence ≥ 85%." },
+  { value: "autonomous", label: "Autonomous", hint: "Auto-approve everything (paper)." },
+];
+
+export function AutonomyToggle() {
+  const { data: system, update } = useSystemState();
+  const [busy, setBusy] = useState(false);
+  const current = system?.autonomyLevel ?? "manual";
+
+  const setLevel = async (level: AutonomyLevel) => {
+    if (level === current || busy) return;
+    setBusy(true);
+    try {
+      await update({ autonomyLevel: level });
+      toast.success(`Autonomy: ${level}`);
+    } catch {
+      toast.error("Couldn't update autonomy.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const hint = LEVELS.find((l) => l.value === current)?.hint ?? "";
+
+  return (
+    <div className="panel p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Autonomy</span>
+        <span className="text-[10px] text-muted-foreground">paper-only until live armed</span>
+      </div>
+      <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-md border border-border">
+        {LEVELS.map((l) => (
+          <button
+            key={l.value}
+            onClick={() => setLevel(l.value)}
+            disabled={busy}
+            className={cn(
+              "text-xs py-1.5 px-2 rounded-sm transition-colors",
+              current === l.value
+                ? "bg-primary text-primary-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-background",
+            )}
+          >
+            {l.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground italic">{hint}</p>
+    </div>
+  );
+}
