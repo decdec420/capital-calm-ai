@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Activity, ArrowLeft, Eye, EyeOff, Loader2 } from "lucide-react";
 
 const emailSchema = z.string().trim().email("Enter a valid email").max(255);
 const passwordSchema = z
@@ -27,7 +27,8 @@ export default function Auth() {
   const location = useLocation();
   const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? "/";
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
+  const [resetSent, setResetSent] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -103,6 +104,28 @@ export default function Auth() {
     }
   };
 
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const e1 = emailSchema.safeParse(email);
+      if (!e1.success) return toast.error(e1.error.issues[0].message);
+
+      const { error } = await supabase.auth.resetPasswordForEmail(e1.data, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) {
+        toast.error(error.message || "Couldn't send reset email.");
+        return;
+      }
+      // Don't disclose whether the email exists — show the same confirmation either way.
+      setResetSent(true);
+      toast.success("If that email exists, a reset link is on its way.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 relative overflow-hidden">
       {/* Ambient amber glow */}
@@ -125,6 +148,66 @@ export default function Auth() {
         </div>
 
         <div className="panel p-6">
+          {mode === "forgot" ? (
+            <div className="space-y-4">
+              <div>
+                <div className="text-sm font-medium text-foreground">Reset password</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter your email and we'll send you a link to set a new password.
+                </p>
+              </div>
+
+              {resetSent ? (
+                <>
+                  <div className="rounded-md border border-status-safe/30 bg-status-safe/5 p-3">
+                    <p className="text-xs text-foreground">
+                      If <span className="text-primary">{email}</span> is registered, a reset link is on its way. Check your inbox (and spam folder).
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setResetSent(false);
+                      setMode("signin");
+                    }}
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-1.5" />
+                    Back to sign in
+                  </Button>
+                </>
+              ) : (
+                <form onSubmit={handleForgot} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="forgot-email" className="text-xs uppercase tracking-wider text-muted-foreground">
+                      Email
+                    </Label>
+                    <Input
+                      id="forgot-email"
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="operator@desk.local"
+                      required
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={submitting}>
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send reset link"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("signin")}
+                    className="w-full text-[11px] text-muted-foreground hover:text-foreground transition-colors flex items-center justify-center gap-1"
+                  >
+                    <ArrowLeft className="h-3 w-3" />
+                    Back to sign in
+                  </button>
+                </form>
+              )}
+            </div>
+          ) : (
           <Tabs value={mode} onValueChange={(v) => setMode(v as "signin" | "signup")}>
             <TabsList className="grid grid-cols-2 mb-5 bg-secondary">
               <TabsTrigger value="signin">Sign in</TabsTrigger>
@@ -148,9 +231,21 @@ export default function Auth() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
-                    Password
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
+                      Password
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetSent(false);
+                        setMode("forgot");
+                      }}
+                      className="text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                   <PasswordInput
                     id="signin-password"
                     autoComplete="current-password"
@@ -220,6 +315,7 @@ export default function Auth() {
               </form>
             </TabsContent>
           </Tabs>
+          )}
         </div>
 
         <p className="mt-4 text-center text-[11px] text-muted-foreground">
