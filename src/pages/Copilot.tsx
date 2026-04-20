@@ -223,7 +223,19 @@ export default function Copilot() {
 
       {/* SIGNAL BRIDGE — top of page */}
       {activeSignal ? (
-        <SignalCard signal={activeSignal} />
+        <div className="space-y-2">
+          <SignalCard signal={activeSignal} />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setExplainSignal(activeSignal)}
+              className="gap-1.5"
+            >
+              <Telescope className="h-3.5 w-3.5" /> Explain this decision
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="panel p-6 text-center border-dashed">
           <div className="h-10 w-10 rounded-md bg-secondary text-muted-foreground flex items-center justify-center mx-auto mb-3">
