@@ -53,7 +53,7 @@ export default function RiskCenter() {
               variant="outline"
               size="sm"
               className="gap-1.5 text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked"
-              onClick={toggleKill}
+              onClick={() => setKillOpen(true)}
             >
               <ShieldAlert className="h-3.5 w-3.5" />
               {system?.killSwitchEngaged ? "Disarm kill-switch" : "Engage kill-switch"}
@@ -153,6 +153,13 @@ export default function RiskCenter() {
             toast.error(e instanceof Error ? e.message : "Couldn't save guardrail");
           }
         }}
+      />
+
+      <KillSwitchDialog
+        open={killOpen}
+        onOpenChange={setKillOpen}
+        engaged={!!system?.killSwitchEngaged}
+        onConfirm={confirmKill}
       />
     </div>
   );

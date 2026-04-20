@@ -340,7 +340,7 @@ export default function Overview() {
                 variant="outline"
                 size="sm"
                 className="text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked"
-                onClick={() => updateSystem({ killSwitchEngaged: !system?.killSwitchEngaged, bot: "halted" })}
+                onClick={() => setKillOpen(true)}
               >
                 {system?.killSwitchEngaged ? "Disarm" : "Halt bot"}
               </Button>
