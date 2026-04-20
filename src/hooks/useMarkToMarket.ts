@@ -41,7 +41,7 @@ export function useMarkToMarket(intervalMs = 30_000) {
         const priceMap = new Map(priceEntries);
 
         let totalUnrealized = 0;
-        const updates: Promise<unknown>[] = [];
+        const updates: PromiseLike<unknown>[] = [];
 
         for (const t of open) {
           const px = priceMap.get(t.symbol);
