@@ -340,16 +340,21 @@ Deno.serve(async (req) => {
     const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Detect mode: cron fanout uses service-role bearer + { cronAll: true }
+    // Detect mode: cron fanout sends { cronAll: true, cronToken: <vault-stored-token> }
     const authHeader = req.headers.get("Authorization") ?? "";
-    const bearer = authHeader.replace(/^Bearer\s+/i, "");
     let body: any = {};
     try {
       body = await req.json();
     } catch {
       body = {};
     }
-    const isCronFanout = body?.cronAll === true && bearer === SERVICE_KEY;
+
+    let isCronFanout = false;
+    if (body?.cronAll === true && typeof body?.cronToken === "string") {
+      // Verify token against the value stored in vault by the migration
+      const { data: tok } = await admin.rpc("get_signal_engine_cron_token");
+      if (tok && tok === body.cronToken) isCronFanout = true;
+    }
 
     // Pull live candles ONCE — shared across all users this tick
     const cbResp = await fetch("https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=3600");
