@@ -463,7 +463,13 @@ async function runTickForUser(
   const side = decision.side ?? "long";
   const stop = Number(decision.proposed_stop ?? (side === "long" ? entry * 0.985 : entry * 1.015));
   const target = Number(decision.proposed_target ?? (side === "long" ? entry * 1.03 : entry * 0.97));
+  // TP1 = 1R from entry. If AI didn't supply, derive: midpoint of entry→target.
+  const riskPerUnit = Math.abs(entry - stop);
+  const tp1 = Number(
+    decision.proposed_tp1 ?? (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
+  );
   const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const fullSize = sizeUsd / entry;
 
   const { data: signalRow, error: insertErr } = await admin
     .from("trade_signals")
@@ -481,7 +487,13 @@ async function runTickForUser(
       size_pct: sizePct,
       ai_reasoning: decision.reasoning ?? "",
       ai_model: "google/gemini-3-flash-preview",
-      context_snapshot: { regime: winner.regime, lastPrice: winner.lastPrice, perSymbol },
+      context_snapshot: {
+        regime: winner.regime,
+        lastPrice: winner.lastPrice,
+        perSymbol,
+        tp1,
+        pullback: winner.regime.pullback,
+      },
       status: "pending",
     })
     .select()
@@ -497,19 +509,24 @@ async function runTickForUser(
   const autoApprove = autonomy === "autonomous" || (autonomy === "assisted" && conf >= 0.85);
 
   if (autoApprove) {
+    const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
+    if (winner.regime.pullback) tags.push("pullback");
     const { data: tradeRow } = await admin
       .from("trades")
       .insert({
         user_id: userId,
         symbol: winner.symbol,
         side,
-        size: sizeUsd / entry,
+        size: fullSize,
+        original_size: fullSize,
         entry_price: entry,
         stop_loss: stop,
         take_profit: target,
-        strategy_version: "signal-engine v1",
-        reason_tags: ["ai-signal", "auto", winner.regime.regime, winner.symbol],
-        notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%`,
+        tp1_price: tp1,
+        tp1_filled: false,
+        strategy_version: "signal-engine v2 (ladder)",
+        reason_tags: tags,
+        notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}`,
         status: "open",
         outcome: "open",
       })
