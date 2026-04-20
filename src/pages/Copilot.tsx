@@ -7,6 +7,7 @@ import { SignalCard } from "@/components/trader/SignalCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
 import { CalibrationChart } from "@/components/trader/CalibrationChart";
+import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -220,6 +221,9 @@ export default function Copilot() {
           </>
         }
       />
+
+      {/* MULTI-SYMBOL WATCHLIST — what the engine is hunting across */}
+      <MultiSymbolStrip />
 
       {/* SIGNAL BRIDGE — top of page */}
       {activeSignal ? (
