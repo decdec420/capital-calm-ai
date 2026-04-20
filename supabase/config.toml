@@ -4,7 +4,7 @@ project_id = "klgotmhyxxtppzpbjkfu"
 verify_jwt = false
 
 [functions.market-brief]
-verify_jwt = true
+verify_jwt = false
 
 [functions.journal-explain]
-verify_jwt = true
+verify_jwt = false
