@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { ProfileEditor } from "@/components/trader/ProfileEditor";
@@ -8,9 +9,10 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Compass } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
+import { WELCOME_KEY } from "@/pages/Welcome";
 import type { SystemMode } from "@/lib/domain-types";
 import { toast } from "sonner";
 
@@ -18,6 +20,12 @@ export default function Settings() {
   const { data: system, update: updateSystem } = useSystemState();
   const { data: account, update: updateAccount } = useAccountState();
   const [killOpen, setKillOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const replayTour = () => {
+    localStorage.removeItem(WELCOME_KEY);
+    navigate("/welcome");
+  };
 
   const confirmKill = async () => {
     if (!system) return;
@@ -157,6 +165,19 @@ export default function Settings() {
         <p className="text-xs text-muted-foreground">
           Currently using default Lovable auth emails. When you add a custom domain, ping me and I'll wire branded templates that match the Trader OS look.
         </p>
+      </Section>
+
+      <Section title="Onboarding">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-foreground">Replay the welcome tour</div>
+            <div className="text-xs text-muted-foreground">Forgot what each tab does? Take the 60-second walkthrough again.</div>
+          </div>
+          <Button variant="outline" size="sm" onClick={replayTour}>
+            <Compass className="h-3.5 w-3.5" />
+            Replay tour
+          </Button>
+        </div>
       </Section>
 
       {system && (
