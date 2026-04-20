@@ -338,6 +338,9 @@ export default function Copilot() {
         </div>
       </div>
 
+      {/* CALIBRATION — is the AI honest about its edge? */}
+      <CalibrationChart signals={history} />
+
       {/* SIGNAL HISTORY — the AI's report card */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -362,15 +365,32 @@ export default function Copilot() {
                   </div>
                   <p className="text-xs text-muted-foreground truncate mt-0.5">{s.aiReasoning || s.decisionReason}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
-                  <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                <div className="text-right shrink-0 flex items-center gap-2">
+                  <div>
+                    <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
+                    <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setExplainSignal(s)}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                    title="Explain this decision"
+                  >
+                    <Telescope className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <SignalExplainDialog
+        signal={explainSignal}
+        open={explainSignal !== null}
+        onOpenChange={(o) => !o && setExplainSignal(null)}
+      />
     </div>
   );
 }
