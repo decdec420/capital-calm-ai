@@ -105,12 +105,16 @@ export default function Overview() {
 
   const toggleBot = async () => {
     if (!system) return;
+    if (system.killSwitchEngaged && system.bot !== "running") {
+      toast.error("Kill-switch is engaged. Disarm it before starting the bot.");
+      return;
+    }
     const next = system.bot === "running" ? "paused" : "running";
     try {
       await updateSystem({ bot: next });
       toast.success(`Bot ${next}.`);
-    } catch {
-      toast.error("Couldn't toggle bot.");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Couldn't toggle bot.");
     }
   };
 
