@@ -20,8 +20,34 @@ type Symbol = (typeof SYMBOLS)[number];
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
 
+// EMA helper for pullback detection.
+function ema(values: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const out: number[] = [];
+  let prev = values[0];
+  for (let i = 0; i < values.length; i++) {
+    prev = i === 0 ? values[i] : values[i] * k + prev * (1 - k);
+    out.push(prev);
+  }
+  return out;
+}
+
+// RSI(14) — last value only.
+function rsi(values: number[], period = 14): number {
+  if (values.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = values.length - period; i < values.length; i++) {
+    const d = values[i] - values[i - 1];
+    if (d >= 0) gains += d; else losses -= d;
+  }
+  const avgG = gains / period, avgL = losses / period;
+  if (avgL === 0) return 100;
+  const rs = avgG / avgL;
+  return 100 - 100 / (1 + rs);
+}
+
 function computeRegime(candles: Candle[]) {
-  if (candles.length < 20) {
+  if (candles.length < 25) {
     return {
       regime: "range",
       confidence: 0,
@@ -30,6 +56,12 @@ function computeRegime(candles: Candle[]) {
       todScore: 0.5,
       pctChange: 0,
       annualizedVolPct: 0,
+      pullback: false,
+      rsiNow: 50,
+      rsiPrev: 50,
+      emaFast: 0,
+      emaSlow: 0,
+      slowRising: false,
       noTradeReasons: ["Not enough data"],
     };
   }
@@ -61,13 +93,67 @@ function computeRegime(candles: Candle[]) {
   const todScore = hour >= 13 && hour < 21 ? 0.85 : hour >= 7 && hour < 23 ? 0.55 : 0.3;
   const trendBoost = regime === "trending_up" || regime === "breakout" ? 0.25 : regime === "trending_down" ? 0.1 : 0;
   const volBoost = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
-  const setupScore = Math.min(1, Math.max(0, confidence * 0.4 + todScore * 0.3 + trendBoost + volBoost));
+
+  // Pullback detection: in an uptrend, has price dipped to the fast EMA
+  // while the slow EMA is still rising AND RSI is curling up off a dip?
+  const emaFastArr = ema(closes, 9);
+  const emaSlowArr = ema(closes, 21);
+  const emaFast = emaFastArr[emaFastArr.length - 1];
+  const emaSlow = emaSlowArr[emaSlowArr.length - 1];
+  const emaSlowPrev = emaSlowArr[emaSlowArr.length - 6] ?? emaSlow;
+  const slowRising = emaSlow > emaSlowPrev;
+  const rsiNow = rsi(closes, 14);
+  const rsiPrev = rsi(closes.slice(0, -1), 14);
+  // Dip: low touched within 0.4% of fast EMA in last 3 bars
+  const recent = candles.slice(-3);
+  const touchedFastEma = recent.some((c) => c.l <= emaFast * 1.004);
+  const inUptrend = (regime === "trending_up" || regime === "breakout") && slowRising;
+  const rsiCurlingUp = rsiPrev < 45 && rsiNow > rsiPrev && rsiNow < 65;
+  const pullback = inUptrend && touchedFastEma && rsiCurlingUp;
+
+  // Boost setup score for confirmed pullbacks (the textbook buy-low setup)
+  const pullbackBoost = pullback ? 0.2 : 0;
+  const setupScore = Math.min(1, Math.max(0, confidence * 0.35 + todScore * 0.25 + trendBoost + volBoost + pullbackBoost));
+
   const noTradeReasons: string[] = [];
   if (setupScore < 0.65) noTradeReasons.push(`Setup score ${setupScore.toFixed(2)} below 0.65`);
   if (volatility === "extreme") noTradeReasons.push("Volatility extreme");
-  if (regime === "chop") noTradeReasons.push("Chop — no edge");
+  // STRICT REGIME GATE: chop and pure range get nothing.
+  if (regime === "chop" || regime === "range") noTradeReasons.push(`${regime} regime — no edge`);
   if (todScore < 0.4) noTradeReasons.push("Outside prime liquidity window");
-  return { regime, confidence, volatility, setupScore, todScore, pctChange, annualizedVolPct, noTradeReasons };
+  return { regime, confidence, volatility, setupScore, todScore, pctChange, annualizedVolPct, pullback, rsiNow, rsiPrev, emaFast, emaSlow, slowRising, noTradeReasons };
+}
+
+// Pattern memory: per-symbol+regime win/loss stats from closed trades.
+async function buildPatternMemory(admin: any, userId: string) {
+  const { data: closed } = await admin
+    .from("trades")
+    .select("symbol, side, outcome, pnl, reason_tags")
+    .eq("user_id", userId)
+    .eq("status", "closed")
+    .order("closed_at", { ascending: false })
+    .limit(50);
+  if (!closed || closed.length === 0) return { totalClosed: 0, bySymbol: {}, byRegime: {} };
+  const bySymbol: Record<string, { wins: number; losses: number; netPnl: number }> = {};
+  const byRegime: Record<string, { wins: number; losses: number; netPnl: number }> = {};
+  for (const t of closed) {
+    const pnl = Number(t.pnl ?? 0);
+    const win = t.outcome === "win";
+    bySymbol[t.symbol] ??= { wins: 0, losses: 0, netPnl: 0 };
+    bySymbol[t.symbol].wins += win ? 1 : 0;
+    bySymbol[t.symbol].losses += win ? 0 : 1;
+    bySymbol[t.symbol].netPnl += pnl;
+    const regimeTag = (t.reason_tags ?? []).find((tag: string) =>
+      ["trending_up", "trending_down", "breakout", "range", "chop"].includes(tag),
+    );
+    if (regimeTag) {
+      byRegime[regimeTag] ??= { wins: 0, losses: 0, netPnl: 0 };
+      byRegime[regimeTag].wins += win ? 1 : 0;
+      byRegime[regimeTag].losses += win ? 0 : 1;
+      byRegime[regimeTag].netPnl += pnl;
+    }
+  }
+  return { totalClosed: closed.length, bySymbol, byRegime };
 }
 
 // Sweep stale pending signals → mark expired + log a journal skip.
@@ -111,7 +197,6 @@ async function fetchCandles(symbol: Symbol): Promise<Candle[]> {
 }
 
 // Ask the AI to decide on ONE symbol given full account context.
-// Returns the parsed tool-call decision or null on failure/skip.
 async function decideForSymbol(opts: {
   symbol: Symbol;
   lastPrice: number;
@@ -119,26 +204,28 @@ async function decideForSymbol(opts: {
   contextPacket: any;
   LOVABLE_API_KEY: string;
 }) {
-  const { symbol, lastPrice, regime, contextPacket, LOVABLE_API_KEY } = opts;
+  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY } = opts;
 
   const systemPrompt = `You are the Trader OS Signal Engine for ${symbol}.
-You are disciplined, conservative, and risk-first. A SKIP is not a failure — it is data.
-You may PROPOSE_TRADE only when ALL are true:
+Disciplined, conservative, risk-first, compounding-focused. A SKIP is data, not failure.
+
+ENTRY PHILOSOPHY: "Buy low within an uptrend, sell high in pieces."
+PROPOSE_TRADE only when ALL are true:
 - setupScore >= 0.65
-- regime is trending_up, trending_down, or breakout (never chop or pure range)
+- regime is trending_up, trending_down, or breakout (NEVER chop, NEVER pure range)
 - volatility is not extreme
-- no guardrail is in 'blocked' state and none above 0.85 utilization
+- no guardrail blocked or above 0.85 utilization
+- For LONGS: strongly prefer pullback==true (RSI dipped <45 then curled up while slow EMA still rising). A clean pullback is the highest-quality buy.
 
-Otherwise you MUST output decision="skip" with a clear reason.
+PATTERN MEMORY: review patternMemory in context. If a symbol or regime has been losing recently, raise your bar. If it has been winning, you may be slightly more aggressive on size (still capped 0.25).
 
-Sizing rules:
-- size_pct between 0.10 and 0.25 (% of equity), scaled by confidence
-- stop: ~1.5% from entry (long: entry * 0.985, short: entry * 1.015)
-- target: ~3% from entry (2:1 R:R minimum)
+SIZING (compounding-friendly, survival-first):
+- size_pct: 0.10–0.25 of equity, scaled by confidence and pullback quality
+- proposed_stop: ~1.2–1.8% from entry
+- proposed_tp1: 1R from entry — half closes here, stop moves to breakeven
+- proposed_target (TP2): 2R from entry — runner exits here
 
-Note: ${symbol} may have different volatility character than BTC. Adjust your confidence accordingly.
-
-You MUST call the submit_decision tool with structured output. Do not respond in plain text.`;
+You MUST call submit_decision. No plain text.`;
 
   const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -166,12 +253,13 @@ You MUST call the submit_decision tool with structured output. Do not respond in
               properties: {
                 decision: { type: "string", enum: ["propose_trade", "skip"] },
                 side: { type: "string", enum: ["long", "short"] },
-                confidence: { type: "number", description: "0..1 confidence in this decision" },
-                size_pct: { type: "number", description: "Position size as % of equity, 0.10-0.25" },
-                proposed_entry: { type: "number", description: "Entry price (use current lastPrice)" },
-                proposed_stop: { type: "number", description: "Stop loss price" },
-                proposed_target: { type: "number", description: "Take profit price" },
-                reasoning: { type: "string", description: "2-4 sentence explanation. Witty but precise. No emojis." },
+                confidence: { type: "number", description: "0..1" },
+                size_pct: { type: "number", description: "0.10-0.25" },
+                proposed_entry: { type: "number" },
+                proposed_stop: { type: "number", description: "~1.2-1.8% away" },
+                proposed_tp1: { type: "number", description: "1R from entry — half closes, stop→BE" },
+                proposed_target: { type: "number", description: "2R from entry — runner exits" },
+                reasoning: { type: "string", description: "2-4 sentences. Mention pullback quality + pattern memory if relevant. Witty but precise. No emojis." },
               },
               required: ["decision", "confidence", "reasoning"],
               additionalProperties: false,
@@ -209,7 +297,7 @@ async function runTickForUser(
   // Sweep expired across all symbols first
   const expiredCount = await expirePendingSignals(admin, userId);
 
-  const [{ data: sys }, { data: acct }, { data: rails }, { data: openTrades }, { data: pendingSignals }, { data: recentSignals }] =
+  const [{ data: sys }, { data: acct }, { data: rails }, { data: openTrades }, { data: pendingSignals }, { data: recentSignals }, patternMemory] =
     await Promise.all([
       admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
       admin.from("account_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -227,6 +315,7 @@ async function runTickForUser(
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(15),
+      buildPatternMemory(admin, userId),
     ]);
 
   if (!sys) return { userId, tick: "no_system_state", expiredCount, perSymbol: [] };
@@ -281,8 +370,19 @@ async function runTickForUser(
 
   // Pick the best free candidate by setupScore. If none qualifies, every symbol
   // gets a "skipped" record but no AI calls are made (saves credits).
-  const tradable = candidates.filter((c) => !c.locked && c.regime.setupScore >= 0.5);
-  tradable.sort((a, b) => b.regime.setupScore - a.regime.setupScore);
+  // Strict regime gate: only trending_up / trending_down / breakout qualify.
+  // Plus require a real setup score, not garbage.
+  const TRADEABLE_REGIMES = new Set(["trending_up", "trending_down", "breakout"]);
+  const tradable = candidates.filter(
+    (c) => !c.locked && TRADEABLE_REGIMES.has(c.regime.regime) && c.regime.setupScore >= 0.55,
+  );
+  // Prefer pullback setups, then by setupScore
+  tradable.sort((a, b) => {
+    const pbA = a.regime.pullback ? 1 : 0;
+    const pbB = b.regime.pullback ? 1 : 0;
+    if (pbA !== pbB) return pbB - pbA;
+    return b.regime.setupScore - a.regime.setupScore;
+  });
   const winner = tradable[0];
 
   const perSymbol: any[] = candidates.map((c) => ({
@@ -330,6 +430,7 @@ async function runTickForUser(
       decidedBy: s.decided_by,
       reason: s.decision_reason,
     })),
+    patternMemory,
   };
 
   const aiResult = await decideForSymbol({
@@ -362,7 +463,13 @@ async function runTickForUser(
   const side = decision.side ?? "long";
   const stop = Number(decision.proposed_stop ?? (side === "long" ? entry * 0.985 : entry * 1.015));
   const target = Number(decision.proposed_target ?? (side === "long" ? entry * 1.03 : entry * 0.97));
+  // TP1 = 1R from entry. If AI didn't supply, derive: midpoint of entry→target.
+  const riskPerUnit = Math.abs(entry - stop);
+  const tp1 = Number(
+    decision.proposed_tp1 ?? (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
+  );
   const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const fullSize = sizeUsd / entry;
 
   const { data: signalRow, error: insertErr } = await admin
     .from("trade_signals")
@@ -380,7 +487,13 @@ async function runTickForUser(
       size_pct: sizePct,
       ai_reasoning: decision.reasoning ?? "",
       ai_model: "google/gemini-3-flash-preview",
-      context_snapshot: { regime: winner.regime, lastPrice: winner.lastPrice, perSymbol },
+      context_snapshot: {
+        regime: winner.regime,
+        lastPrice: winner.lastPrice,
+        perSymbol,
+        tp1,
+        pullback: winner.regime.pullback,
+      },
       status: "pending",
     })
     .select()
@@ -396,19 +509,24 @@ async function runTickForUser(
   const autoApprove = autonomy === "autonomous" || (autonomy === "assisted" && conf >= 0.85);
 
   if (autoApprove) {
+    const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
+    if (winner.regime.pullback) tags.push("pullback");
     const { data: tradeRow } = await admin
       .from("trades")
       .insert({
         user_id: userId,
         symbol: winner.symbol,
         side,
-        size: sizeUsd / entry,
+        size: fullSize,
+        original_size: fullSize,
         entry_price: entry,
         stop_loss: stop,
         take_profit: target,
-        strategy_version: "signal-engine v1",
-        reason_tags: ["ai-signal", "auto", winner.regime.regime, winner.symbol],
-        notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%`,
+        tp1_price: tp1,
+        tp1_filled: false,
+        strategy_version: "signal-engine v2 (ladder)",
+        reason_tags: tags,
+        notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}`,
         status: "open",
         outcome: "open",
       })

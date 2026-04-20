@@ -99,6 +99,12 @@ Deno.serve(async (req) => {
     const entry = Number(sig.proposed_entry);
     const sizeUsd = Number(sig.size_usd);
     const size = sizeUsd / entry;
+    const ctx = (sig.context_snapshot ?? {}) as any;
+    const tp1Price = ctx?.tp1 != null ? Number(ctx.tp1) : null;
+    const wasPullback = ctx?.pullback === true;
+
+    const tags = ["ai-signal", sig.regime];
+    if (wasPullback) tags.push("pullback");
 
     const { data: tradeRow, error: tradeErr } = await admin
       .from("trades")
@@ -107,12 +113,15 @@ Deno.serve(async (req) => {
         symbol: sig.symbol,
         side: sig.side,
         size,
+        original_size: size,
         entry_price: entry,
         stop_loss: sig.proposed_stop !== null ? Number(sig.proposed_stop) : null,
         take_profit: sig.proposed_target !== null ? Number(sig.proposed_target) : null,
-        strategy_version: "signal-engine v1",
-        reason_tags: ["ai-signal", sig.regime],
-        notes: `Operator-approved. AI confidence ${(Number(sig.confidence) * 100).toFixed(0)}%.`,
+        tp1_price: tp1Price,
+        tp1_filled: false,
+        strategy_version: "signal-engine v2 (ladder)",
+        reason_tags: tags,
+        notes: `Operator-approved. AI confidence ${(Number(sig.confidence) * 100).toFixed(0)}%.${wasPullback ? " Pullback entry." : ""}`,
         status: "open",
         outcome: "open",
       })
