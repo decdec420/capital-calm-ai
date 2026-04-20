@@ -6,6 +6,7 @@ import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
+import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
@@ -42,6 +43,7 @@ export default function Overview() {
   const { pending: pendingSignals } = useSignals();
   const [brief, setBrief] = useState<string>("");
   const [briefLoading, setBriefLoading] = useState(false);
+  const [killOpen, setKillOpen] = useState(false);
   const activeSignal = pendingSignals[0];
 
   const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
@@ -340,7 +342,7 @@ export default function Overview() {
                 variant="outline"
                 size="sm"
                 className="text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked"
-                onClick={() => updateSystem({ killSwitchEngaged: !system?.killSwitchEngaged, bot: "halted" })}
+                onClick={() => setKillOpen(true)}
               >
                 {system?.killSwitchEngaged ? "Disarm" : "Halt bot"}
               </Button>
@@ -348,6 +350,22 @@ export default function Overview() {
           </div>
         </div>
       </div>
+
+      <KillSwitchDialog
+        open={killOpen}
+        onOpenChange={setKillOpen}
+        engaged={!!system?.killSwitchEngaged}
+        onConfirm={async () => {
+          if (!system) return;
+          const v = !system.killSwitchEngaged;
+          try {
+            await updateSystem({ killSwitchEngaged: v, bot: v ? "halted" : "paused" });
+            toast.success(v ? "Kill-switch ENGAGED. Bot halted." : "Kill-switch disarmed.");
+          } catch {
+            toast.error("Couldn't toggle kill-switch.");
+          }
+        }}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { SectionHeader } from "@/components/trader/SectionHeader";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { EmptyState } from "@/components/trader/EmptyState";
+import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -19,11 +20,12 @@ export default function RiskCenter() {
   const { data: system, update: updateSystem } = useSystemState();
   const [newOpen, setNewOpen] = useState(false);
   const [editing, setEditing] = useState<RiskGuardrail | null>(null);
+  const [killOpen, setKillOpen] = useState(false);
 
   const blocked = guardrails.filter((g) => g.level === "blocked").length;
   const caution = guardrails.filter((g) => g.level === "caution").length;
 
-  const toggleKill = async () => {
+  const confirmKill = async () => {
     if (!system) return;
     try {
       await updateSystem({
@@ -51,7 +53,7 @@ export default function RiskCenter() {
               variant="outline"
               size="sm"
               className="gap-1.5 text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked"
-              onClick={toggleKill}
+              onClick={() => setKillOpen(true)}
             >
               <ShieldAlert className="h-3.5 w-3.5" />
               {system?.killSwitchEngaged ? "Disarm kill-switch" : "Engage kill-switch"}
@@ -151,6 +153,13 @@ export default function RiskCenter() {
             toast.error(e instanceof Error ? e.message : "Couldn't save guardrail");
           }
         }}
+      />
+
+      <KillSwitchDialog
+        open={killOpen}
+        onOpenChange={setKillOpen}
+        engaged={!!system?.killSwitchEngaged}
+        onConfirm={confirmKill}
       />
     </div>
   );

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { ProfileEditor } from "@/components/trader/ProfileEditor";
+import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,18 @@ import { toast } from "sonner";
 export default function Settings() {
   const { data: system, update: updateSystem } = useSystemState();
   const { data: account, update: updateAccount } = useAccountState();
+  const [killOpen, setKillOpen] = useState(false);
+
+  const confirmKill = async () => {
+    if (!system) return;
+    const v = !system.killSwitchEngaged;
+    try {
+      await updateSystem({ killSwitchEngaged: v, bot: v ? "halted" : "paused" });
+      toast.success(v ? "Kill-switch ENGAGED." : "Kill-switch disarmed.");
+    } catch {
+      toast.error("Couldn't toggle.");
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -87,14 +100,7 @@ export default function Settings() {
               </div>
               <Switch
                 checked={system.killSwitchEngaged}
-                onCheckedChange={async (v) => {
-                  try {
-                    await updateSystem({ killSwitchEngaged: v, bot: v ? "halted" : "paused" });
-                    toast.success(v ? "Kill-switch ENGAGED." : "Kill-switch disarmed.");
-                  } catch {
-                    toast.error("Couldn't toggle.");
-                  }
-                }}
+                onCheckedChange={() => setKillOpen(true)}
               />
             </div>
 
@@ -152,6 +158,15 @@ export default function Settings() {
           Currently using default Lovable auth emails. When you add a custom domain, ping me and I'll wire branded templates that match the Trader OS look.
         </p>
       </Section>
+
+      {system && (
+        <KillSwitchDialog
+          open={killOpen}
+          onOpenChange={setKillOpen}
+          engaged={system.killSwitchEngaged}
+          onConfirm={confirmKill}
+        />
+      )}
     </div>
   );
 }
