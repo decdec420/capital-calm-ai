@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { SystemState, SystemMode, BotStatus, ConnectionState } from "@/lib/domain-types";
+import type { SystemState, SystemMode, BotStatus, ConnectionState, AutonomyLevel } from "@/lib/domain-types";
 
 function mapRow(r: any): SystemState {
   return {
@@ -15,6 +15,7 @@ function mapRow(r: any): SystemState {
     uptimeHours: Number(r.uptime_hours),
     lastHeartbeat: r.last_heartbeat,
     latencyMs: r.latency_ms,
+    autonomyLevel: (r.autonomy_level ?? "manual") as AutonomyLevel,
   };
 }
 
@@ -46,6 +47,7 @@ export function useSystemState() {
     if (patch.bot) dbPatch.bot = patch.bot;
     if (patch.killSwitchEngaged !== undefined) dbPatch.kill_switch_engaged = patch.killSwitchEngaged;
     if (patch.liveTradingEnabled !== undefined) dbPatch.live_trading_enabled = patch.liveTradingEnabled;
+    if (patch.autonomyLevel) dbPatch.autonomy_level = patch.autonomyLevel;
     const { error } = await supabase.from("system_state").update(dbPatch).eq("user_id", user.id);
     if (error) throw error;
     await refetch();

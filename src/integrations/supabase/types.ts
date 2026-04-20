@@ -268,6 +268,7 @@ export type Database = {
       }
       system_state: {
         Row: {
+          autonomy_level: string
           bot: string
           broker_connection: string
           created_at: string
@@ -283,6 +284,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          autonomy_level?: string
           bot?: string
           broker_connection?: string
           created_at?: string
@@ -298,6 +300,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          autonomy_level?: string
           bot?: string
           broker_connection?: string
           created_at?: string
@@ -310,6 +313,84 @@ export type Database = {
           mode?: string
           updated_at?: string
           uptime_hours?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trade_signals: {
+        Row: {
+          ai_model: string
+          ai_reasoning: string
+          confidence: number
+          context_snapshot: Json
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_reason: string | null
+          executed_trade_id: string | null
+          expires_at: string
+          id: string
+          proposed_entry: number
+          proposed_stop: number | null
+          proposed_target: number | null
+          regime: string
+          setup_score: number
+          side: string
+          size_pct: number
+          size_usd: number
+          status: string
+          symbol: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_model?: string
+          ai_reasoning?: string
+          confidence?: number
+          context_snapshot?: Json
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_reason?: string | null
+          executed_trade_id?: string | null
+          expires_at?: string
+          id?: string
+          proposed_entry: number
+          proposed_stop?: number | null
+          proposed_target?: number | null
+          regime?: string
+          setup_score?: number
+          side: string
+          size_pct?: number
+          size_usd?: number
+          status?: string
+          symbol?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_model?: string
+          ai_reasoning?: string
+          confidence?: number
+          context_snapshot?: Json
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_reason?: string | null
+          executed_trade_id?: string | null
+          expires_at?: string
+          id?: string
+          proposed_entry?: number
+          proposed_stop?: number | null
+          proposed_target?: number | null
+          regime?: string
+          setup_score?: number
+          side?: string
+          size_pct?: number
+          size_usd?: number
+          status?: string
+          symbol?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
