@@ -370,8 +370,19 @@ async function runTickForUser(
 
   // Pick the best free candidate by setupScore. If none qualifies, every symbol
   // gets a "skipped" record but no AI calls are made (saves credits).
-  const tradable = candidates.filter((c) => !c.locked && c.regime.setupScore >= 0.5);
-  tradable.sort((a, b) => b.regime.setupScore - a.regime.setupScore);
+  // Strict regime gate: only trending_up / trending_down / breakout qualify.
+  // Plus require a real setup score, not garbage.
+  const TRADEABLE_REGIMES = new Set(["trending_up", "trending_down", "breakout"]);
+  const tradable = candidates.filter(
+    (c) => !c.locked && TRADEABLE_REGIMES.has(c.regime.regime) && c.regime.setupScore >= 0.55,
+  );
+  // Prefer pullback setups, then by setupScore
+  tradable.sort((a, b) => {
+    const pbA = a.regime.pullback ? 1 : 0;
+    const pbB = b.regime.pullback ? 1 : 0;
+    if (pbA !== pbB) return pbB - pbA;
+    return b.regime.setupScore - a.regime.setupScore;
+  });
   const winner = tradable[0];
 
   const perSymbol: any[] = candidates.map((c) => ({
@@ -419,6 +430,7 @@ async function runTickForUser(
       decidedBy: s.decided_by,
       reason: s.decision_reason,
     })),
+    patternMemory,
   };
 
   const aiResult = await decideForSymbol({
