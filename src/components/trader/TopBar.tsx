@@ -1,8 +1,18 @@
-import { Bell, ShieldAlert, Wifi, WifiOff } from "lucide-react";
+import { Bell, LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "./StatusBadge";
 import { systemState, alerts } from "@/mocks/data";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 import type { SystemMode } from "@/mocks/types";
 
 const modeTone: Record<SystemMode, "neutral" | "candidate" | "accent" | "blocked"> = {
@@ -12,8 +22,24 @@ const modeTone: Record<SystemMode, "neutral" | "candidate" | "accent" | "blocked
   live: "blocked",
 };
 
+const initialsFor = (name?: string | null, email?: string | null) => {
+  const source = (name || email || "OP").trim();
+  const parts = source.split(/[\s@._-]+/).filter(Boolean);
+  const initials = (parts[0]?.[0] ?? "O") + (parts[1]?.[0] ?? "");
+  return initials.toUpperCase().slice(0, 2);
+};
+
 export function TopBar() {
   const s = systemState;
+  const { user, profile, signOut } = useAuth();
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out. Stay disciplined.");
+  };
+
+  const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
+  const initials = initialsFor(profile?.display_name, user?.email);
+
   return (
     <header className="h-14 border-b border-border bg-card/40 backdrop-blur supports-[backdrop-filter]:bg-card/40 flex items-center px-3 gap-3 shrink-0">
       <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
@@ -55,11 +81,36 @@ export function TopBar() {
         )}
       </button>
 
-      <div className="flex items-center gap-2 pl-2 border-l border-border">
-        <div className={cn("h-7 w-7 rounded-full bg-secondary border border-border flex items-center justify-center text-xs font-medium text-foreground")}>
-          OP
-        </div>
-      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-2 pl-2 border-l border-border hover:opacity-80 transition-opacity outline-none"
+            aria-label="Operator menu"
+          >
+            <div
+              className={cn(
+                "h-7 w-7 rounded-full bg-secondary border border-border flex items-center justify-center text-[11px] font-medium text-foreground",
+              )}
+            >
+              {initials}
+            </div>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm text-foreground">{displayName}</span>
+              <span className="text-[11px] text-muted-foreground truncate">{user?.email}</span>
+            </div>
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleSignOut} className="text-destructive focus:text-destructive">
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </header>
   );
 }
