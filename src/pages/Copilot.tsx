@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 import { accountState, marketRegime, openPosition, strategies, systemState } from "@/mocks/data";
 import { Send, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
