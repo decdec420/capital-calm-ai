@@ -60,12 +60,21 @@ export default function Copilot() {
     };
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        toast.error("Sign in to use the Copilot.");
+        setStreaming(false);
+        return;
+      }
+
       const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/copilot-chat`;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          Authorization: `Bearer ${accessToken}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
         body: JSON.stringify({
           messages: [...messages, userMsg],
@@ -74,7 +83,8 @@ export default function Copilot() {
       });
 
       if (!resp.ok || !resp.body) {
-        if (resp.status === 429) toast.error("Rate limit reached. Give it a moment.");
+        if (resp.status === 401) toast.error("Sign in to use the Copilot.");
+        else if (resp.status === 429) toast.error("Rate limit reached. Give it a moment.");
         else if (resp.status === 402) toast.error("AI credits depleted. Top up in Settings → Workspace → Usage.");
         else toast.error("Copilot failed to respond.");
         setStreaming(false);
