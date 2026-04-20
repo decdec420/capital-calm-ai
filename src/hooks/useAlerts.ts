@@ -37,7 +37,7 @@ export function useAlerts() {
     }
     refetch();
     const channel = supabase
-      .channel(`alerts:${user.id}`)
+      .channel(`alerts:${user.id}:${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "alerts", filter: `user_id=eq.${user.id}` },
