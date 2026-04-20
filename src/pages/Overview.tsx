@@ -349,6 +349,22 @@ export default function Overview() {
           </div>
         </div>
       </div>
+
+      <KillSwitchDialog
+        open={killOpen}
+        onOpenChange={setKillOpen}
+        engaged={!!system?.killSwitchEngaged}
+        onConfirm={async () => {
+          if (!system) return;
+          const v = !system.killSwitchEngaged;
+          try {
+            await updateSystem({ killSwitchEngaged: v, bot: v ? "halted" : "paused" });
+            toast.success(v ? "Kill-switch ENGAGED. Bot halted." : "Kill-switch disarmed.");
+          } catch {
+            toast.error("Couldn't toggle kill-switch.");
+          }
+        }}
+      />
     </div>
   );
 }

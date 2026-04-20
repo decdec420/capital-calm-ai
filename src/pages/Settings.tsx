@@ -158,6 +158,15 @@ export default function Settings() {
           Currently using default Lovable auth emails. When you add a custom domain, ping me and I'll wire branded templates that match the Trader OS look.
         </p>
       </Section>
+
+      {system && (
+        <KillSwitchDialog
+          open={killOpen}
+          onOpenChange={setKillOpen}
+          engaged={system.killSwitchEngaged}
+          onConfirm={confirmKill}
+        />
+      )}
     </div>
   );
 }
