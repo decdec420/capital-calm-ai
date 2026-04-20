@@ -5,6 +5,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { SignalCard } from "@/components/trader/SignalCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
+import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
+import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,8 +17,9 @@ import { useStrategies } from "@/hooks/useStrategies";
 import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
-import { Send, Sparkles, Brain, Play, Check, X } from "lucide-react";
+import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { TradeSignal } from "@/lib/domain-types";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -32,6 +35,7 @@ export default function Copilot() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
+  const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { data: system } = useSystemState();
   const { data: account } = useAccountState();
