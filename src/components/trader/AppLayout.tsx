@@ -3,8 +3,13 @@ import { AppSidebar } from "@/components/trader/AppSidebar";
 import { TopBar } from "@/components/trader/TopBar";
 import { StatusFooter } from "@/components/trader/StatusFooter";
 import { Outlet } from "react-router-dom";
+import { useMarkToMarket } from "@/hooks/useMarkToMarket";
 
 export function AppLayout() {
+  // Live-mark every open position to market and roll equity. Runs once
+  // per session so Overview/footer/Trades all reflect AI- and manually-
+  // logged positions in real time.
+  useMarkToMarket();
   return (
     <SidebarProvider defaultOpen>
       <div className="min-h-screen flex w-full bg-background">
