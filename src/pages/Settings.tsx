@@ -1,5 +1,6 @@
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
+import { ProfileEditor } from "@/components/trader/ProfileEditor";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { systemState } from "@/mocks/data";
@@ -9,6 +10,10 @@ export default function Settings() {
   return (
     <div className="space-y-6 animate-fade-in">
       <SectionHeader eyebrow="Settings" title="Integrations & runtime" description="Read-only view of broker, data, and runtime configuration." />
+
+      <Section title="Workspace">
+        <ProfileEditor />
+      </Section>
 
       <Section title="Brokers">
         <Row label="Paper broker" value="Connected" tone="safe" />
