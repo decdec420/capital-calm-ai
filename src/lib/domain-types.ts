@@ -65,10 +65,13 @@ export interface Trade {
   symbol: string;
   side: TradeSide;
   size: number;
+  originalSize: number | null;
   entryPrice: number;
   exitPrice: number | null;
   stopLoss: number | null;
   takeProfit: number | null;
+  tp1Price: number | null;
+  tp1Filled: boolean;
   currentPrice: number | null;
   pnl: number | null;
   pnlPct: number | null;
