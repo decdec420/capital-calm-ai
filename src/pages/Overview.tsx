@@ -26,9 +26,11 @@ import { useTrades } from "@/hooks/useTrades";
 import { useAlerts } from "@/hooks/useAlerts";
 import { useGuardrails } from "@/hooks/useGuardrails";
 import { useCandles } from "@/hooks/useCandles";
+import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Brain } from "lucide-react";
 
 export default function Overview() {
   const { data: account } = useAccountState();
@@ -37,8 +39,10 @@ export default function Overview() {
   const { alerts, dismiss } = useAlerts();
   const { guardrails } = useGuardrails();
   const { candles } = useCandles();
+  const { pending: pendingSignals } = useSignals();
   const [brief, setBrief] = useState<string>("");
   const [briefLoading, setBriefLoading] = useState(false);
+  const activeSignal = pendingSignals[0];
 
   const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
   const lastPrice = candles[candles.length - 1]?.c ?? 0;
