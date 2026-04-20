@@ -151,14 +151,14 @@ export default function Auth() {
                   <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
                     Password
                   </Label>
-                  <Input
+                  <PasswordInput
                     id="signin-password"
-                    type="password"
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    required
+                    show={showPassword}
+                    onToggleShow={() => setShowPassword((s) => !s)}
                   />
                 </div>
                 <Button type="submit" className="w-full" disabled={submitting}>
@@ -201,14 +201,14 @@ export default function Auth() {
                   <Label htmlFor="signup-password" className="text-xs uppercase tracking-wider text-muted-foreground">
                     Password
                   </Label>
-                  <Input
+                  <PasswordInput
                     id="signup-password"
-                    type="password"
                     autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="At least 8 characters"
-                    required
+                    show={showPassword}
+                    onToggleShow={() => setShowPassword((s) => !s)}
                   />
                 </div>
                 <Button type="submit" className="w-full" disabled={submitting}>
