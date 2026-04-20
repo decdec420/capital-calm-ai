@@ -218,6 +218,7 @@ export default function Overview() {
           value={account ? `$${account.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
           icon={<DollarSign className="h-3.5 w-3.5" />}
           hint={account ? `cash $${account.cash.toFixed(0)}` : undefined}
+          explain="Total account value: cash + open positions marked-to-market. The single number that matters most over time."
         />
         <MetricCard
           label="Daily PnL"
@@ -225,13 +226,26 @@ export default function Overview() {
           delta={{ value: `${dailyPnlPct >= 0 ? "+" : ""}${dailyPnlPct.toFixed(2)}%`, direction: dailyPnl >= 0 ? "up" : "down" }}
           tone={dailyPnl >= 0 ? "safe" : "blocked"}
           icon={dailyPnl >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+          explain="Profit & Loss since the start-of-day equity snapshot. Includes realized + unrealized. Resets when you reset the day in Settings."
         />
-        <MetricCard label="Trades today" value={String(closedToday.length + open.length)} hint="cap 6" />
-        <MetricCard label="Loss vs cap" value={`${lossVsCap.toFixed(2)}%`} hint="cap 1.50%" tone={lossVsCap > 1 ? "caution" : "safe"} />
+        <MetricCard
+          label="Trades today"
+          value={String(closedToday.length + open.length)}
+          hint="cap 6"
+          explain="Open + closed positions opened today. Hard cap of 6 to stop revenge-trading after a bad fill."
+        />
+        <MetricCard
+          label="Loss vs cap"
+          value={`${lossVsCap.toFixed(2)}%`}
+          hint="cap 1.50%"
+          tone={lossVsCap > 1 ? "caution" : "safe"}
+          explain="How much of today's max-loss budget you've already burned. At 100% the bot halts itself for the day."
+        />
         <MetricCard
           label="Floor distance"
           value={account ? `${floorDistance.toFixed(1)}%` : "—"}
           hint={account ? `floor $${account.balanceFloor.toFixed(0)}` : undefined}
+          explain="How far equity sits above the absolute balance floor. Hit the floor and the kill-switch trips automatically. Big number = comfortable."
         />
         <MetricCard
           label="Live mode"
@@ -239,6 +253,7 @@ export default function Overview() {
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
           tone={liveGated ? "blocked" : "safe"}
           hint={liveGated ? "paper-only" : "operator-armed"}
+          explain="Gated = paper money only, no real orders. Armed = real orders allowed (still subject to every guardrail). Toggle in Settings."
         />
       </div>
 

@@ -1,5 +1,7 @@
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
+import { Explain } from "./Explain";
+import type { ReactNode } from "react";
 
 interface MetricCardProps {
   label: string;
@@ -10,6 +12,8 @@ interface MetricCardProps {
   icon?: React.ReactNode;
   className?: string;
   children?: React.ReactNode;
+  /** Plain-English meaning of this metric. Surfaces in "What's this?" help mode. */
+  explain?: ReactNode;
 }
 
 const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
@@ -20,8 +24,8 @@ const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
   accent: "ring-1 ring-inset ring-primary/25",
 };
 
-export function MetricCard({ label, value, hint, delta, tone = "default", icon, className, children }: MetricCardProps) {
-  return (
+export function MetricCard({ label, value, hint, delta, tone = "default", icon, className, children, explain }: MetricCardProps) {
+  const card = (
     <div className={cn("panel p-4 flex flex-col gap-2 animate-fade-in", toneRing[tone], className)}>
       <div className="flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
@@ -48,5 +52,12 @@ export function MetricCard({ label, value, hint, delta, tone = "default", icon, 
       {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
       {children}
     </div>
+  );
+
+  if (!explain) return card;
+  return (
+    <Explain title={label} hint={explain}>
+      {card}
+    </Explain>
   );
 }
