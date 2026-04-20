@@ -5,6 +5,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { SignalCard } from "@/components/trader/SignalCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
+import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
+import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,8 +17,9 @@ import { useStrategies } from "@/hooks/useStrategies";
 import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
-import { Send, Sparkles, Brain, Play, Check, X } from "lucide-react";
+import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { TradeSignal } from "@/lib/domain-types";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -32,6 +35,7 @@ export default function Copilot() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
+  const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { data: system } = useSystemState();
   const { data: account } = useAccountState();
@@ -219,7 +223,19 @@ export default function Copilot() {
 
       {/* SIGNAL BRIDGE — top of page */}
       {activeSignal ? (
-        <SignalCard signal={activeSignal} />
+        <div className="space-y-2">
+          <SignalCard signal={activeSignal} />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setExplainSignal(activeSignal)}
+              className="gap-1.5"
+            >
+              <Telescope className="h-3.5 w-3.5" /> Explain this decision
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className="panel p-6 text-center border-dashed">
           <div className="h-10 w-10 rounded-md bg-secondary text-muted-foreground flex items-center justify-center mx-auto mb-3">
@@ -322,6 +338,9 @@ export default function Copilot() {
         </div>
       </div>
 
+      {/* CALIBRATION — is the AI honest about its edge? */}
+      <CalibrationChart signals={history} />
+
       {/* SIGNAL HISTORY — the AI's report card */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -346,15 +365,32 @@ export default function Copilot() {
                   </div>
                   <p className="text-xs text-muted-foreground truncate mt-0.5">{s.aiReasoning || s.decisionReason}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
-                  <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                <div className="text-right shrink-0 flex items-center gap-2">
+                  <div>
+                    <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
+                    <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setExplainSignal(s)}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                    title="Explain this decision"
+                  >
+                    <Telescope className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <SignalExplainDialog
+        signal={explainSignal}
+        open={explainSignal !== null}
+        onOpenChange={(o) => !o && setExplainSignal(null)}
+      />
     </div>
   );
 }
