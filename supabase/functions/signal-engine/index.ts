@@ -197,7 +197,6 @@ async function fetchCandles(symbol: Symbol): Promise<Candle[]> {
 }
 
 // Ask the AI to decide on ONE symbol given full account context.
-// Returns the parsed tool-call decision or null on failure/skip.
 async function decideForSymbol(opts: {
   symbol: Symbol;
   lastPrice: number;
@@ -205,26 +204,28 @@ async function decideForSymbol(opts: {
   contextPacket: any;
   LOVABLE_API_KEY: string;
 }) {
-  const { symbol, lastPrice, regime, contextPacket, LOVABLE_API_KEY } = opts;
+  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY } = opts;
 
   const systemPrompt = `You are the Trader OS Signal Engine for ${symbol}.
-You are disciplined, conservative, and risk-first. A SKIP is not a failure — it is data.
-You may PROPOSE_TRADE only when ALL are true:
+Disciplined, conservative, risk-first, compounding-focused. A SKIP is data, not failure.
+
+ENTRY PHILOSOPHY: "Buy low within an uptrend, sell high in pieces."
+PROPOSE_TRADE only when ALL are true:
 - setupScore >= 0.65
-- regime is trending_up, trending_down, or breakout (never chop or pure range)
+- regime is trending_up, trending_down, or breakout (NEVER chop, NEVER pure range)
 - volatility is not extreme
-- no guardrail is in 'blocked' state and none above 0.85 utilization
+- no guardrail blocked or above 0.85 utilization
+- For LONGS: strongly prefer pullback==true (RSI dipped <45 then curled up while slow EMA still rising). A clean pullback is the highest-quality buy.
 
-Otherwise you MUST output decision="skip" with a clear reason.
+PATTERN MEMORY: review patternMemory in context. If a symbol or regime has been losing recently, raise your bar. If it has been winning, you may be slightly more aggressive on size (still capped 0.25).
 
-Sizing rules:
-- size_pct between 0.10 and 0.25 (% of equity), scaled by confidence
-- stop: ~1.5% from entry (long: entry * 0.985, short: entry * 1.015)
-- target: ~3% from entry (2:1 R:R minimum)
+SIZING (compounding-friendly, survival-first):
+- size_pct: 0.10–0.25 of equity, scaled by confidence and pullback quality
+- proposed_stop: ~1.2–1.8% from entry
+- proposed_tp1: 1R from entry — half closes here, stop moves to breakeven
+- proposed_target (TP2): 2R from entry — runner exits here
 
-Note: ${symbol} may have different volatility character than BTC. Adjust your confidence accordingly.
-
-You MUST call the submit_decision tool with structured output. Do not respond in plain text.`;
+You MUST call submit_decision. No plain text.`;
 
   const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -252,12 +253,13 @@ You MUST call the submit_decision tool with structured output. Do not respond in
               properties: {
                 decision: { type: "string", enum: ["propose_trade", "skip"] },
                 side: { type: "string", enum: ["long", "short"] },
-                confidence: { type: "number", description: "0..1 confidence in this decision" },
-                size_pct: { type: "number", description: "Position size as % of equity, 0.10-0.25" },
-                proposed_entry: { type: "number", description: "Entry price (use current lastPrice)" },
-                proposed_stop: { type: "number", description: "Stop loss price" },
-                proposed_target: { type: "number", description: "Take profit price" },
-                reasoning: { type: "string", description: "2-4 sentence explanation. Witty but precise. No emojis." },
+                confidence: { type: "number", description: "0..1" },
+                size_pct: { type: "number", description: "0.10-0.25" },
+                proposed_entry: { type: "number" },
+                proposed_stop: { type: "number", description: "~1.2-1.8% away" },
+                proposed_tp1: { type: "number", description: "1R from entry — half closes, stop→BE" },
+                proposed_target: { type: "number", description: "2R from entry — runner exits" },
+                reasoning: { type: "string", description: "2-4 sentences. Mention pullback quality + pattern memory if relevant. Witty but precise. No emojis." },
               },
               required: ["decision", "confidence", "reasoning"],
               additionalProperties: false,
