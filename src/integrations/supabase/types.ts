@@ -405,6 +405,7 @@ export type Database = {
           id: string
           notes: string | null
           opened_at: string
+          original_size: number | null
           outcome: string | null
           pnl: number | null
           pnl_pct: number | null
@@ -416,6 +417,8 @@ export type Database = {
           strategy_version: string
           symbol: string
           take_profit: number | null
+          tp1_filled: boolean
+          tp1_price: number | null
           unrealized_pnl: number | null
           unrealized_pnl_pct: number | null
           updated_at: string
@@ -430,6 +433,7 @@ export type Database = {
           id?: string
           notes?: string | null
           opened_at?: string
+          original_size?: number | null
           outcome?: string | null
           pnl?: number | null
           pnl_pct?: number | null
@@ -441,6 +445,8 @@ export type Database = {
           strategy_version?: string
           symbol: string
           take_profit?: number | null
+          tp1_filled?: boolean
+          tp1_price?: number | null
           unrealized_pnl?: number | null
           unrealized_pnl_pct?: number | null
           updated_at?: string
@@ -455,6 +461,7 @@ export type Database = {
           id?: string
           notes?: string | null
           opened_at?: string
+          original_size?: number | null
           outcome?: string | null
           pnl?: number | null
           pnl_pct?: number | null
@@ -466,6 +473,8 @@ export type Database = {
           strategy_version?: string
           symbol?: string
           take_profit?: number | null
+          tp1_filled?: boolean
+          tp1_price?: number | null
           unrealized_pnl?: number | null
           unrealized_pnl_pct?: number | null
           updated_at?: string
