@@ -75,7 +75,7 @@ export function MultiSymbolStrip({ className, onSelect, selected }: MultiSymbolS
                 <span className="text-xs text-muted-foreground tabular">
                   ${r.last.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                 </span>
-                <RegimeBadge regime={r.regime.regime} size="sm" />
+                <RegimeBadge regime={r.regime.regime} />
               </div>
               <div className="flex items-center gap-1.5">
                 <div className="flex-1 h-1 rounded-full bg-secondary overflow-hidden">
