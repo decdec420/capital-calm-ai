@@ -20,8 +20,34 @@ type Symbol = (typeof SYMBOLS)[number];
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
 
+// EMA helper for pullback detection.
+function ema(values: number[], period: number): number[] {
+  const k = 2 / (period + 1);
+  const out: number[] = [];
+  let prev = values[0];
+  for (let i = 0; i < values.length; i++) {
+    prev = i === 0 ? values[i] : values[i] * k + prev * (1 - k);
+    out.push(prev);
+  }
+  return out;
+}
+
+// RSI(14) — last value only.
+function rsi(values: number[], period = 14): number {
+  if (values.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = values.length - period; i < values.length; i++) {
+    const d = values[i] - values[i - 1];
+    if (d >= 0) gains += d; else losses -= d;
+  }
+  const avgG = gains / period, avgL = losses / period;
+  if (avgL === 0) return 100;
+  const rs = avgG / avgL;
+  return 100 - 100 / (1 + rs);
+}
+
 function computeRegime(candles: Candle[]) {
-  if (candles.length < 20) {
+  if (candles.length < 25) {
     return {
       regime: "range",
       confidence: 0,
@@ -30,6 +56,12 @@ function computeRegime(candles: Candle[]) {
       todScore: 0.5,
       pctChange: 0,
       annualizedVolPct: 0,
+      pullback: false,
+      rsiNow: 50,
+      rsiPrev: 50,
+      emaFast: 0,
+      emaSlow: 0,
+      slowRising: false,
       noTradeReasons: ["Not enough data"],
     };
   }
@@ -61,13 +93,67 @@ function computeRegime(candles: Candle[]) {
   const todScore = hour >= 13 && hour < 21 ? 0.85 : hour >= 7 && hour < 23 ? 0.55 : 0.3;
   const trendBoost = regime === "trending_up" || regime === "breakout" ? 0.25 : regime === "trending_down" ? 0.1 : 0;
   const volBoost = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
-  const setupScore = Math.min(1, Math.max(0, confidence * 0.4 + todScore * 0.3 + trendBoost + volBoost));
+
+  // Pullback detection: in an uptrend, has price dipped to the fast EMA
+  // while the slow EMA is still rising AND RSI is curling up off a dip?
+  const emaFastArr = ema(closes, 9);
+  const emaSlowArr = ema(closes, 21);
+  const emaFast = emaFastArr[emaFastArr.length - 1];
+  const emaSlow = emaSlowArr[emaSlowArr.length - 1];
+  const emaSlowPrev = emaSlowArr[emaSlowArr.length - 6] ?? emaSlow;
+  const slowRising = emaSlow > emaSlowPrev;
+  const rsiNow = rsi(closes, 14);
+  const rsiPrev = rsi(closes.slice(0, -1), 14);
+  // Dip: low touched within 0.4% of fast EMA in last 3 bars
+  const recent = candles.slice(-3);
+  const touchedFastEma = recent.some((c) => c.l <= emaFast * 1.004);
+  const inUptrend = (regime === "trending_up" || regime === "breakout") && slowRising;
+  const rsiCurlingUp = rsiPrev < 45 && rsiNow > rsiPrev && rsiNow < 65;
+  const pullback = inUptrend && touchedFastEma && rsiCurlingUp;
+
+  // Boost setup score for confirmed pullbacks (the textbook buy-low setup)
+  const pullbackBoost = pullback ? 0.2 : 0;
+  const setupScore = Math.min(1, Math.max(0, confidence * 0.35 + todScore * 0.25 + trendBoost + volBoost + pullbackBoost));
+
   const noTradeReasons: string[] = [];
   if (setupScore < 0.65) noTradeReasons.push(`Setup score ${setupScore.toFixed(2)} below 0.65`);
   if (volatility === "extreme") noTradeReasons.push("Volatility extreme");
-  if (regime === "chop") noTradeReasons.push("Chop — no edge");
+  // STRICT REGIME GATE: chop and pure range get nothing.
+  if (regime === "chop" || regime === "range") noTradeReasons.push(`${regime} regime — no edge`);
   if (todScore < 0.4) noTradeReasons.push("Outside prime liquidity window");
-  return { regime, confidence, volatility, setupScore, todScore, pctChange, annualizedVolPct, noTradeReasons };
+  return { regime, confidence, volatility, setupScore, todScore, pctChange, annualizedVolPct, pullback, rsiNow, rsiPrev, emaFast, emaSlow, slowRising, noTradeReasons };
+}
+
+// Pattern memory: per-symbol+regime win/loss stats from closed trades.
+async function buildPatternMemory(admin: any, userId: string) {
+  const { data: closed } = await admin
+    .from("trades")
+    .select("symbol, side, outcome, pnl, reason_tags")
+    .eq("user_id", userId)
+    .eq("status", "closed")
+    .order("closed_at", { ascending: false })
+    .limit(50);
+  if (!closed || closed.length === 0) return { totalClosed: 0, bySymbol: {}, byRegime: {} };
+  const bySymbol: Record<string, { wins: number; losses: number; netPnl: number }> = {};
+  const byRegime: Record<string, { wins: number; losses: number; netPnl: number }> = {};
+  for (const t of closed) {
+    const pnl = Number(t.pnl ?? 0);
+    const win = t.outcome === "win";
+    bySymbol[t.symbol] ??= { wins: 0, losses: 0, netPnl: 0 };
+    bySymbol[t.symbol].wins += win ? 1 : 0;
+    bySymbol[t.symbol].losses += win ? 0 : 1;
+    bySymbol[t.symbol].netPnl += pnl;
+    const regimeTag = (t.reason_tags ?? []).find((tag: string) =>
+      ["trending_up", "trending_down", "breakout", "range", "chop"].includes(tag),
+    );
+    if (regimeTag) {
+      byRegime[regimeTag] ??= { wins: 0, losses: 0, netPnl: 0 };
+      byRegime[regimeTag].wins += win ? 1 : 0;
+      byRegime[regimeTag].losses += win ? 0 : 1;
+      byRegime[regimeTag].netPnl += pnl;
+    }
+  }
+  return { totalClosed: closed.length, bySymbol, byRegime };
 }
 
 // Sweep stale pending signals → mark expired + log a journal skip.
