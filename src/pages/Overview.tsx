@@ -6,6 +6,7 @@ import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
+import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
