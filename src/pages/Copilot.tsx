@@ -222,6 +222,9 @@ export default function Copilot() {
         }
       />
 
+      {/* MULTI-SYMBOL WATCHLIST — what the engine is hunting across */}
+      <MultiSymbolStrip />
+
       {/* SIGNAL BRIDGE — top of page */}
       {activeSignal ? (
         <div className="space-y-2">
