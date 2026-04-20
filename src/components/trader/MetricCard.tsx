@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowRight, ArrowUp } from "lucide-react";
-import { Explain } from "./Explain";
+import { ExplainIcon } from "./Explain";
 import type { ReactNode } from "react";
 
 interface MetricCardProps {
@@ -12,7 +12,7 @@ interface MetricCardProps {
   icon?: React.ReactNode;
   className?: string;
   children?: React.ReactNode;
-  /** Plain-English meaning of this metric. Surfaces in "What's this?" help mode. */
+  /** Plain-English meaning. Surfaces as a hover tooltip on a tiny ⓘ next to the label. */
   explain?: ReactNode;
 }
 
@@ -25,10 +25,13 @@ const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
 };
 
 export function MetricCard({ label, value, hint, delta, tone = "default", icon, className, children, explain }: MetricCardProps) {
-  const card = (
+  return (
     <div className={cn("panel p-4 flex flex-col gap-2 animate-fade-in", toneRing[tone], className)}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
+          {explain && <ExplainIcon title={label} hint={explain} />}
+        </div>
         {icon && <span className="text-muted-foreground">{icon}</span>}
       </div>
       <div className="flex items-baseline gap-2">
@@ -52,12 +55,5 @@ export function MetricCard({ label, value, hint, delta, tone = "default", icon, 
       {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
       {children}
     </div>
-  );
-
-  if (!explain) return card;
-  return (
-    <Explain title={label} hint={explain}>
-      {card}
-    </Explain>
   );
 }
