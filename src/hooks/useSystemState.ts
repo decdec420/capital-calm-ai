@@ -38,7 +38,7 @@ export function useSystemState() {
     }
     refetch();
     const channel = supabase
-      .channel(`system_state:${user.id}`)
+      .channel(`system_state:${user.id}:${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "system_state", filter: `user_id=eq.${user.id}` },
