@@ -37,6 +37,17 @@ export function useSystemState() {
       return;
     }
     refetch();
+    const channel = supabase
+      .channel(`system_state:${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "system_state", filter: `user_id=eq.${user.id}` },
+        () => refetch(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
