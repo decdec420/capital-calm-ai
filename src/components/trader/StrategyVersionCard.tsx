@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
-import type { StrategyVersion } from "@/mocks/types";
+import type { StrategyVersion } from "@/lib/domain-types";
 
 const statusTone = {
   approved: "safe",

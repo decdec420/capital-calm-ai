@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
-import type { RiskGuardrail } from "@/mocks/types";
+import type { RiskGuardrail } from "@/lib/domain-types";
 
 interface GuardrailRowProps {
   guardrail: RiskGuardrail;

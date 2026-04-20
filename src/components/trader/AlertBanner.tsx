@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { AlertCircle, AlertTriangle, Info } from "lucide-react";
-import type { AlertSeverity } from "@/mocks/types";
+import type { AlertSeverity } from "@/lib/domain-types";
 
 const severityStyles: Record<AlertSeverity, { ring: string; text: string; icon: React.ReactNode }> = {
   info: { ring: "border-l-status-candidate/60", text: "text-status-candidate", icon: <Info className="h-4 w-4" /> },

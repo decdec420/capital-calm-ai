@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
-import type { JournalEntry } from "@/mocks/types";
+import type { JournalEntry } from "@/lib/domain-types";
 import { ReasonChip } from "./ReasonChip";
 
 const kindTone = {
