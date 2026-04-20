@@ -11,14 +11,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useStrategies, type NewStrategyInput } from "@/hooks/useStrategies";
 import type { StrategyParam, StrategyStatus, StrategyVersion } from "@/lib/domain-types";
-import { ArrowRight, Beaker, Check, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowRight, Beaker, Check, FlaskConical, Loader2, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { fetchCandlesAndBacktest } from "@/lib/backtest";
 
 export default function StrategyLab() {
   const { strategies, loading, create, update, remove } = useStrategies();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [backtestingId, setBacktestingId] = useState<string | null>(null);
 
   const candidate = strategies.find((s) => s.status === "candidate");
   const approved = strategies.find((s) => s.status === "approved");
@@ -55,6 +57,27 @@ export default function StrategyLab() {
     };
   };
 
+  const runBacktest = async (s: StrategyVersion) => {
+    setBacktestingId(s.id);
+    const t = toast.loading(`Backtesting ${s.version} on BTC-USD 1h…`);
+    try {
+      const result = await fetchCandlesAndBacktest(s.params);
+      if (result.metrics.trades === 0) {
+        toast.warning(`${s.version}: zero signals on the sample. Loosen the cross filter.`, { id: t });
+      } else {
+        await update(s.id, { metrics: result.metrics });
+        toast.success(
+          `${s.version}: ${result.metrics.trades} trades · ${(result.metrics.winRate * 100).toFixed(0)}% win · ${result.metrics.expectancy.toFixed(2)}R expectancy`,
+          { id: t },
+        );
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Backtest failed", { id: t });
+    } finally {
+      setBacktestingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <SectionHeader
@@ -84,17 +107,28 @@ export default function StrategyLab() {
               <div key={s.id} className="relative group">
                 <StrategyVersionCard strategy={s} selected={selectedId === s.id} onSelect={() => setSelectedId(s.id)} />
                 <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditingId(s.id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs gap-1"
+                    disabled={backtestingId === s.id}
+                    onClick={(e) => { e.stopPropagation(); runBacktest(s); }}
+                    title="Replay strategy on BTC-USD 1h candles"
+                  >
+                    {backtestingId === s.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
+                    Backtest
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={(e) => { e.stopPropagation(); setEditingId(s.id); }}>
                     Edit
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => create(cloneFrom(s)).then(() => toast.success("Cloned as candidate."))}>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); create(cloneFrom(s)).then(() => toast.success("Cloned as candidate.")); }}>
                     <RotateCcw className="h-3 w-3" />
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
                     className="h-7 w-7 p-0"
-                    onClick={() => remove(s.id).then(() => toast.success("Strategy removed."))}
+                    onClick={(e) => { e.stopPropagation(); remove(s.id).then(() => toast.success("Strategy removed.")); }}
                   >
                     <Trash2 className="h-3 w-3 text-muted-foreground" />
                   </Button>
