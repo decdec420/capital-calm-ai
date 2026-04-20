@@ -104,7 +104,27 @@ export default function Auth() {
     }
   };
 
-  return (
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const e1 = emailSchema.safeParse(email);
+      if (!e1.success) return toast.error(e1.error.issues[0].message);
+
+      const { error } = await supabase.auth.resetPasswordForEmail(e1.data, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) {
+        toast.error(error.message || "Couldn't send reset email.");
+        return;
+      }
+      // Don't disclose whether the email exists — show the same confirmation either way.
+      setResetSent(true);
+      toast.success("If that email exists, a reset link is on its way.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
     <div className="min-h-screen flex items-center justify-center bg-background px-4 relative overflow-hidden">
       {/* Ambient amber glow */}
       <div className="pointer-events-none absolute inset-0">
