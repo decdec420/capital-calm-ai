@@ -125,6 +125,8 @@ export default function Auth() {
       setSubmitting(false);
     }
   };
+
+  return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 relative overflow-hidden">
       {/* Ambient amber glow */}
       <div className="pointer-events-none absolute inset-0">
