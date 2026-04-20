@@ -2,95 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Trader OS — warm amber / graphite design system. All colors HSL. */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Graphite base */
+    --background: 30 10% 5%;
+    --foreground: 36 20% 92%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 30 10% 7%;
+    --card-foreground: 36 20% 92%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 30 10% 8%;
+    --popover-foreground: 36 20% 92%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Warm amber accent */
+    --primary: 38 92% 55%;
+    --primary-foreground: 30 15% 8%;
+    --primary-glow: 42 95% 62%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 30 8% 12%;
+    --secondary-foreground: 36 15% 85%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 30 8% 11%;
+    --muted-foreground: 36 8% 55%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 30 8% 14%;
+    --accent-foreground: 36 20% 92%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 65% 48%;
+    --destructive-foreground: 36 20% 95%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 30 8% 14%;
+    --input: 30 8% 14%;
+    --ring: 38 92% 55%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Status semantics */
+    --status-safe: 145 50% 45%;
+    --status-safe-foreground: 145 30% 95%;
+    --status-caution: 38 92% 55%;
+    --status-caution-foreground: 30 15% 8%;
+    --status-blocked: 0 65% 48%;
+    --status-blocked-foreground: 0 30% 95%;
+    --status-candidate: 210 60% 55%;
+    --status-candidate-foreground: 210 30% 95%;
+    --status-disabled: 270 40% 55%;
+    --status-disabled-foreground: 270 30% 95%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    /* Surfaces */
+    --surface-1: 30 10% 7%;
+    --surface-2: 30 10% 9%;
+    --surface-3: 30 10% 11%;
+    --hairline: 30 8% 16%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Sidebar */
+    --sidebar-background: 30 12% 4%;
+    --sidebar-foreground: 36 12% 70%;
+    --sidebar-primary: 38 92% 55%;
+    --sidebar-primary-foreground: 30 15% 8%;
+    --sidebar-accent: 30 10% 10%;
+    --sidebar-accent-foreground: 36 20% 92%;
+    --sidebar-border: 30 8% 12%;
+    --sidebar-ring: 38 92% 55%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Gradients & shadows */
+    --gradient-amber: linear-gradient(135deg, hsl(38 92% 55%), hsl(32 88% 48%));
+    --gradient-surface: linear-gradient(180deg, hsl(30 10% 8%), hsl(30 10% 6%));
+    --shadow-panel: 0 1px 0 hsl(36 20% 92% / 0.04) inset, 0 8px 24px -12px hsl(0 0% 0% / 0.6);
+    --shadow-amber: 0 0 0 1px hsl(38 92% 55% / 0.25), 0 8px 24px -8px hsl(38 92% 45% / 0.35);
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Same as root — app is dark-first */
+    --background: 30 10% 5%;
+    --foreground: 36 20% 92%;
+    --card: 30 10% 7%;
+    --card-foreground: 36 20% 92%;
+    --popover: 30 10% 8%;
+    --popover-foreground: 36 20% 92%;
+    --primary: 38 92% 55%;
+    --primary-foreground: 30 15% 8%;
+    --secondary: 30 8% 12%;
+    --secondary-foreground: 36 15% 85%;
+    --muted: 30 8% 11%;
+    --muted-foreground: 36 8% 55%;
+    --accent: 30 8% 14%;
+    --accent-foreground: 36 20% 92%;
+    --destructive: 0 65% 48%;
+    --destructive-foreground: 36 20% 95%;
+    --border: 30 8% 14%;
+    --input: 30 8% 14%;
+    --ring: 38 92% 55%;
   }
 }
 
@@ -99,7 +103,33 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html {
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  /* Tabular numerals for metrics */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-border bg-card;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .hairline {
+    @apply border-t border-border/60;
+  }
+
+  .metric-value {
+    @apply tabular tracking-tight;
   }
 }
