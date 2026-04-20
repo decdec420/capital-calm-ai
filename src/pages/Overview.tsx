@@ -42,6 +42,7 @@ export default function Overview() {
   const { pending: pendingSignals } = useSignals();
   const [brief, setBrief] = useState<string>("");
   const [briefLoading, setBriefLoading] = useState(false);
+  const [killOpen, setKillOpen] = useState(false);
   const activeSignal = pendingSignals[0];
 
   const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);

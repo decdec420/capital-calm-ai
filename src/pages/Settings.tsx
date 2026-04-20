@@ -100,14 +100,7 @@ export default function Settings() {
               </div>
               <Switch
                 checked={system.killSwitchEngaged}
-                onCheckedChange={async (v) => {
-                  try {
-                    await updateSystem({ killSwitchEngaged: v, bot: v ? "halted" : "paused" });
-                    toast.success(v ? "Kill-switch ENGAGED." : "Kill-switch disarmed.");
-                  } catch {
-                    toast.error("Couldn't toggle.");
-                  }
-                }}
+                onCheckedChange={() => setKillOpen(true)}
               />
             </div>
 
