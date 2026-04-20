@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, Loader2 } from "lucide-react";
+import { Activity, Eye, EyeOff, Loader2 } from "lucide-react";
 
 const emailSchema = z.string().trim().email("Enter a valid email").max(255);
 const passwordSchema = z
@@ -30,6 +30,7 @@ export default function Auth() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -150,14 +151,14 @@ export default function Auth() {
                   <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
                     Password
                   </Label>
-                  <Input
+                  <PasswordInput
                     id="signin-password"
-                    type="password"
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    required
+                    show={showPassword}
+                    onToggleShow={() => setShowPassword((s) => !s)}
                   />
                 </div>
                 <Button type="submit" className="w-full" disabled={submitting}>
@@ -200,14 +201,14 @@ export default function Auth() {
                   <Label htmlFor="signup-password" className="text-xs uppercase tracking-wider text-muted-foreground">
                     Password
                   </Label>
-                  <Input
+                  <PasswordInput
                     id="signup-password"
-                    type="password"
                     autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="At least 8 characters"
-                    required
+                    show={showPassword}
+                    onToggleShow={() => setShowPassword((s) => !s)}
                   />
                 </div>
                 <Button type="submit" className="w-full" disabled={submitting}>
@@ -225,6 +226,43 @@ export default function Auth() {
           Single-operator workspace. Capital preservation first. No hype.
         </p>
       </div>
+    </div>
+  );
+}
+
+type PasswordInputProps = {
+  id: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  autoComplete?: string;
+  show: boolean;
+  onToggleShow: () => void;
+};
+
+function PasswordInput({ id, value, onChange, placeholder, autoComplete, show, onToggleShow }: PasswordInputProps) {
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        type={show ? "text" : "password"}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        required
+        className="pr-10"
+      />
+      <button
+        type="button"
+        onClick={onToggleShow}
+        aria-label={show ? "Hide password" : "Show password"}
+        aria-pressed={show}
+        tabIndex={-1}
+        className="absolute right-2 top-1/2 -translate-y-1/2 h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
