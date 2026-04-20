@@ -1,4 +1,4 @@
-import { Bell, LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
+import { Bell, HelpCircle, LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -9,8 +9,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "./StatusBadge";
+import { Explain } from "./Explain";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useHelpMode } from "@/contexts/HelpModeContext";
 import { toast } from "sonner";
 import type { SystemMode } from "@/lib/domain-types";
 import { useSystemState } from "@/hooks/useSystemState";
@@ -21,6 +23,13 @@ const modeTone: Record<SystemMode, "neutral" | "candidate" | "accent" | "blocked
   paper: "candidate",
   learning: "accent",
   live: "blocked",
+};
+
+const modeHints: Record<SystemMode, string> = {
+  research: "No orders. Just looking, taking notes, kicking tires.",
+  paper: "Simulated trades against live prices. No real money at risk.",
+  learning: "Bot proposes trades but waits for you to approve each one.",
+  live: "Real money, real orders. All guardrails active. Be sure.",
 };
 
 const initialsFor = (name?: string | null, email?: string | null) => {
@@ -34,6 +43,7 @@ export function TopBar() {
   const { user, profile, signOut } = useAuth();
   const { data: s } = useSystemState();
   const { alerts } = useAlerts();
+  const { enabled: helpOn, toggle: toggleHelp } = useHelpMode();
   const handleSignOut = async () => {
     await signOut();
     toast.success("Signed out. Stay disciplined.");
@@ -49,32 +59,72 @@ export function TopBar() {
 
       {s && (
         <>
-          <StatusBadge tone={modeTone[s.mode]} dot pulse={s.mode === "live"}>
-            {s.mode}
-          </StatusBadge>
+          <Explain
+            inline
+            title="System mode"
+            hint={modeHints[s.mode]}
+          >
+            <StatusBadge tone={modeTone[s.mode]} dot pulse={s.mode === "live"}>
+              {s.mode}
+            </StatusBadge>
+          </Explain>
 
-          <StatusBadge tone={s.bot === "running" ? "safe" : s.bot === "halted" ? "blocked" : "caution"} dot pulse={s.bot === "running"}>
-            bot {s.bot}
-          </StatusBadge>
+          <Explain
+            inline
+            title="Bot status"
+            hint="Running = actively scanning + proposing. Paused = breathing, no new signals. Halted = kill-switch tripped, nothing moves."
+          >
+            <StatusBadge tone={s.bot === "running" ? "safe" : s.bot === "halted" ? "blocked" : "caution"} dot pulse={s.bot === "running"}>
+              bot {s.bot}
+            </StatusBadge>
+          </Explain>
 
-          <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
-            {s.brokerConnection === "connected" ? (
-              <Wifi className="h-3.5 w-3.5 text-status-safe" />
-            ) : (
-              <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
-            )}
-            <span className="tabular capitalize">{s.brokerConnection}</span>
-          </div>
+          <Explain
+            inline
+            title="Broker connection"
+            hint="Whether we have a healthy pipe to the broker for prices and (eventually) orders."
+          >
+            <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
+              {s.brokerConnection === "connected" ? (
+                <Wifi className="h-3.5 w-3.5 text-status-safe" />
+              ) : (
+                <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
+              )}
+              <span className="tabular capitalize">{s.brokerConnection}</span>
+            </div>
+          </Explain>
         </>
       )}
 
       <div className="flex-1" />
 
       {s?.killSwitchEngaged && (
-        <StatusBadge tone="blocked" dot>
-          <ShieldAlert className="h-3 w-3" /> kill-switch
-        </StatusBadge>
+        <Explain
+          inline
+          title="Kill-switch engaged"
+          hint="The big red button is pressed. Bot is halted, no new orders. Disarm from Risk Center or Settings."
+        >
+          <StatusBadge tone="blocked" dot>
+            <ShieldAlert className="h-3 w-3" /> kill-switch
+          </StatusBadge>
+        </Explain>
       )}
+
+      <button
+        type="button"
+        onClick={toggleHelp}
+        aria-pressed={helpOn}
+        aria-label={helpOn ? "Turn off What's this? mode" : "Turn on What's this? mode"}
+        title={helpOn ? "What's this? mode: ON — click to turn off" : "What's this? mode: OFF — click for tooltips on everything"}
+        className={cn(
+          "h-8 w-8 rounded-md flex items-center justify-center transition-colors",
+          helpOn
+            ? "bg-primary/15 text-primary ring-1 ring-primary/40"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
+      >
+        <HelpCircle className="h-4 w-4" />
+      </button>
 
       <button
         type="button"
