@@ -171,9 +171,21 @@ export default function Auth() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
-                    Password
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="signin-password" className="text-xs uppercase tracking-wider text-muted-foreground">
+                      Password
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetSent(false);
+                        setMode("forgot");
+                      }}
+                      className="text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                   <PasswordInput
                     id="signin-password"
                     autoComplete="current-password"
