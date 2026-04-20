@@ -9,11 +9,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "./StatusBadge";
-import { systemState, alerts } from "@/mocks/data";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import type { SystemMode } from "@/mocks/types";
+import type { SystemMode } from "@/lib/domain-types";
+import { useSystemState } from "@/hooks/useSystemState";
+import { useAlerts } from "@/hooks/useAlerts";
 
 const modeTone: Record<SystemMode, "neutral" | "candidate" | "accent" | "blocked"> = {
   research: "neutral",
@@ -30,8 +31,9 @@ const initialsFor = (name?: string | null, email?: string | null) => {
 };
 
 export function TopBar() {
-  const s = systemState;
   const { user, profile, signOut } = useAuth();
+  const { data: s } = useSystemState();
+  const { alerts } = useAlerts();
   const handleSignOut = async () => {
     await signOut();
     toast.success("Signed out. Stay disciplined.");
@@ -45,26 +47,30 @@ export function TopBar() {
       <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
       <div className="h-5 w-px bg-border" />
 
-      <StatusBadge tone={modeTone[s.mode]} dot pulse={s.mode === "live"}>
-        {s.mode}
-      </StatusBadge>
+      {s && (
+        <>
+          <StatusBadge tone={modeTone[s.mode]} dot pulse={s.mode === "live"}>
+            {s.mode}
+          </StatusBadge>
 
-      <StatusBadge tone={s.bot === "running" ? "safe" : s.bot === "halted" ? "blocked" : "caution"} dot pulse={s.bot === "running"}>
-        bot {s.bot}
-      </StatusBadge>
+          <StatusBadge tone={s.bot === "running" ? "safe" : s.bot === "halted" ? "blocked" : "caution"} dot pulse={s.bot === "running"}>
+            bot {s.bot}
+          </StatusBadge>
 
-      <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
-        {s.brokerConnection === "connected" ? (
-          <Wifi className="h-3.5 w-3.5 text-status-safe" />
-        ) : (
-          <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
-        )}
-        <span className="tabular">{s.latencyMs}ms</span>
-      </div>
+          <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
+            {s.brokerConnection === "connected" ? (
+              <Wifi className="h-3.5 w-3.5 text-status-safe" />
+            ) : (
+              <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
+            )}
+            <span className="tabular capitalize">{s.brokerConnection}</span>
+          </div>
+        </>
+      )}
 
       <div className="flex-1" />
 
-      {s.killSwitchEngaged && (
+      {s?.killSwitchEngaged && (
         <StatusBadge tone="blocked" dot>
           <ShieldAlert className="h-3 w-3" /> kill-switch
         </StatusBadge>

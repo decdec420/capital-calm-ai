@@ -1,11 +1,22 @@
-import { systemState } from "@/mocks/data";
+import { useSystemState } from "@/hooks/useSystemState";
 
 export function StatusFooter() {
-  const s = systemState;
+  const { data: s } = useSystemState();
+
+  if (!s) {
+    return (
+      <footer className="h-7 border-t border-border bg-card/40 px-3 flex items-center gap-4 text-[10px] uppercase tracking-wider text-muted-foreground tabular shrink-0">
+        <span>booting…</span>
+        <div className="flex-1" />
+        <span>BTC-USD · UTC {new Date().toUTCString().slice(17, 22)}</span>
+      </footer>
+    );
+  }
+
   return (
     <footer className="h-7 border-t border-border bg-card/40 px-3 flex items-center gap-4 text-[10px] uppercase tracking-wider text-muted-foreground tabular shrink-0">
       <span>
-        latency <span className="text-foreground/80">{s.latencyMs}ms</span>
+        mode <span className="text-foreground/80 capitalize">{s.mode}</span>
       </span>
       <span className="h-3 w-px bg-border" />
       <span>
@@ -17,7 +28,7 @@ export function StatusFooter() {
       </span>
       <span className="h-3 w-px bg-border" />
       <span>
-        uptime <span className="text-foreground/80">{s.uptimeHours.toFixed(1)}h</span>
+        bot <span className="text-foreground/80">{s.bot}</span>
       </span>
       <div className="flex-1" />
       <span>BTC-USD · UTC {new Date().toUTCString().slice(17, 22)}</span>

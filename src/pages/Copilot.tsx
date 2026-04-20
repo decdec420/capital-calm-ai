@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -6,17 +6,22 @@ import { StatusBadge } from "@/components/trader/StatusBadge";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { accountState, marketRegime, openPosition, strategies, systemState } from "@/mocks/data";
+import { useSystemState } from "@/hooks/useSystemState";
+import { useAccountState } from "@/hooks/useAccountState";
+import { useTrades } from "@/hooks/useTrades";
+import { useStrategies } from "@/hooks/useStrategies";
+import { useCandles } from "@/hooks/useCandles";
+import { computeRegime } from "@/lib/regime";
 import { Send, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
 const SUGGESTED = [
-  "Why did the bot skip the last trade?",
-  "Summarize today's market conditions.",
-  "Should the candidate strategy v1.4 be promoted?",
-  "What are the biggest current risks in the system?",
+  "What's the current regime telling me?",
+  "Should I be sitting on hands right now?",
+  "Why did my last trade lose / win?",
+  "Which guardrail is closest to tripping?",
 ];
 
 export default function Copilot() {
@@ -24,19 +29,26 @@ export default function Copilot() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { data: system } = useSystemState();
+  const { data: account } = useAccountState();
+  const { open, closed } = useTrades();
+  const { strategies } = useStrategies();
+  const { candles } = useCandles();
+  const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
   const buildContext = () => ({
-    mode: systemState.mode,
-    bot: systemState.bot,
-    liveTradingEnabled: systemState.liveTradingEnabled,
-    killSwitchEngaged: systemState.killSwitchEngaged,
-    account: { equity: accountState.equity, balanceFloor: accountState.balanceFloor },
-    regime: marketRegime,
-    openPosition,
+    mode: system?.mode,
+    bot: system?.bot,
+    liveTradingEnabled: system?.liveTradingEnabled,
+    killSwitchEngaged: system?.killSwitchEngaged,
+    account: account ? { equity: account.equity, balanceFloor: account.balanceFloor } : null,
+    regime,
+    openPosition: open[0] ?? null,
+    recentClosed: closed.slice(0, 5).map((t) => ({ side: t.side, outcome: t.outcome, pnlPct: t.pnlPct })),
     approvedStrategy: strategies.find((s) => s.status === "approved"),
     candidateStrategy: strategies.find((s) => s.status === "candidate"),
   });
@@ -155,7 +167,7 @@ export default function Copilot() {
                 </div>
                 <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                  System context (mode, regime, position, strategies) is automatically attached.
+                  Live context (mode, regime, position, strategies) is automatically attached.
                 </p>
                 <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
                   {SUGGESTED.map((s) => (
@@ -222,11 +234,11 @@ export default function Copilot() {
           <div className="panel p-4">
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Context attached</div>
             <ul className="text-xs text-muted-foreground space-y-1.5">
-              <li>• Mode: <span className="text-foreground capitalize">{systemState.mode}</span></li>
-              <li>• Regime: <span className="text-foreground capitalize">{marketRegime.regime.replace("_", " ")}</span></li>
-              <li>• Open position: <span className="text-foreground">{openPosition ? `${openPosition.side} ${openPosition.symbol}` : "none"}</span></li>
-              <li>• Approved strategy: <span className="text-foreground">trend-rev v1.3</span></li>
-              <li>• Candidate: <span className="text-foreground">v1.4</span></li>
+              <li>• Mode: <span className="text-foreground capitalize">{system?.mode ?? "—"}</span></li>
+              <li>• Regime: <span className="text-foreground capitalize">{regime.regime.replace("_", " ")}</span></li>
+              <li>• Open position: <span className="text-foreground">{open[0] ? `${open[0].side} ${open[0].symbol}` : "none"}</span></li>
+              <li>• Approved strategy: <span className="text-foreground">{strategies.find((s) => s.status === "approved")?.version ?? "—"}</span></li>
+              <li>• Candidate: <span className="text-foreground">{strategies.find((s) => s.status === "candidate")?.version ?? "—"}</span></li>
             </ul>
           </div>
           <div className="panel p-4">
