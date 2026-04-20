@@ -175,6 +175,36 @@ export default function Overview() {
         </div>
       </div>
 
+      {/* Pending signal banner */}
+      {activeSignal && (
+        <Link
+          to="/copilot"
+          className="panel p-4 flex items-center gap-4 border-primary/40 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent hover:border-primary/60 transition-colors group animate-fade-in"
+        >
+          <div className="h-10 w-10 rounded-md bg-primary/20 text-primary flex items-center justify-center shrink-0">
+            <Brain className="h-5 w-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">AI signal pending</span>
+              <StatusBadge tone={activeSignal.side === "long" ? "safe" : "blocked"} size="sm" dot>
+                {activeSignal.side}
+              </StatusBadge>
+              <span className="text-[10px] text-muted-foreground tabular">
+                {(activeSignal.confidence * 100).toFixed(0)}% conf
+              </span>
+            </div>
+            <div className="text-sm font-medium text-foreground truncate">
+              {activeSignal.side.toUpperCase()} {activeSignal.symbol} @ ${activeSignal.proposedEntry.toFixed(2)}
+              <span className="text-muted-foreground"> — {activeSignal.aiReasoning.slice(0, 80)}{activeSignal.aiReasoning.length > 80 ? "…" : ""}</span>
+            </div>
+          </div>
+          <div className="text-xs text-primary group-hover:translate-x-0.5 transition-transform shrink-0 hidden sm:block">
+            Review →
+          </div>
+        </Link>
+      )}
+
       {/* Metric grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <MetricCard
