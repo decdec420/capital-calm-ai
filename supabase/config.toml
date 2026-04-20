@@ -2,3 +2,9 @@ project_id = "klgotmhyxxtppzpbjkfu"
 
 [functions.copilot-chat]
 verify_jwt = false
+
+[functions.market-brief]
+verify_jwt = true
+
+[functions.journal-explain]
+verify_jwt = true

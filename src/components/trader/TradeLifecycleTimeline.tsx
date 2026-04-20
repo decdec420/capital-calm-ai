@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Check, Circle, Clock, Eye, Archive } from "lucide-react";
-import type { TradePhase } from "@/mocks/types";
+import type { TradePhase } from "@/lib/domain-types";
 
 const phases: { key: TradePhase; label: string; icon: React.ReactNode }[] = [
   { key: "candidate", label: "Candidate", icon: <Circle className="h-3 w-3" /> },

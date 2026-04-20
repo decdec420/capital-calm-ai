@@ -1,4 +1,6 @@
-// Domain types — modeled to match a future TS bot backend.
+// Domain types — shared across pages, hooks, and components.
+// Mirrors the shape of the Lovable Cloud (Supabase) tables but uses
+// camelCase + dates as strings so it's easy to consume in React.
 
 export type SystemMode = "research" | "paper" | "learning" | "live";
 export type BotStatus = "running" | "paused" | "halted" | "starting";
@@ -14,11 +16,17 @@ export type StrategyStatus = "approved" | "candidate" | "archived";
 
 export type TradeSide = "long" | "short";
 export type TradeOutcome = "win" | "loss" | "breakeven" | "open";
+export type TradeStatus = "open" | "closed";
 export type TradePhase = "candidate" | "entered" | "monitored" | "exited" | "archived";
 
 export type AlertSeverity = "info" | "warning" | "critical";
 
+export type JournalKind = "research" | "trade" | "learning" | "skip" | "daily" | "postmortem";
+
+export type ExperimentStatus = "queued" | "running" | "accepted" | "rejected";
+
 export interface SystemState {
+  id: string;
   mode: SystemMode;
   bot: BotStatus;
   brokerConnection: ConnectionState;
@@ -31,6 +39,7 @@ export interface SystemState {
 }
 
 export interface AccountState {
+  id: string;
   equity: number;
   cash: number;
   startOfDayEquity: number;
@@ -45,59 +54,57 @@ export interface MarketRegime {
   volatility: VolatilityState;
   spread: SpreadQuality;
   timeOfDayScore: number; // 0..1
+  setupScore: number; // 0..1
   noTradeReasons: string[];
   summary: string;
 }
 
-export interface OpenPosition {
+export interface Trade {
   id: string;
   symbol: string;
   side: TradeSide;
   size: number;
   entryPrice: number;
-  currentPrice: number;
-  stopLoss: number;
-  takeProfit: number;
-  unrealizedPnl: number;
-  unrealizedPnlPct: number;
-  openedAt: string;
-  strategyVersion: string;
-}
-
-export interface ClosedTrade {
-  id: string;
-  symbol: string;
-  side: TradeSide;
-  size: number;
-  entryPrice: number;
-  exitPrice: number;
-  pnl: number;
-  pnlPct: number;
-  outcome: TradeOutcome;
+  exitPrice: number | null;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  currentPrice: number | null;
+  pnl: number | null;
+  pnlPct: number | null;
+  unrealizedPnl: number | null;
+  unrealizedPnlPct: number | null;
+  status: TradeStatus;
+  outcome: TradeOutcome | null;
   reasonTags: string[];
-  openedAt: string;
-  closedAt: string;
   strategyVersion: string;
-  notes?: string;
+  notes: string | null;
+  openedAt: string;
+  closedAt: string | null;
 }
-
-export type JournalKind = "research" | "trade" | "learning" | "skip" | "daily" | "postmortem";
 
 export interface JournalEntry {
   id: string;
   kind: JournalKind;
   title: string;
   summary: string;
-  timestamp: string;
+  timestamp: string; // = created_at
   tags: string[];
-  raw?: Record<string, unknown>;
-  llmExplanation?: string;
+  raw?: Record<string, unknown> | null;
+  llmExplanation?: string | null;
 }
 
 export interface StrategyParam {
   key: string;
   value: number | string | boolean;
   unit?: string;
+}
+
+export interface StrategyMetrics {
+  expectancy: number;
+  winRate: number;
+  maxDrawdown: number;
+  sharpe: number;
+  trades: number;
 }
 
 export interface StrategyVersion {
@@ -108,13 +115,7 @@ export interface StrategyVersion {
   createdAt: string;
   description: string;
   params: StrategyParam[];
-  metrics: {
-    expectancy: number;
-    winRate: number;
-    maxDrawdown: number;
-    sharpe: number;
-    trades: number;
-  };
+  metrics: StrategyMetrics;
 }
 
 export interface RiskGuardrail {
@@ -125,18 +126,19 @@ export interface RiskGuardrail {
   limit: string;
   level: RiskLevel;
   utilization: number; // 0..1
+  sortOrder: number;
 }
 
 export interface Experiment {
   id: string;
   title: string;
-  status: "queued" | "running" | "accepted" | "rejected";
+  status: ExperimentStatus;
   parameter: string;
   before: string;
   after: string;
   delta: string;
   createdAt: string;
-  notes?: string;
+  notes?: string | null;
 }
 
 export interface Alert {

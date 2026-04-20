@@ -1,5 +1,5 @@
 import { StatusBadge } from "./StatusBadge";
-import type { Regime } from "@/mocks/types";
+import type { Regime } from "@/lib/domain-types";
 
 const regimeLabel: Record<Regime, string> = {
   trending_up: "Trending ↑",

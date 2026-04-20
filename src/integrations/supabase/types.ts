@@ -14,6 +14,192 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_state: {
+        Row: {
+          balance_floor: number
+          base_currency: string
+          cash: number
+          created_at: string
+          equity: number
+          id: string
+          start_of_day_equity: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          balance_floor?: number
+          base_currency?: string
+          cash?: number
+          created_at?: string
+          equity?: number
+          id?: string
+          start_of_day_equity?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          balance_floor?: number
+          base_currency?: string
+          cash?: number
+          created_at?: string
+          equity?: number
+          id?: string
+          start_of_day_equity?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      alerts: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          severity: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message?: string
+          severity?: string
+          title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          severity?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      experiments: {
+        Row: {
+          after_value: string
+          before_value: string
+          created_at: string
+          delta: string
+          id: string
+          notes: string | null
+          parameter: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          after_value?: string
+          before_value?: string
+          created_at?: string
+          delta?: string
+          id?: string
+          notes?: string | null
+          parameter?: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          after_value?: string
+          before_value?: string
+          created_at?: string
+          delta?: string
+          id?: string
+          notes?: string | null
+          parameter?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      guardrails: {
+        Row: {
+          created_at: string
+          current_value: string
+          description: string
+          id: string
+          label: string
+          level: string
+          limit_value: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+          utilization: number
+        }
+        Insert: {
+          created_at?: string
+          current_value?: string
+          description?: string
+          id?: string
+          label: string
+          level?: string
+          limit_value?: string
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+          utilization?: number
+        }
+        Update: {
+          created_at?: string
+          current_value?: string
+          description?: string
+          id?: string
+          label?: string
+          level?: string
+          limit_value?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+          utilization?: number
+        }
+        Relationships: []
+      }
+      journal_entries: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          llm_explanation: string | null
+          raw: Json | null
+          summary: string
+          tags: string[]
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind?: string
+          llm_explanation?: string | null
+          raw?: Json | null
+          summary?: string
+          tags?: string[]
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          llm_explanation?: string | null
+          raw?: Json | null
+          summary?: string
+          tags?: string[]
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -36,6 +222,171 @@ export type Database = {
           created_at?: string
           display_name?: string | null
           id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      strategies: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          metrics: Json
+          name: string
+          params: Json
+          status: string
+          updated_at: string
+          user_id: string
+          version: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string
+          id?: string
+          metrics?: Json
+          name: string
+          params?: Json
+          status?: string
+          updated_at?: string
+          user_id: string
+          version: string
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          metrics?: Json
+          name?: string
+          params?: Json
+          status?: string
+          updated_at?: string
+          user_id?: string
+          version?: string
+        }
+        Relationships: []
+      }
+      system_state: {
+        Row: {
+          bot: string
+          broker_connection: string
+          created_at: string
+          data_feed: string
+          id: string
+          kill_switch_engaged: boolean
+          last_heartbeat: string
+          latency_ms: number
+          live_trading_enabled: boolean
+          mode: string
+          updated_at: string
+          uptime_hours: number
+          user_id: string
+        }
+        Insert: {
+          bot?: string
+          broker_connection?: string
+          created_at?: string
+          data_feed?: string
+          id?: string
+          kill_switch_engaged?: boolean
+          last_heartbeat?: string
+          latency_ms?: number
+          live_trading_enabled?: boolean
+          mode?: string
+          updated_at?: string
+          uptime_hours?: number
+          user_id: string
+        }
+        Update: {
+          bot?: string
+          broker_connection?: string
+          created_at?: string
+          data_feed?: string
+          id?: string
+          kill_switch_engaged?: boolean
+          last_heartbeat?: string
+          latency_ms?: number
+          live_trading_enabled?: boolean
+          mode?: string
+          updated_at?: string
+          uptime_hours?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trades: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          current_price: number | null
+          entry_price: number
+          exit_price: number | null
+          id: string
+          notes: string | null
+          opened_at: string
+          outcome: string | null
+          pnl: number | null
+          pnl_pct: number | null
+          reason_tags: string[]
+          side: string
+          size: number
+          status: string
+          stop_loss: number | null
+          strategy_version: string
+          symbol: string
+          take_profit: number | null
+          unrealized_pnl: number | null
+          unrealized_pnl_pct: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          current_price?: number | null
+          entry_price: number
+          exit_price?: number | null
+          id?: string
+          notes?: string | null
+          opened_at?: string
+          outcome?: string | null
+          pnl?: number | null
+          pnl_pct?: number | null
+          reason_tags?: string[]
+          side: string
+          size: number
+          status?: string
+          stop_loss?: number | null
+          strategy_version?: string
+          symbol: string
+          take_profit?: number | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_pct?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          current_price?: number | null
+          entry_price?: number
+          exit_price?: number | null
+          id?: string
+          notes?: string | null
+          opened_at?: string
+          outcome?: string | null
+          pnl?: number | null
+          pnl_pct?: number | null
+          reason_tags?: string[]
+          side?: string
+          size?: number
+          status?: string
+          stop_loss?: number | null
+          strategy_version?: string
+          symbol?: string
+          take_profit?: number | null
+          unrealized_pnl?: number | null
+          unrealized_pnl_pct?: number | null
           updated_at?: string
           user_id?: string
         }

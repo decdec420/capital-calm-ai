@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { MetricCard } from "@/components/trader/MetricCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
@@ -6,14 +7,110 @@ import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { Button } from "@/components/ui/button";
-import { Activity, DollarSign, Pause, ShieldAlert, Sparkles, TrendingDown, TrendingUp, Zap } from "lucide-react";
-import { accountState, aiInsights, alerts, marketRegime, openPosition, riskGuardrails, systemState } from "@/mocks/data";
+import {
+  Activity,
+  DollarSign,
+  Pause,
+  Play,
+  ShieldAlert,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  X,
+  Zap,
+} from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAccountState } from "@/hooks/useAccountState";
+import { useSystemState } from "@/hooks/useSystemState";
+import { useTrades } from "@/hooks/useTrades";
+import { useAlerts } from "@/hooks/useAlerts";
+import { useGuardrails } from "@/hooks/useGuardrails";
+import { useCandles } from "@/hooks/useCandles";
+import { computeRegime } from "@/lib/regime";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export default function Overview() {
-  const dailyPnl = accountState.equity - accountState.startOfDayEquity;
-  const dailyPnlPct = (dailyPnl / accountState.startOfDayEquity) * 100;
-  const floorDistance = ((accountState.equity - accountState.balanceFloor) / accountState.equity) * 100;
+  const { data: account } = useAccountState();
+  const { data: system, update: updateSystem } = useSystemState();
+  const { open, closed } = useTrades();
+  const { alerts, dismiss } = useAlerts();
+  const { guardrails } = useGuardrails();
+  const { candles } = useCandles();
+  const [brief, setBrief] = useState<string>("");
+  const [briefLoading, setBriefLoading] = useState(false);
+
+  const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
+  const lastPrice = candles[candles.length - 1]?.c ?? 0;
+  const firstPrice = candles[0]?.c ?? lastPrice;
+  const pctChange = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
+
+  const openPosition = open[0];
+  const closedToday = closed.filter((t) => t.closedAt && new Date(t.closedAt).toDateString() === new Date().toDateString());
+  const realizedToday = closedToday.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const lossToday = Math.min(0, realizedToday);
+
+  const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
+  const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
+  const floorDistance = account ? ((account.equity - account.balanceFloor) / account.equity) * 100 : 0;
+  const lossVsCap = account ? (Math.abs(lossToday) / account.startOfDayEquity) * 100 : 0;
+
+  const requestBrief = async () => {
+    setBriefLoading(true);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        toast.error("Sign in first.");
+        return;
+      }
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-brief`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({
+          regime: regime.regime,
+          lastPrice: lastPrice.toFixed(2),
+          pctChange: pctChange.toFixed(2),
+          openTradesCount: open.length,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (res.status === 429) toast.error("Rate limit reached. Try again in a moment.");
+        else if (res.status === 402) toast.error("AI credits depleted. Top up in Workspace usage.");
+        else toast.error(json.error ?? "Brief failed");
+        return;
+      }
+      setBrief(json.brief);
+    } catch {
+      toast.error("Couldn't reach the brief service.");
+    } finally {
+      setBriefLoading(false);
+    }
+  };
+
+  // Auto-fetch brief once on mount when we have candles
+  useEffect(() => {
+    if (candles.length > 0 && !brief && !briefLoading) requestBrief();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles.length]);
+
+  const toggleBot = async () => {
+    if (!system) return;
+    const next = system.bot === "running" ? "paused" : "running";
+    try {
+      await updateSystem({ bot: next });
+      toast.success(`Bot ${next}.`);
+    } catch {
+      toast.error("Couldn't toggle bot.");
+    }
+  };
+
+  const liveGated = !system?.liveTradingEnabled;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -23,11 +120,12 @@ export default function Overview() {
         description="Calm, decisive view of the bot, the market, and your guardrails."
         actions={
           <>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Pause className="h-3.5 w-3.5" /> Pause bot
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={toggleBot}>
+              {system?.bot === "running" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {system?.bot === "running" ? "Pause bot" : "Resume bot"}
             </Button>
-            <Button size="sm" className="gap-1.5">
-              <Sparkles className="h-3.5 w-3.5" /> Request brief
+            <Button size="sm" className="gap-1.5" onClick={requestBrief} disabled={briefLoading}>
+              <Sparkles className="h-3.5 w-3.5" /> {briefLoading ? "Briefing…" : "Request brief"}
             </Button>
           </>
         }
@@ -41,30 +139,35 @@ export default function Overview() {
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">System mode</div>
-            <div className="text-base font-semibold text-foreground capitalize">{systemState.mode}</div>
+            <div className="text-base font-semibold text-foreground capitalize">{system?.mode ?? "—"}</div>
           </div>
         </div>
         <div className="h-10 w-px bg-border hidden md:block" />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Market regime</div>
           <div className="mt-1">
-            <RegimeBadge regime={marketRegime.regime} confidence={marketRegime.confidence} />
+            <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
           </div>
         </div>
         <div className="h-10 w-px bg-border hidden md:block" />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk posture</div>
           <div className="mt-1">
-            <StatusBadge tone="safe" dot>
-              capital protected
+            <StatusBadge tone={floorDistance > 2 ? "safe" : "caution"} dot>
+              {floorDistance > 2 ? "capital protected" : "near floor"}
             </StatusBadge>
           </div>
         </div>
         <div className="flex-1" />
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Strategy</div>
-          <div className="text-sm font-medium text-foreground">trend-rev v1.3</div>
-          <div className="text-[11px] text-status-candidate">candidate v1.4 paper</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC-USD live</div>
+          <div className="text-sm font-medium text-foreground tabular">
+            ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          </div>
+          <div className={`text-[11px] tabular ${pctChange >= 0 ? "text-status-safe" : "text-status-blocked"}`}>
+            {pctChange >= 0 ? "+" : ""}
+            {pctChange.toFixed(2)}% window
+          </div>
         </div>
       </div>
 
@@ -72,9 +175,9 @@ export default function Overview() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <MetricCard
           label="Equity"
-          value={`$${accountState.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={account ? `$${account.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
           icon={<DollarSign className="h-3.5 w-3.5" />}
-          hint={`cash $${accountState.cash.toFixed(0)}`}
+          hint={account ? `cash $${account.cash.toFixed(0)}` : undefined}
         />
         <MetricCard
           label="Daily PnL"
@@ -83,15 +186,19 @@ export default function Overview() {
           tone={dailyPnl >= 0 ? "safe" : "blocked"}
           icon={dailyPnl >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
         />
-        <MetricCard label="Trades today" value="3" hint="cap 6" />
-        <MetricCard label="Loss vs cap" value="0.27%" hint="cap 1.50%" tone="safe" />
-        <MetricCard label="Floor distance" value={`${floorDistance.toFixed(1)}%`} hint={`floor $${accountState.balanceFloor.toFixed(0)}`} />
+        <MetricCard label="Trades today" value={String(closedToday.length + open.length)} hint="cap 6" />
+        <MetricCard label="Loss vs cap" value={`${lossVsCap.toFixed(2)}%`} hint="cap 1.50%" tone={lossVsCap > 1 ? "caution" : "safe"} />
+        <MetricCard
+          label="Floor distance"
+          value={account ? `${floorDistance.toFixed(1)}%` : "—"}
+          hint={account ? `floor $${account.balanceFloor.toFixed(0)}` : undefined}
+        />
         <MetricCard
           label="Live mode"
-          value="Gated"
+          value={liveGated ? "Gated" : "Armed"}
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          tone="blocked"
-          hint="paper-only"
+          tone={liveGated ? "blocked" : "safe"}
+          hint={liveGated ? "paper-only" : "operator-armed"}
         />
       </div>
 
@@ -99,9 +206,9 @@ export default function Overview() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <AIInsightPanel
-            title={aiInsights[0].title}
-            body={aiInsights[0].body}
-            timestamp="12m"
+            title="Today's market brief"
+            body={brief || (briefLoading ? "Cooking up a brief…" : "No brief yet. Tap Request brief.")}
+            timestamp={brief ? "now" : undefined}
             footer={
               <Link to="/copilot" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
                 Open Copilot <Zap className="h-3 w-3" />
@@ -126,14 +233,8 @@ export default function Overview() {
                 <PosCell label="Symbol" value={openPosition.symbol} />
                 <PosCell label="Side" value={openPosition.side.toUpperCase()} />
                 <PosCell label="Entry" value={`$${openPosition.entryPrice.toFixed(2)}`} />
-                <PosCell label="Stop" value={`$${openPosition.stopLoss.toFixed(2)}`} />
-                <PosCell label="TP" value={`$${openPosition.takeProfit.toFixed(2)}`} />
-              </div>
-              <div className="flex items-center justify-between pt-2 border-t border-border">
-                <span className="text-xs text-muted-foreground">Unrealized</span>
-                <span className={`text-sm tabular font-medium ${openPosition.unrealizedPnl >= 0 ? "text-status-safe" : "text-status-blocked"}`}>
-                  {openPosition.unrealizedPnl >= 0 ? "+" : ""}${openPosition.unrealizedPnl.toFixed(2)} ({openPosition.unrealizedPnlPct.toFixed(2)}%)
-                </span>
+                <PosCell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} />
+                <PosCell label="TP" value={openPosition.takeProfit !== null ? `$${openPosition.takeProfit.toFixed(2)}` : "—"} />
               </div>
             </div>
           )}
@@ -143,11 +244,29 @@ export default function Overview() {
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Recent alerts</span>
               <span className="text-xs text-muted-foreground">{alerts.length}</span>
             </div>
-            <div className="space-y-2">
-              {alerts.map((a) => (
-                <AlertBanner key={a.id} severity={a.severity} title={a.title} message={a.message} timestamp={new Date(a.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} />
-              ))}
-            </div>
+            {alerts.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No alerts. Quiet is good.</p>
+            ) : (
+              <div className="space-y-2">
+                {alerts.slice(0, 4).map((a) => (
+                  <div key={a.id} className="relative group">
+                    <AlertBanner
+                      severity={a.severity}
+                      title={a.title}
+                      message={a.message}
+                      timestamp={new Date(a.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    />
+                    <button
+                      onClick={() => dismiss(a.id)}
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-secondary"
+                      aria-label="Dismiss"
+                    >
+                      <X className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -155,11 +274,11 @@ export default function Overview() {
           <div className="panel p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Kill-switches</span>
-              <StatusBadge tone="safe" size="sm" dot>
-                armed
+              <StatusBadge tone={system?.killSwitchEngaged ? "blocked" : "safe"} size="sm" dot>
+                {system?.killSwitchEngaged ? "engaged" : "armed"}
               </StatusBadge>
             </div>
-            {riskGuardrails.slice(-3).map((g) => (
+            {guardrails.slice(-3).map((g) => (
               <GuardrailRow key={g.id} guardrail={g} className="!p-3" />
             ))}
             <Link to="/risk" className="block text-xs text-primary hover:underline pt-1">
@@ -170,11 +289,22 @@ export default function Overview() {
           <div className="panel p-4 space-y-2">
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Quick actions</span>
             <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" size="sm">Force flat</Button>
-              <Button variant="outline" size="sm">Snapshot</Button>
-              <Button variant="outline" size="sm">Daily report</Button>
-              <Button variant="outline" size="sm" className="text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked">
-                Halt bot
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/trades">Log trade</Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/journals">Journal</Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/risk">Risk center</Link>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked"
+                onClick={() => updateSystem({ killSwitchEngaged: !system?.killSwitchEngaged, bot: "halted" })}
+              >
+                {system?.killSwitchEngaged ? "Disarm" : "Halt bot"}
               </Button>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Candle } from "@/mocks/types";
+import type { Candle } from "@/lib/domain-types";
 import { cn } from "@/lib/utils";
 
 interface PriceChartProps {
