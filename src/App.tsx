@@ -4,6 +4,9 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/trader/AppLayout";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ProtectedRoute } from "@/components/trader/ProtectedRoute";
+import Auth from "./pages/Auth";
 import Overview from "./pages/Overview";
 import MarketIntel from "./pages/MarketIntel";
 import Trades from "./pages/Trades";
@@ -23,21 +26,30 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<Overview />} />
-            <Route path="/market" element={<MarketIntel />} />
-            <Route path="/trades" element={<Trades />} />
-            <Route path="/journals" element={<Journals />} />
-            <Route path="/strategy" element={<StrategyLab />} />
-            <Route path="/risk" element={<RiskCenter />} />
-            <Route path="/learning" element={<Learning />} />
-            <Route path="/copilot" element={<Copilot />} />
-            <Route path="/settings" element={<Settings />} />
-          </Route>
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/" element={<Overview />} />
+              <Route path="/market" element={<MarketIntel />} />
+              <Route path="/trades" element={<Trades />} />
+              <Route path="/journals" element={<Journals />} />
+              <Route path="/strategy" element={<StrategyLab />} />
+              <Route path="/risk" element={<RiskCenter />} />
+              <Route path="/learning" element={<Learning />} />
+              <Route path="/copilot" element={<Copilot />} />
+              <Route path="/settings" element={<Settings />} />
+            </Route>
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
