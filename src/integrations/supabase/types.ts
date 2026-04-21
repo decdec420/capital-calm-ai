@@ -142,39 +142,57 @@ export type Database = {
       experiments: {
         Row: {
           after_value: string
+          auto_resolved: boolean
+          backtest_result: Json | null
           before_value: string
           created_at: string
           delta: string
+          hypothesis: string | null
           id: string
+          needs_review: boolean
           notes: string | null
           parameter: string
+          proposed_by: string
           status: string
+          strategy_id: string | null
           title: string
           updated_at: string
           user_id: string
         }
         Insert: {
           after_value?: string
+          auto_resolved?: boolean
+          backtest_result?: Json | null
           before_value?: string
           created_at?: string
           delta?: string
+          hypothesis?: string | null
           id?: string
+          needs_review?: boolean
           notes?: string | null
           parameter?: string
+          proposed_by?: string
           status?: string
+          strategy_id?: string | null
           title: string
           updated_at?: string
           user_id: string
         }
         Update: {
           after_value?: string
+          auto_resolved?: boolean
+          backtest_result?: Json | null
           before_value?: string
           created_at?: string
           delta?: string
+          hypothesis?: string | null
           id?: string
+          needs_review?: boolean
           notes?: string | null
           parameter?: string
+          proposed_by?: string
           status?: string
+          strategy_id?: string | null
           title?: string
           updated_at?: string
           user_id?: string

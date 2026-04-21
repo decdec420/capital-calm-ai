@@ -109,7 +109,24 @@ export interface EngineSnapshot {
 
 export type JournalKind = "research" | "trade" | "learning" | "skip" | "daily" | "postmortem";
 
-export type ExperimentStatus = "queued" | "running" | "accepted" | "rejected";
+export type ExperimentStatus = "queued" | "running" | "accepted" | "rejected" | "needs_review";
+
+export type ExperimentProposedBy = "user" | "copilot";
+
+export interface ExperimentBacktestSide {
+  metrics: StrategyMetrics;
+  pnlRStdev: number;
+}
+export interface ExperimentBacktestResult {
+  before: ExperimentBacktestSide;
+  after: ExperimentBacktestSide;
+  deltas: { expectancy: number; winRate: number };
+  candleCount: number;
+  significantSample: boolean;
+  significantDelta: boolean;
+  ranAt: string;
+  error?: string;
+}
 
 export interface SystemState {
   id: string;
@@ -234,6 +251,12 @@ export interface Experiment {
   delta: string;
   createdAt: string;
   notes?: string | null;
+  proposedBy: ExperimentProposedBy;
+  hypothesis?: string | null;
+  backtestResult?: ExperimentBacktestResult | null;
+  strategyId?: string | null;
+  autoResolved: boolean;
+  needsReview: boolean;
 }
 
 export interface Alert {

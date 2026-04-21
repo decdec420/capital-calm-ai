@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.signal-decide]
 verify_jwt = false
+
+[functions.propose-experiment]
+verify_jwt = false
+
+[functions.run-experiment]
+verify_jwt = false

@@ -17,6 +17,7 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { useTrades } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
+import { useExperiments } from "@/hooks/useExperiments";
 import { useSignals } from "@/hooks/useSignals";
 import { useConversations } from "@/hooks/useConversations";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
@@ -40,6 +41,7 @@ export default function Copilot() {
   const { data: account } = useAccountState();
   const { open, closed } = useTrades();
   const { strategies } = useStrategies();
+  const { counts: expCounts, needsReview: expNeedsReview, recentlyAutoResolved: expRecent } = useExperiments();
   const { pending, history } = useSignals();
   const {
     conversations,
@@ -169,6 +171,14 @@ export default function Copilot() {
       decidedBy: s.decidedBy,
     })),
     approvedStrategy: strategies.find((s) => s.status === "approved"),
+    experiments: {
+      running: expCounts.running + expCounts.queued,
+      needsReview: expCounts.needsReview,
+      copilotProposed: expCounts.copilotProposed,
+      autoResolved: expCounts.autoResolved,
+      pendingReview: expNeedsReview.slice(0, 3).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta, hypothesis: e.hypothesis })),
+      recentlyAccepted: expRecent.filter((e) => e.status === "accepted").slice(0, 5).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta })),
+    },
   });
 
   const send = async (text: string) => {
