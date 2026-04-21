@@ -8,6 +8,7 @@ import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
@@ -270,7 +271,7 @@ function GuardrailDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Utilization (0–1)"><Input type="number" step="0.01" min="0" max="1" value={utilization} onChange={(e) => setUtilization(e.target.value)} /></Field>
+            <Field label="Utilization (0–1)"><NumberStepper value={utilization} onChange={setUtilization} step={0.05} shiftMultiplier={2} min={0} max={1} precision={2} /></Field>
           </div>
         </div>
         <DialogFooter>

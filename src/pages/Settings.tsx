@@ -260,7 +260,7 @@ function NumField({ label, value, onChange }: { label: string; value: string; on
   return (
     <div className="space-y-1.5">
       <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>
-      <Input type="number" step="0.01" value={value} onChange={(e) => onChange(e.target.value)} />
+      <NumberStepper value={value} onChange={onChange} step={0.01} shiftMultiplier={10} precision={2} />
     </div>
   );
 }
