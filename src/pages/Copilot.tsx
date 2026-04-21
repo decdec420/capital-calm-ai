@@ -132,7 +132,20 @@ export default function Copilot() {
     liveTradingEnabled: system?.liveTradingEnabled,
     killSwitchEngaged: system?.killSwitchEngaged,
     account: account ? { equity: account.equity, balanceFloor: account.balanceFloor } : null,
-    regime,
+    engineSnapshot: snapshot
+      ? {
+          ranAt: snapshot.ranAt,
+          chosenSymbol: snapshot.chosenSymbol,
+          gateReasons: snapshot.gateReasons,
+          perSymbol: snapshot.perSymbol.map((p) => ({
+            symbol: p.symbol,
+            regime: p.regime,
+            setupScore: p.setupScore,
+            confidence: p.confidence,
+            chosen: p.chosen,
+          })),
+        }
+      : null,
     openPosition: open[0] ?? null,
     pendingSignal: activeSignal ?? null,
     recentClosed: closed.slice(0, 5).map((t) => ({ side: t.side, outcome: t.outcome, pnlPct: t.pnlPct })),
