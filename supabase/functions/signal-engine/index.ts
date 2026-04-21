@@ -188,26 +188,31 @@ async function buildPatternMemory(admin: any, userId: string) {
   return { totalClosed: closed.length, bySymbol, byRegime };
 }
 
-// Sweep stale pending signals → mark expired + log a journal skip.
+// Sweep stale pending signals → mark expired + log a journal skip + lifecycle.
 async function expirePendingSignals(admin: any, userId: string) {
   const nowIso = new Date().toISOString();
   const { data: stale } = await admin
     .from("trade_signals")
-    .select("id,symbol,side,proposed_entry,confidence")
+    .select("id,symbol,side,proposed_entry,confidence,lifecycle_transitions")
     .eq("user_id", userId)
     .eq("status", "pending")
     .lt("expires_at", nowIso);
   if (!stale || stale.length === 0) return 0;
-  await admin
-    .from("trade_signals")
-    .update({
-      status: "expired",
-      decided_by: "expired",
-      decision_reason: "TTL elapsed without decision",
-      decided_at: nowIso,
-    })
-    .in("id", stale.map((s: any) => s.id));
+  // Update each row individually so we can append to its lifecycle_transitions array.
   for (const s of stale) {
+    const prev = Array.isArray(s.lifecycle_transitions) ? s.lifecycle_transitions : [];
+    const next = [...prev, { phase: "expired", at: nowIso, by: "engine", reason: "TTL elapsed without decision" }];
+    await admin
+      .from("trade_signals")
+      .update({
+        status: "expired",
+        decided_by: "expired",
+        decision_reason: "TTL elapsed without decision",
+        decided_at: nowIso,
+        lifecycle_phase: "expired",
+        lifecycle_transitions: next,
+      })
+      .eq("id", s.id);
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "skip",
