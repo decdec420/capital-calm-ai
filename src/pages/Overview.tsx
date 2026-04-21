@@ -8,9 +8,12 @@ import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
+import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/MetricDrilldowns";
+import { AlertDetailSheet } from "@/components/trader/AlertDetailSheet";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
+  ArrowRight,
   DollarSign,
   Pause,
   Play,
@@ -33,7 +36,7 @@ import { computeRegime } from "@/lib/regime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
-import type { Regime } from "@/lib/domain-types";
+import type { Alert, Regime } from "@/lib/domain-types";
 
 export default function Overview() {
   const { data: account } = useAccountState();
