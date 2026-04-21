@@ -23,7 +23,7 @@ const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" 
 };
 
 export default function Learning() {
-  const { loading, create, setStatus, remove, promoteToStrategy, counts, needsReview, inFlight, recentlyAutoResolved } = useExperiments();
+  const { loading, create, setStatus, remove, promoteToStrategy, counts, needsReview, inFlight, accepted, recentlyAutoResolved } = useExperiments();
   const [newOpen, setNewOpen] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
 
@@ -117,6 +117,27 @@ export default function Learning() {
           <div className="divide-y divide-border">
             {inFlight.map((e) => (
               <ExperimentRow key={e.id} exp={e}
+                onRemove={() => remove(e.id).then(() => toast.success("Removed."))}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ACCEPTED — ready to ship */}
+      {accepted.length > 0 && (
+        <div className="panel">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-status-safe font-semibold">Accepted · ready to ship</span>
+              <StatusBadge tone="safe" size="sm">{accepted.length}</StatusBadge>
+            </div>
+            <span className="text-xs text-muted-foreground">Promote to spin up a candidate strategy version.</span>
+          </div>
+          <div className="divide-y divide-border">
+            {accepted.map((e) => (
+              <ExperimentRow key={e.id} exp={e}
+                onPromote={() => promoteToStrategy(e.id).then((v) => toast.success(`Promoted as candidate ${v}`)).catch((err) => toast.error(err.message))}
                 onRemove={() => remove(e.id).then(() => toast.success("Removed."))}
               />
             ))}

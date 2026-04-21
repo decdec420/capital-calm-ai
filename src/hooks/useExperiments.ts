@@ -149,10 +149,14 @@ export function useExperiments() {
 
   const needsReview = useMemo(() => experiments.filter((e) => e.needsReview), [experiments]);
   const inFlight = useMemo(() => experiments.filter((e) => e.status === "queued" || e.status === "running"), [experiments]);
+  const accepted = useMemo(
+    () => experiments.filter((e) => e.status === "accepted").slice(0, 20),
+    [experiments],
+  );
   const recentlyAutoResolved = useMemo(
     () => experiments.filter((e) => e.autoResolved && (e.status === "accepted" || e.status === "rejected")).slice(0, 20),
     [experiments],
   );
 
-  return { experiments, loading, create, setStatus, remove, refetch, promoteToStrategy, counts, needsReview, inFlight, recentlyAutoResolved };
+  return { experiments, loading, create, setStatus, remove, refetch, promoteToStrategy, counts, needsReview, inFlight, accepted, recentlyAutoResolved };
 }
