@@ -1,6 +1,7 @@
-import { Activity, BookOpen, Brain, LayoutDashboard, LineChart, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
+import { Activity, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useLocation } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
+import { toast } from "sonner";
 import {
   Sidebar,
   SidebarContent,
@@ -14,7 +15,9 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 const sections = [
   {
@@ -42,12 +45,26 @@ const sections = [
   },
 ];
 
-const settingsItem = { title: "Settings", url: "/settings", icon: Settings };
+const initialsFor = (name?: string | null, email?: string | null) => {
+  const source = (name || email || "OP").trim();
+  const parts = source.split(/[\s@._-]+/).filter(Boolean);
+  const initials = (parts[0]?.[0] ?? "O") + (parts[1]?.[0] ?? "");
+  return initials.toUpperCase().slice(0, 2);
+};
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const { user, profile, signOut } = useAuth();
+
+  const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
+  const initials = initialsFor(profile?.display_name, user?.email);
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out. Stay disciplined.");
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -65,73 +82,93 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
 
-      <SidebarContent className="px-1 py-2 flex flex-col h-full">
-        <div className="flex-1">
-          {sections.map((section) => (
-            <SidebarGroup key={section.label}>
-              {!collapsed && (
-                <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/60">
-                  {section.label}
-                </SidebarGroupLabel>
-              )}
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {section.items.map((item) => {
-                    const active = location.pathname === item.url;
-                    return (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton asChild isActive={active}>
-                          <NavLink
-                            to={item.url}
-                            end
-                            className={cn(
-                              "group flex items-center gap-2.5 rounded-md text-sm transition-colors",
-                              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                            )}
-                            activeClassName="bg-sidebar-accent text-primary font-medium border-l-2 border-primary -ml-px pl-[calc(0.5rem-1px)]"
-                          >
-                            <item.icon className="h-4 w-4 shrink-0" />
-                            {!collapsed && <span>{item.title}</span>}
-                          </NavLink>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          ))}
-        </div>
-
-        {/* Settings at the very bottom */}
-        <SidebarGroup className="mt-auto pt-4 border-t border-sidebar-border">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {(() => {
-                const active = location.pathname === settingsItem.url;
-                return (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton asChild isActive={active}>
-                      <NavLink
-                        to={settingsItem.url}
-                        end
-                        className={cn(
-                          "group flex items-center gap-2.5 rounded-md text-sm transition-colors",
-                          "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                        )}
-                        activeClassName="bg-sidebar-accent text-primary font-medium border-l-2 border-primary -ml-px pl-[calc(0.5rem-1px)]"
-                      >
-                        <settingsItem.icon className="h-4 w-4 shrink-0" />
-                        {!collapsed && <span>{settingsItem.title}</span>}
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })()}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+      <SidebarContent className="px-1 py-2">
+        {sections.map((section) => (
+          <SidebarGroup key={section.label}>
+            {!collapsed && (
+              <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/60">
+                {section.label}
+              </SidebarGroupLabel>
+            )}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {section.items.map((item) => {
+                  const active = location.pathname === item.url;
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton asChild isActive={active}>
+                        <NavLink
+                          to={item.url}
+                          end
+                          className={cn(
+                            "group flex items-center gap-2.5 rounded-md text-sm transition-colors",
+                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                          )}
+                          activeClassName="bg-sidebar-accent text-primary font-medium border-l-2 border-primary -ml-px pl-[calc(0.5rem-1px)]"
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          {!collapsed && <span>{item.title}</span>}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
+
+      {/* User shelf — avatar + name + email; popover with Settings & Sign out */}
+      <SidebarFooter className="border-t border-sidebar-border p-2">
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "w-full flex items-center gap-2.5 rounded-md p-1.5 text-left transition-colors",
+                "hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                collapsed && "justify-center",
+              )}
+              aria-label="Open user menu"
+            >
+              <div className="h-8 w-8 shrink-0 rounded-full bg-secondary border border-border flex items-center justify-center text-[11px] font-medium text-foreground">
+                {initials}
+              </div>
+              {!collapsed && (
+                <div className="flex-1 min-w-0 leading-tight">
+                  <div className="text-sm text-sidebar-foreground truncate">{displayName}</div>
+                  <div className="text-[10px] text-muted-foreground truncate">{user?.email}</div>
+                </div>
+              )}
+              {!collapsed && <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            side="right"
+            align="end"
+            className="w-56 p-1 bg-popover border-border"
+          >
+            <div className="px-2 py-1.5 border-b border-border mb-1">
+              <div className="text-sm text-foreground truncate">{displayName}</div>
+              <div className="text-[11px] text-muted-foreground truncate">{user?.email}</div>
+            </div>
+            <Link
+              to="/settings"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-foreground hover:bg-accent"
+            >
+              <Settings className="h-4 w-4" /> Settings
+            </Link>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4" /> Sign out
+            </button>
+          </PopoverContent>
+        </Popover>
+      </SidebarFooter>
     </Sidebar>
   );
 }
