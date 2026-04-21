@@ -1,4 +1,4 @@
-import { Bell, LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
+import { LogOut, ShieldAlert, Wifi, WifiOff } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -15,7 +15,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import type { SystemMode } from "@/lib/domain-types";
 import { useSystemState } from "@/hooks/useSystemState";
-import { useAlerts } from "@/hooks/useAlerts";
 
 const modeTone: Record<SystemMode, "neutral" | "candidate" | "accent" | "blocked"> = {
   research: "neutral",
@@ -41,7 +40,6 @@ const initialsFor = (name?: string | null, email?: string | null) => {
 export function TopBar() {
   const { user, profile, signOut } = useAuth();
   const { data: s } = useSystemState();
-  const { alerts } = useAlerts();
   const handleSignOut = async () => {
     await signOut();
     toast.success("Signed out. Stay disciplined.");
@@ -107,17 +105,6 @@ export function TopBar() {
           </StatusBadge>
         </Explain>
       )}
-
-      <button
-        type="button"
-        className="relative h-8 w-8 rounded-md hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-        aria-label="Alerts"
-      >
-        <Bell className="h-4 w-4" />
-        {alerts.length > 0 && (
-          <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
-        )}
-      </button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
