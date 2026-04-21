@@ -341,50 +341,51 @@ export default function Copilot() {
               <p className="text-xs text-muted-foreground italic">Loading thread…</p>
             </div>
           ) : (
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-center py-12">
-                <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
-                  <Sparkles className="h-5 w-5" />
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                  <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                    Live context (mode, regime, position, signals, autonomy) is auto-attached. Threads persist across refreshes.
+                  </p>
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
+                    {SUGGESTED.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => send(s)}
+                        className="text-left text-xs px-3 py-2.5 rounded-md border border-border bg-card hover:bg-accent hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                  Live context (mode, regime, position, signals, autonomy) is auto-attached.
-                </p>
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
-                  {SUGGESTED.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => send(s)}
-                      className="text-left text-xs px-3 py-2.5 rounded-md border border-border bg-card hover:bg-accent hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
+              )}
+              {messages.map((m) => (
+                <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                  <div
+                    className={cn(
+                      "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
+                      m.role === "user"
+                        ? "bg-primary/15 border border-primary/25 text-foreground"
+                        : "bg-secondary border border-border text-foreground",
+                    )}
+                  >
+                    {m.role === "assistant" ? (
+                      <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
+                        <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-            {messages.map((m, i) => (
-              <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
-                    m.role === "user"
-                      ? "bg-primary/15 border border-primary/25 text-foreground"
-                      : "bg-secondary border border-border text-foreground",
-                  )}
-                >
-                  {m.role === "assistant" ? (
-                    <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
-                      <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           <form
             onSubmit={(e) => {
