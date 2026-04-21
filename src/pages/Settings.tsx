@@ -7,6 +7,7 @@ import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AlertTriangle, Compass } from "lucide-react";
