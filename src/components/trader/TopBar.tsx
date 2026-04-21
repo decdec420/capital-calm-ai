@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "./StatusBadge";
 import { Explain } from "./Explain";
+import { ExplainModeToggle } from "./ExplainModeToggle";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -65,46 +66,30 @@ export function TopBar() {
             </StatusBadge>
           </Explain>
 
-          <Explain
-            inline
-            title="Bot status"
-            hint="Running = actively scanning + proposing. Paused = breathing, no new signals. Halted = kill-switch tripped, nothing moves."
-          >
-            <StatusBadge tone={s.bot === "running" ? "safe" : s.bot === "halted" ? "blocked" : "caution"} dot pulse={s.bot === "running"}>
-              bot {s.bot}
-            </StatusBadge>
-          </Explain>
+          <StatusBadge tone={s.bot === "running" ? "safe" : s.bot === "halted" ? "blocked" : "caution"} dot pulse={s.bot === "running"}>
+            bot {s.bot}
+          </StatusBadge>
 
-          <Explain
-            inline
-            title="Broker connection"
-            hint="Whether we have a healthy pipe to the broker for prices and (eventually) orders."
-          >
-            <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
-              {s.brokerConnection === "connected" ? (
-                <Wifi className="h-3.5 w-3.5 text-status-safe" />
-              ) : (
-                <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
-              )}
-              <span className="tabular capitalize">{s.brokerConnection}</span>
-            </div>
-          </Explain>
+          <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground">
+            {s.brokerConnection === "connected" ? (
+              <Wifi className="h-3.5 w-3.5 text-status-safe" />
+            ) : (
+              <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
+            )}
+            <span className="tabular capitalize">{s.brokerConnection}</span>
+          </div>
         </>
       )}
 
       <div className="flex-1" />
 
       {s?.killSwitchEngaged && (
-        <Explain
-          inline
-          title="Kill-switch engaged"
-          hint="The big red button is pressed. Bot is halted, no new orders. Disarm from Risk Center or Settings."
-        >
-          <StatusBadge tone="blocked" dot>
-            <ShieldAlert className="h-3 w-3" /> kill-switch
-          </StatusBadge>
-        </Explain>
+        <StatusBadge tone="blocked" dot>
+          <ShieldAlert className="h-3 w-3" /> kill-switch
+        </StatusBadge>
       )}
+
+      <ExplainModeToggle />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
