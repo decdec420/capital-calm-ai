@@ -166,27 +166,44 @@ export default function RiskCenter() {
         />
       ) : (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">All guardrails</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {guardrails.map((g) => (
-              <div key={g.id} className="relative group">
-                <button type="button" onClick={() => setEditing(g)} className="w-full text-left">
-                  <GuardrailRow guardrail={g} />
-                </button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-3 right-3 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    remove(g.id).then(() => toast.success("Guardrail removed."));
-                  }}
-                >
-                  <Trash2 className="h-3 w-3 text-muted-foreground" />
-                </Button>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              {filter === "all" ? "All guardrails" : `${filter} guardrails`} · {filtered.length}
+            </span>
+            {filter !== "all" && (
+              <button
+                type="button"
+                onClick={() => setFilter("all")}
+                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+              >
+                Clear filter <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
+          {filtered.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No guardrails match this filter.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filtered.map((g) => (
+                <div key={g.id} className="relative group">
+                  <button type="button" onClick={() => setEditing(g)} className="w-full text-left">
+                    <GuardrailRow guardrail={g} />
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-3 right-3 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(g.id).then(() => toast.success("Guardrail removed."));
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
