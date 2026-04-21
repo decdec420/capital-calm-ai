@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { TradeSignal, SignalStatus, SignalDecidedBy, TradeSide } from "@/lib/domain-types";
+import type {
+  TradeSignal,
+  SignalStatus,
+  SignalDecidedBy,
+  TradeSide,
+  SignalLifecyclePhase,
+  LifecycleTransition,
+} from "@/lib/domain-types";
 
 function mapRow(r: any): TradeSignal {
   return {
@@ -23,6 +30,12 @@ function mapRow(r: any): TradeSignal {
     decidedBy: (r.decided_by ?? null) as SignalDecidedBy | null,
     decisionReason: r.decision_reason ?? null,
     executedTradeId: r.executed_trade_id ?? null,
+    strategyId: r.strategy_id ?? null,
+    strategyVersion: r.strategy_version ?? null,
+    lifecyclePhase: (r.lifecycle_phase ?? "proposed") as SignalLifecyclePhase,
+    lifecycleTransitions: Array.isArray(r.lifecycle_transitions)
+      ? (r.lifecycle_transitions as LifecycleTransition[])
+      : [],
     expiresAt: r.expires_at,
     decidedAt: r.decided_at,
     createdAt: r.created_at,

@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Trade, TradeSide, TradeStatus, TradeOutcome } from "@/lib/domain-types";
+import type {
+  Trade,
+  TradeSide,
+  TradeStatus,
+  TradeOutcome,
+  TradeLifecyclePhase,
+  LifecycleTransition,
+} from "@/lib/domain-types";
 
 function mapRow(r: any): Trade {
   return {
@@ -25,6 +32,11 @@ function mapRow(r: any): Trade {
     outcome: r.outcome as TradeOutcome | null,
     reasonTags: r.reason_tags ?? [],
     strategyVersion: r.strategy_version ?? "",
+    strategyId: r.strategy_id ?? null,
+    lifecyclePhase: (r.lifecycle_phase ?? "entered") as TradeLifecyclePhase,
+    lifecycleTransitions: Array.isArray(r.lifecycle_transitions)
+      ? (r.lifecycle_transitions as LifecycleTransition[])
+      : [],
     notes: r.notes,
     openedAt: r.opened_at,
     closedAt: r.closed_at,

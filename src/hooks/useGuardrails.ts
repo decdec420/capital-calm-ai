@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { RiskGuardrail, RiskLevel } from "@/lib/domain-types";
+import type { RiskGuardrail, RiskLevel, GuardrailType } from "@/lib/domain-types";
 
 function mapRow(r: any): RiskGuardrail {
   return {
@@ -13,6 +13,7 @@ function mapRow(r: any): RiskGuardrail {
     level: r.level as RiskLevel,
     utilization: Number(r.utilization),
     sortOrder: r.sort_order,
+    guardrailType: (r.guardrail_type ?? "generic") as GuardrailType,
   };
 }
 
