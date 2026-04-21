@@ -221,6 +221,7 @@ export interface RiskGuardrail {
   level: RiskLevel;
   utilization: number; // 0..1
   sortOrder: number;
+  guardrailType: GuardrailType;
 }
 
 export interface Experiment {
@@ -283,6 +284,10 @@ export interface TradeSignal {
   decidedBy: SignalDecidedBy | null;
   decisionReason: string | null;
   executedTradeId: string | null;
+  strategyId: string | null;
+  strategyVersion: string | null;
+  lifecyclePhase: SignalLifecyclePhase;
+  lifecycleTransitions: LifecycleTransition[];
   expiresAt: string;
   decidedAt: string | null;
   createdAt: string;
