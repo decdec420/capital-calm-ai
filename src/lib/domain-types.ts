@@ -21,6 +21,92 @@ export type TradePhase = "candidate" | "entered" | "monitored" | "exited" | "arc
 
 export type AlertSeverity = "info" | "warning" | "critical";
 
+// Lifecycle phases — backend is source of truth. Two enums, one per entity.
+export type SignalLifecyclePhase =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "expired"
+  | "executed";
+
+export type TradeLifecyclePhase =
+  | "entered"
+  | "monitored"
+  | "tp1_hit"
+  | "exited"
+  | "archived";
+
+export interface LifecycleTransition {
+  phase: string;
+  at: string;
+  by?: string;
+  reason?: string;
+  meta?: Record<string, unknown>;
+}
+
+// Typed guardrail kinds (matches backend `guardrail_type` column).
+export type GuardrailType =
+  | "size_cap"
+  | "daily_loss"
+  | "trade_count"
+  | "balance_floor"
+  | "spread"
+  | "stale_data"
+  | "drawdown"
+  | "latency"
+  | "generic";
+
+// Structured gate reason emitted by the engine. UI switches on `code` for
+// icon + tone; `message` is the operator-readable line.
+export type GateSeverity = "halt" | "block" | "skip";
+
+export type GateReasonCode =
+  | "KILL_SWITCH"
+  | "BOT_PAUSED"
+  | "DAILY_LOSS_CAP"
+  | "TRADE_COUNT_CAP"
+  | "BALANCE_FLOOR"
+  | "OPEN_POSITION"
+  | "PENDING_SIGNAL"
+  | "CHOP_REGIME"
+  | "RANGE_REGIME"
+  | "LOW_SETUP_SCORE"
+  | "STALE_DATA"
+  | "AI_SKIP"
+  | "AI_ERROR"
+  | "INSERT_ERROR"
+  | "NO_SYSTEM_STATE"
+  | "COOLDOWN"
+  | string;
+
+export interface GateReason {
+  code: GateReasonCode;
+  severity: GateSeverity;
+  message: string;
+  meta?: { symbol?: string; [k: string]: unknown };
+}
+
+// Per-symbol snapshot row written by the engine on every tick.
+export interface SnapshotPerSymbol {
+  symbol: string;
+  regime: Regime | "unknown";
+  confidence: number;
+  setupScore: number;
+  volatility: VolatilityState | string;
+  todScore: number;
+  lastPrice: number;
+  pullback: boolean;
+  chosen: boolean;
+  lockGate: GateReason | null;
+}
+
+export interface EngineSnapshot {
+  ranAt: string;
+  gateReasons: GateReason[];
+  perSymbol: SnapshotPerSymbol[];
+  chosenSymbol: string | null;
+}
+
 export type JournalKind = "research" | "trade" | "learning" | "skip" | "daily" | "postmortem";
 
 export type ExperimentStatus = "queued" | "running" | "accepted" | "rejected";
@@ -37,6 +123,7 @@ export interface SystemState {
   lastHeartbeat: string;
   latencyMs: number;
   autonomyLevel: "manual" | "assisted" | "autonomous";
+  lastEngineSnapshot: EngineSnapshot | null;
 }
 
 export interface AccountState {
