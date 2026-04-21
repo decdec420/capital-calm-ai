@@ -168,6 +168,9 @@ export interface Trade {
   outcome: TradeOutcome | null;
   reasonTags: string[];
   strategyVersion: string;
+  strategyId: string | null;
+  lifecyclePhase: TradeLifecyclePhase;
+  lifecycleTransitions: LifecycleTransition[];
   notes: string | null;
   openedAt: string;
   closedAt: string | null;
