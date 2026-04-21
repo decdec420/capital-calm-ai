@@ -14,12 +14,12 @@ import { Brain, Check, ChevronDown, FlaskConical, MoreHorizontal, Plus, Sparkles
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
-const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" | "blocked" | "warning"> = {
+const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" | "blocked" | "caution"> = {
   queued: "neutral",
   running: "candidate",
   accepted: "safe",
   rejected: "blocked",
-  needs_review: "warning",
+  needs_review: "caution",
 };
 
 export default function Learning() {
