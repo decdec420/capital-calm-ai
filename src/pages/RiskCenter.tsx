@@ -76,7 +76,15 @@ export default function RiskCenter() {
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="panel p-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setFilter("all")}
+          aria-pressed={filter === "all"}
+          className={cn(
+            "panel p-4 flex items-center gap-3 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            filter === "all" && "border-primary/60 ring-1 ring-primary/30",
+          )}
+        >
           <div className={`h-10 w-10 rounded-md flex items-center justify-center ${blocked > 0 ? "bg-status-blocked/15 text-status-blocked" : "bg-status-safe/15 text-status-safe"}`}>
             {blocked > 0 ? <ShieldAlert className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />}
           </div>
@@ -86,15 +94,41 @@ export default function RiskCenter() {
               {blocked > 0 ? "Active blockers" : caution > 0 ? "Watch close" : "Capital protected"}
             </div>
           </div>
-        </div>
-        <div className="panel p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter(filter === "blocked" ? "all" : "blocked")}
+          aria-pressed={filter === "blocked"}
+          disabled={blocked === 0}
+          className={cn(
+            "panel p-4 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+            "hover:border-status-blocked/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-blocked/40",
+            filter === "blocked" && "border-status-blocked/60 ring-1 ring-status-blocked/40",
+          )}
+        >
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Blocked checks</div>
           <div className="text-2xl font-semibold tabular text-status-blocked">{blocked}</div>
-        </div>
-        <div className="panel p-4">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mt-1">
+            {filter === "blocked" ? "filter active · click to clear" : blocked > 0 ? "click to filter" : "—"}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter(filter === "caution" ? "all" : "caution")}
+          aria-pressed={filter === "caution"}
+          disabled={caution === 0}
+          className={cn(
+            "panel p-4 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+            "hover:border-status-caution/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-caution/40",
+            filter === "caution" && "border-status-caution/60 ring-1 ring-status-caution/40",
+          )}
+        >
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Caution checks</div>
           <div className="text-2xl font-semibold tabular text-status-caution">{caution}</div>
-        </div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mt-1">
+            {filter === "caution" ? "filter active · click to clear" : caution > 0 ? "click to filter" : "—"}
+          </div>
+        </button>
       </div>
 
       {/* Live engine gates from the last tick — not user-defined guardrails. */}
