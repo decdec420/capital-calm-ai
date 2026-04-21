@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { NumberStepper } from "@/components/trader/NumberStepper";
 import { useTrades, type NewTradeInput } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
 import { useCandles } from "@/hooks/useCandles";
