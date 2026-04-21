@@ -124,6 +124,7 @@ export type Database = {
           created_at: string
           current_value: string
           description: string
+          guardrail_type: string
           id: string
           label: string
           level: string
@@ -137,6 +138,7 @@ export type Database = {
           created_at?: string
           current_value?: string
           description?: string
+          guardrail_type?: string
           id?: string
           label: string
           level?: string
@@ -150,6 +152,7 @@ export type Database = {
           created_at?: string
           current_value?: string
           description?: string
+          guardrail_type?: string
           id?: string
           label?: string
           level?: string
@@ -275,6 +278,7 @@ export type Database = {
           data_feed: string
           id: string
           kill_switch_engaged: boolean
+          last_engine_snapshot: Json
           last_heartbeat: string
           latency_ms: number
           live_trading_enabled: boolean
@@ -291,6 +295,7 @@ export type Database = {
           data_feed?: string
           id?: string
           kill_switch_engaged?: boolean
+          last_engine_snapshot?: Json
           last_heartbeat?: string
           latency_ms?: number
           live_trading_enabled?: boolean
@@ -307,6 +312,7 @@ export type Database = {
           data_feed?: string
           id?: string
           kill_switch_engaged?: boolean
+          last_engine_snapshot?: Json
           last_heartbeat?: string
           latency_ms?: number
           live_trading_enabled?: boolean
@@ -330,6 +336,8 @@ export type Database = {
           executed_trade_id: string | null
           expires_at: string
           id: string
+          lifecycle_phase: string
+          lifecycle_transitions: Json
           proposed_entry: number
           proposed_stop: number | null
           proposed_target: number | null
@@ -339,6 +347,7 @@ export type Database = {
           size_pct: number
           size_usd: number
           status: string
+          strategy_id: string | null
           symbol: string
           updated_at: string
           user_id: string
@@ -355,6 +364,8 @@ export type Database = {
           executed_trade_id?: string | null
           expires_at?: string
           id?: string
+          lifecycle_phase?: string
+          lifecycle_transitions?: Json
           proposed_entry: number
           proposed_stop?: number | null
           proposed_target?: number | null
@@ -364,6 +375,7 @@ export type Database = {
           size_pct?: number
           size_usd?: number
           status?: string
+          strategy_id?: string | null
           symbol?: string
           updated_at?: string
           user_id: string
@@ -380,6 +392,8 @@ export type Database = {
           executed_trade_id?: string | null
           expires_at?: string
           id?: string
+          lifecycle_phase?: string
+          lifecycle_transitions?: Json
           proposed_entry?: number
           proposed_stop?: number | null
           proposed_target?: number | null
@@ -389,6 +403,7 @@ export type Database = {
           size_pct?: number
           size_usd?: number
           status?: string
+          strategy_id?: string | null
           symbol?: string
           updated_at?: string
           user_id?: string
@@ -403,6 +418,8 @@ export type Database = {
           entry_price: number
           exit_price: number | null
           id: string
+          lifecycle_phase: string
+          lifecycle_transitions: Json
           notes: string | null
           opened_at: string
           original_size: number | null
@@ -414,6 +431,7 @@ export type Database = {
           size: number
           status: string
           stop_loss: number | null
+          strategy_id: string | null
           strategy_version: string
           symbol: string
           take_profit: number | null
@@ -431,6 +449,8 @@ export type Database = {
           entry_price: number
           exit_price?: number | null
           id?: string
+          lifecycle_phase?: string
+          lifecycle_transitions?: Json
           notes?: string | null
           opened_at?: string
           original_size?: number | null
@@ -442,6 +462,7 @@ export type Database = {
           size: number
           status?: string
           stop_loss?: number | null
+          strategy_id?: string | null
           strategy_version?: string
           symbol: string
           take_profit?: number | null
@@ -459,6 +480,8 @@ export type Database = {
           entry_price?: number
           exit_price?: number | null
           id?: string
+          lifecycle_phase?: string
+          lifecycle_transitions?: Json
           notes?: string | null
           opened_at?: string
           original_size?: number | null
@@ -470,6 +493,7 @@ export type Database = {
           size?: number
           status?: string
           stop_loss?: number | null
+          strategy_id?: string | null
           strategy_version?: string
           symbol?: string
           take_profit?: number | null
