@@ -225,6 +225,26 @@ export default function Overview() {
         </Link>
       )}
 
+      {/* Why isn't the bot trading? — surfaced from the last engine snapshot */}
+      {!activeSignal && lastGateReasons.length > 0 && (
+        <div className="panel p-4 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Why the engine is sitting on hands
+            </span>
+            {snapshot && (
+              <span className="text-[10px] text-muted-foreground tabular">
+                last tick {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
+          <GateReasonList reasons={lastGateReasons} max={3} />
+          <Link to="/copilot" className="text-xs text-primary hover:underline inline-block">
+            Open Copilot to act →
+          </Link>
+        </div>
+      )}
+
       {/* Metric grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <MetricCard
