@@ -40,13 +40,9 @@ const sections = [
       { title: "AI Copilot", url: "/copilot", icon: Sparkles },
     ],
   },
-  {
-    label: "System",
-    items: [
-      { title: "Settings", url: "/settings", icon: Settings },
-    ],
-  },
 ];
+
+const settingsItem = { title: "Settings", url: "/settings", icon: Settings };
 
 export function AppSidebar() {
   const { state } = useSidebar();
