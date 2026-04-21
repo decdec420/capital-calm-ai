@@ -318,9 +318,29 @@ export default function Copilot() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* CONVERSATION SIDEBAR — your thread history, persistent across refreshes */}
+        <div className="lg:col-span-1 lg:row-span-2" style={{ minHeight: "55vh" }}>
+          <ConversationSidebar
+            conversations={conversations}
+            activeId={activeId}
+            onSelect={setActiveId}
+            onNew={async () => {
+              await createConversation();
+            }}
+            onRename={renameConversation}
+            onDelete={deleteConversation}
+            loading={convLoading}
+          />
+        </div>
+
         {/* CHAT */}
         <div className="lg:col-span-3 panel flex flex-col" style={{ minHeight: "55vh" }}>
+          {loadingMessages && messages.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-xs text-muted-foreground italic">Loading thread…</p>
+            </div>
+          ) : (
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center py-12">
