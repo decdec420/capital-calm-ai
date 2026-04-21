@@ -475,6 +475,29 @@ export default function Overview() {
           }
         }}
       />
+
+      <MetricDrilldowns
+        open={drilldown}
+        onOpenChange={setDrilldown}
+        account={account ?? null}
+        system={system ?? null}
+        open_={open}
+        closed={closed}
+        closedToday={closedToday}
+        realizedToday={realizedToday}
+        unrealizedToday={unrealizedToday}
+        dailyPnl={dailyPnl}
+        dailyPnlPct={dailyPnlPct}
+        lossToday={lossToday}
+        lossVsCap={lossVsCap}
+        floorDistance={floorDistance}
+      />
+
+      <AlertDetailSheet
+        alert={activeAlert}
+        onClose={() => setActiveAlert(null)}
+        onDismiss={dismiss}
+      />
     </div>
   );
 }
