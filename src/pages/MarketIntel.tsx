@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { PriceChart } from "@/components/trader/PriceChart";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
@@ -9,6 +11,18 @@ import { JournalEventCard } from "@/components/trader/JournalEventCard";
 import { useCandles } from "@/hooks/useCandles";
 import { useJournals } from "@/hooks/useJournals";
 import { computeRegime } from "@/lib/regime";
+
+// Maps a no-trade reason chip to the page that owns the underlying threshold.
+function noTradeReasonLink(reason: string): { to: string; hint: string } {
+  const r = reason.toLowerCase();
+  if (/setup|score|threshold/.test(r)) return { to: "/risk", hint: "tune in Risk Center" };
+  if (/spread/.test(r)) return { to: "/risk", hint: "spread guardrail" };
+  if (/vol|volatility/.test(r)) return { to: "/risk", hint: "vol guardrail" };
+  if (/regime|chop|range|trend/.test(r)) return { to: "/strategy", hint: "regime params" };
+  if (/tod|time/.test(r)) return { to: "/settings", hint: "time-of-day window" };
+  if (/stale|data|feed/.test(r)) return { to: "/settings", hint: "data feed" };
+  return { to: "/risk", hint: "see guardrails" };
+}
 
 export default function MarketIntel() {
   const { candles, loading } = useCandles();
