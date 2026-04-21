@@ -1,95 +1,142 @@
 
 
-## UX audit — glaring issues & where to fix them
+## Make experiments AI-run, not user-run
 
-I went through Overview, Trades, Risk Center, Market Intel, Journals, the TopBar and the sidebar with a designer's eye. Here's the honest list, ranked by how loud the smell is.
+Right now Experiments is a glorified spreadsheet — you type the parameter, you compute the delta, you flip the status. The Copilot is silent throughout. Let's flip it so the AI proposes, runs, and reports — the operator just reviews.
 
-### Top offenders (the ones you actually feel)
+### The new model
 
-**1. Metric cards on Overview are dead-ends.** Equity, Daily PnL, Trades today, Loss vs cap, Floor distance, Live mode — every one of these begs for a click. Today they do nothing. You stare at "+$142.10" and there's no way to ask "from what?". This is the #1 thing dragging the product backwards.
-
-**2. The "Open position" card on Overview duplicates Trades and isn't clickable.** It says "Open trade →" in tiny text in the corner. The whole card should be the link, or better, expand inline.
-
-**3. TopBar status chips are read-only labels for things that have full pages behind them.** "bot running", "kill-switch", broker connection — these should be entry points, not stickers.
-
-**4. Pending signal banner is the only thing on the page that links well.** Use it as the pattern for everything else.
-
-**5. Recent alerts** dismiss on hover-X only, no "view all" link, no severity filter. Alerts that matter (blocked / critical) look the same as info.
-
-**6. Risk Center has three summary tiles** (Overall posture / Blocked / Caution) that aren't filters. Click "Blocked: 2" → should filter the grid to those two. Right now nothing happens.
-
-**7. Market Intel is an island.** "TOD score 72%" and "Setup score 0.41" — no way to jump to the journal entry, signal, or setting that produced the threshold.
-
-**8. Sidebar Settings** is now alone at the bottom but visually weak — no avatar/email next to it. Settings + sign-out + theme toggle is a typical "user shelf"; right now sign-out lives in the TopBar avatar dropdown and Settings is in the sidebar. Pick one home.
-
-### What I'd actually build (in order)
-
-#### A. Make the Overview metrics clickable — the big win
-Each `MetricCard` becomes optionally interactive, opening a right-side `Sheet` (matching the Trade detail pattern already in `Trades.tsx`) with a real breakdown.
-
-| Card | Click reveals |
-|---|---|
-| Equity | Sparkline of equity over last 30 days, cash vs open positions split, link to Trades |
-| Daily PnL | Realized vs unrealized split, list of today's closed trades w/ PnL, biggest winner/loser |
-| Trades today | Mini list of today's trades (open + closed), link to Trades page |
-| Loss vs cap | Burn-down bar, today's losing trades, link to Risk Center loss-cap guardrail |
-| Floor distance | Equity vs floor visualisation, link to Risk Center |
-| Live mode | Direct link to Settings → Mode controls + a one-line "what would change" |
-
-Add a subtle affordance (cursor + tiny `↗` icon on hover) so it's discoverable without being noisy.
-
-#### B. Wire up Overview's "Open position" panel
-Whole card becomes a link to `/trades`. Drop the "Open trade →" pill. Add a "Close at market" button inline so the most common action lives where the eye already is.
-
-#### C. TopBar chips become entry points
-- `bot running/halted` chip → links to Risk Center (where the kill-switch lives)
-- broker connection → links to Settings → Connections
-- `kill-switch` chip (when engaged) → links to Risk Center, scrolled to kill-switch section
-
-These get a hover state (`hover:bg-accent`) so they read as buttons.
-
-#### D. Risk Center summary tiles become filters
-Click "Blocked: 2" → grid filters to blocked guardrails, tile gets a selected state, a small "Clear filter" pill appears. Same for Caution and Overall.
-
-#### E. Recent alerts panel upgrades
-- Whole row clickable → opens a side-sheet with full message, timestamp, source, and (where available) a deep-link (e.g. "guardrail tripped" → Risk Center, "trade closed" → that trade)
-- Header gets a small severity dot summary: `2 critical · 1 warning`
-- "View all" link at the bottom going to a dedicated alerts feed (or Journals filtered by `kind=alert` if we don't want a new page)
-
-#### F. Market Intel cross-links
-- "No-trade reasons" chips become links to the relevant Risk Center guardrail or Settings threshold
-- Regime card gets a "View past regime journal entries →" link
-- Research/skip entries on this page already use `JournalEventCard` — make titles clickable to the Journals page filtered to that entry
-
-#### G. Sidebar bottom: real user shelf
-Replace the lone Settings link with a small block:
 ```text
-┌──────────────────────────┐
-│ [AB]  Alex Brown      ⚙  │  ← avatar + name + settings cog
-│       alex@acme.com      │
-└──────────────────────────┘
+                    ┌──────────────────────────────────┐
+ Copilot tick  ───▶ │ propose-experiment edge function │
+ (cron, hourly)     │  · scans recent trades + regime  │
+                    │  · picks ONE param to test       │
+                    │  · writes row: status=queued     │
+                    └─────────────┬────────────────────┘
+                                  │
+                    ┌─────────────▼──────────────────┐
+ run-experiment  ◀──┤ pg_cron picks queued rows      │
+ edge function      │  · pulls candles, runs backtest│
+                    │  · fills before/after/delta    │
+                    │  · status=accepted|rejected    │
+                    │  · status=needs_review (close) │
+                    └─────────────┬──────────────────┘
+                                  │
+                    ┌─────────────▼──────────────────┐
+ Operator UI    ◀───┤ Copilot weekly digest          │
+ (only when         │  · "I tested 4 things this wk" │
+  attention needed) │  · 1 needs your call           │
+                    └────────────────────────────────┘
 ```
-Click anywhere → opens a popover with: Settings, Theme, Sign out. Removes the duplication between TopBar avatar dropdown and sidebar Settings. Collapsed sidebar shows just the avatar.
 
-### Out of scope for this round (call out, don't build yet)
-- A proper "Equity over time" chart needs historical snapshots we may not be storing — sparkline can use whatever we have, real chart is a follow-up
-- Command palette (Cmd+K) — natural next step after this, but separate
-- Mobile bottom-nav — Overview is desktop-first today and this audit kept it that way
+Three moving parts: a **proposer**, a **runner**, and a **digest** the user sees. The first two are silent.
 
-### Technical notes
-- Reuse the existing `Sheet` component from `src/components/ui/sheet.tsx` (already used in Trades) for all the metric drilldowns — keeps the visual language consistent
-- Extend `MetricCard` with an optional `onClick` + `href` prop; render a button/Link wrapper only when one is supplied so non-interactive cards stay non-interactive
-- For TopBar chips, wrap `StatusBadge` in `<Link>` and add `hover:opacity-80 transition-opacity` — no new component needed
-- Risk Center filter state lives in the page component; tiles toggle a `filter: 'all' | 'blocked' | 'caution'` local state
+### What changes for the user
 
-### Suggested execution order (one PR each, low risk)
-1. MetricCard becomes clickable + Equity & Daily PnL drilldown sheets (highest impact, biggest "ahh")
-2. TopBar chips → links + Open position card → link
-3. Recent alerts → clickable rows + view-all
-4. Risk Center summary tiles → filters
-5. Sidebar user shelf
-6. Market Intel cross-links
-7. Remaining metric drilldowns (Trades today, Loss vs cap, Floor distance, Live mode)
+**Learning page becomes a digest, not a workbench.** No "Queue experiment" dialog up top. Instead:
 
-Ship in that order and the product feels markedly more "alive" after step 1 alone.
+- **Hero card**: *"Copilot is running 3 experiments in the background. 1 needs your review."*
+- **"Needs review" lane** (only shown when non-empty) — significant deltas where stats are borderline; user clicks Accept / Reject / Promote-to-strategy.
+- **"Recently auto-resolved" lane** — collapsed by default. Clear winners auto-accepted, clear losers auto-rejected. Two-line summary each. Click to expand and see backtest detail.
+- **Copilot's reasoning** — every experiment row gets a "Why did Copilot try this?" expander showing the AI's hypothesis, the evidence it pulled from recent trades, and the backtest result.
+
+The **manual "Queue experiment" button moves to a kebab menu** for power users who want to suggest one — but it's no longer the default action.
+
+### What changes under the hood
+
+#### 1. `experiments` table — small additions
+```sql
+ALTER TABLE experiments
+  ADD COLUMN proposed_by text NOT NULL DEFAULT 'user',  -- 'user' | 'copilot'
+  ADD COLUMN hypothesis text,                            -- AI's reasoning
+  ADD COLUMN backtest_result jsonb,                      -- full BacktestResult
+  ADD COLUMN strategy_id uuid,                           -- which strategy it targets
+  ADD COLUMN auto_resolved boolean NOT NULL DEFAULT false,
+  ADD COLUMN needs_review boolean NOT NULL DEFAULT false;
+```
+Add `'needs_review'` as a valid `status` value alongside the existing four.
+
+#### 2. New edge function: `propose-experiment`
+- Reads: approved strategy + last 30 days of trades + recent gate-reasons + regime history
+- Calls Lovable AI (`google/gemini-3-flash-preview`) with a tool-call schema asking for: `{ parameter, before, after, hypothesis, expected_effect }`
+- Writes one `experiments` row with `proposed_by='copilot'`, `status='queued'`
+- Idempotent: skips if there are already ≥2 queued copilot experiments for this user
+
+#### 3. New edge function: `run-experiment`
+- Picks oldest `queued` experiment row
+- Pulls Coinbase candles (reuses the fetch from `lib/backtest.ts`, ported to Deno — or we lift the pure logic to a shared helper)
+- Runs backtest with **before** params → baseline metrics
+- Runs backtest with **after** params → candidate metrics
+- Computes delta + a simple significance check: trade count ≥ 30, expectancy delta > 1 stdev
+- Decision tree:
+  - Clear improvement → `status='accepted'`, `auto_resolved=true`
+  - Clear regression → `status='rejected'`, `auto_resolved=true`
+  - Borderline / interesting → `status='needs_review'`, `needs_review=true` → fires an alert
+- Writes `backtest_result` jsonb so the UI can render the full breakdown
+
+#### 4. Schedule both with pg_cron
+- `propose-experiment`: every 6h
+- `run-experiment`: every 15m (drains the queue)
+
+Both use the existing `signal_engine_cron_token` pattern from the vault.
+
+#### 5. Copilot context awareness
+Extend the `buildContext()` payload in `Copilot.tsx` with:
+```ts
+experiments: {
+  running: count,
+  needsReview: count,
+  recentlyAccepted: [{ parameter, delta }, ...],
+}
+```
+So when you ask the Copilot *"what have you been testing?"* it actually knows.
+
+#### 6. New "Promote to strategy" action
+On any `accepted` experiment, a button creates a new `strategies` row (status `candidate`) with the **after** params copied in. Closes the loop: idea → test → ship.
+
+### What the user actually sees on the Learning page
+
+```text
+┌────────────────────────────────────────────────────────┐
+│  Copilot R&D                          ⓘ how this works │
+│                                                        │
+│  Running 3 · 1 needs your call · 12 auto-resolved this │
+│  week (8 rejected, 4 accepted)                         │
+└────────────────────────────────────────────────────────┘
+
+┌─ NEEDS REVIEW ─────────────────────────────────────────┐
+│ ► Tighten stop_atr_mult 1.5 → 1.3                      │
+│   Win rate +4%, expectancy −0.08R · borderline         │
+│   Why Copilot tried this · Accept · Reject · Promote   │
+└────────────────────────────────────────────────────────┘
+
+┌─ RECENTLY AUTO-RESOLVED  (click to expand)  ────────  ▼│
+└────────────────────────────────────────────────────────┘
+
+[ ⋯ menu: Suggest experiment manually ]
+```
+
+### Out of scope (call out, build later)
+- Forward-testing in paper mode (after backtest passes, run the param in paper for N days)
+- Multi-parameter / grid search experiments — start with one knob at a time
+- A dedicated Copilot "research log" feed (could fold into Journals with `kind=research`)
+
+### Files touched
+- New migration: `experiments` columns + cron schedule
+- New: `supabase/functions/propose-experiment/index.ts`
+- New: `supabase/functions/run-experiment/index.ts`
+- New: `src/lib/backtest-shared.ts` (lift pure backtest logic so Deno can use it; existing `lib/backtest.ts` re-exports for client use)
+- Edit: `src/hooks/useExperiments.ts` (add `needsReview`, `runningByCopilot`, `promoteToStrategy`)
+- Edit: `src/pages/Learning.tsx` (rewrite as digest)
+- Edit: `supabase/functions/copilot-chat/index.ts` (accept experiments context)
+- Edit: `src/pages/Copilot.tsx` (attach experiments context)
+- Edit: `src/lib/domain-types.ts` (`ExperimentStatus` += `needs_review`, new fields)
+
+### Build order (one PR each)
+1. Migration + extend `useExperiments` + rewrite Learning page as digest reading existing data (UI lands first, even with no copilot rows yet)
+2. `run-experiment` function + pg_cron — drains any manually-queued rows automatically
+3. `propose-experiment` function + pg_cron — Copilot starts seeding the queue
+4. Copilot context wiring + "Promote to strategy" button — closes the loop
+
+After step 1 the page already feels different (read-only digest). After step 3 the AI is genuinely doing R&D in the background.
 
