@@ -51,7 +51,15 @@ export default function MarketIntel() {
         </div>
         <div className="space-y-4">
           <div className="panel p-4 space-y-3">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Regime classification</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Regime classification</span>
+              <Link
+                to="/journals"
+                className="text-[11px] text-primary hover:underline inline-flex items-center gap-0.5"
+              >
+                regime journals <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
               <StatusBadge tone="neutral" size="sm">vol {regime.volatility}</StatusBadge>
@@ -71,13 +79,18 @@ export default function MarketIntel() {
               <p className="text-xs text-status-safe italic">All clear — setup score crosses threshold.</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {regime.noTradeReasons.map((r) => (
-                  <ReasonChip key={r} label={r} tone="caution" />
-                ))}
+                {regime.noTradeReasons.map((r) => {
+                  const link = noTradeReasonLink(r);
+                  return (
+                    <Link key={r} to={link.to} title={link.hint} className="hover:opacity-80 transition-opacity">
+                      <ReasonChip label={r} tone="caution" />
+                    </Link>
+                  );
+                })}
               </div>
             )}
             <p className="text-xs text-muted-foreground italic pt-2">
-              No-trade is a valid outcome. The bot will not force entries.
+              No-trade is a valid outcome. The bot will not force entries. Click a reason to tune it.
             </p>
           </div>
         </div>
@@ -98,13 +111,20 @@ export default function MarketIntel() {
       </div>
 
       <div>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">Research feed</div>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Research feed</span>
+          <Link to="/journals" className="text-[11px] text-primary hover:underline inline-flex items-center gap-0.5">
+            All journals <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
         {research.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No research notes yet. Drop one from the Journals page.</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {research.map((e) => (
-              <JournalEventCard key={e.id} entry={e} />
+              <Link key={e.id} to="/journals" className="block hover:opacity-90 transition-opacity">
+                <JournalEventCard entry={e} />
+              </Link>
             ))}
           </div>
         )}
