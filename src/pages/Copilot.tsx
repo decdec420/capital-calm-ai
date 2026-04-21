@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +9,7 @@ import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
 import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
+import { ConversationSidebar } from "@/components/trader/ConversationSidebar";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,11 +18,10 @@ import { useAccountState } from "@/hooks/useAccountState";
 import { useTrades } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
 import { useSignals } from "@/hooks/useSignals";
+import { useConversations } from "@/hooks/useConversations";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
-
-type Msg = { role: "user" | "assistant"; content: string };
 
 const SUGGESTED = [
   "What's the current regime telling me?",
@@ -31,7 +31,6 @@ const SUGGESTED = [
 ];
 
 export default function Copilot() {
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
@@ -42,6 +41,20 @@ export default function Copilot() {
   const { open, closed } = useTrades();
   const { strategies } = useStrategies();
   const { pending, history } = useSignals();
+  const {
+    conversations,
+    activeId,
+    setActiveId,
+    messages,
+    loading: convLoading,
+    loadingMessages,
+    createConversation,
+    renameConversation,
+    deleteConversation,
+    appendLocalMessage,
+    updateLastAssistant,
+    reloadActiveMessages,
+  } = useConversations();
   const snapshot = system?.lastEngineSnapshot ?? null;
   const chosenSym = snapshot?.chosenSymbol ?? null;
   const chosenRow =
