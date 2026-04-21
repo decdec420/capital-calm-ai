@@ -324,7 +324,11 @@ export default function Overview() {
           />
 
           {openPosition && (
-            <div className="panel p-4 space-y-3">
+            <Link
+              to="/trades"
+              className="panel p-4 space-y-3 block group hover:border-primary/40 transition-colors"
+              aria-label="Open position — view in Trades"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Open position</span>
@@ -332,9 +336,9 @@ export default function Overview() {
                     monitoring
                   </StatusBadge>
                 </div>
-                <Link to="/trades" className="text-xs text-primary hover:underline">
-                  Open trade →
-                </Link>
+                <span className="text-xs text-primary inline-flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
+                  Open in Trades <ArrowRight className="h-3 w-3" />
+                </span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <PosCell label="Symbol" value={openPosition.symbol} />
@@ -343,13 +347,33 @@ export default function Overview() {
                 <PosCell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} />
                 <PosCell label="TP" value={openPosition.takeProfit !== null ? `$${openPosition.takeProfit.toFixed(2)}` : "—"} />
               </div>
-            </div>
+            </Link>
           )}
 
           <div className="panel p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Recent alerts</span>
-              <span className="text-xs text-muted-foreground">{alerts.length}</span>
+              <div className="flex items-center gap-2 text-[10px] tabular">
+                {severityCounts.critical > 0 && (
+                  <span className="inline-flex items-center gap-1 text-status-blocked">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-blocked" />
+                    {severityCounts.critical} critical
+                  </span>
+                )}
+                {severityCounts.warning > 0 && (
+                  <span className="inline-flex items-center gap-1 text-status-caution">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-caution" />
+                    {severityCounts.warning} warning
+                  </span>
+                )}
+                {severityCounts.info > 0 && (
+                  <span className="inline-flex items-center gap-1 text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-candidate" />
+                    {severityCounts.info} info
+                  </span>
+                )}
+                {alerts.length === 0 && <span className="text-muted-foreground">0</span>}
+              </div>
             </div>
             {alerts.length === 0 ? (
               <p className="text-xs text-muted-foreground italic">No alerts. Quiet is good.</p>
@@ -357,14 +381,24 @@ export default function Overview() {
               <div className="space-y-2">
                 {alerts.slice(0, 4).map((a) => (
                   <div key={a.id} className="relative group">
-                    <AlertBanner
-                      severity={a.severity}
-                      title={a.title}
-                      message={a.message}
-                      timestamp={new Date(a.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    />
                     <button
-                      onClick={() => dismiss(a.id)}
+                      type="button"
+                      onClick={() => setActiveAlert(a)}
+                      className="w-full text-left rounded-md transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      aria-label={`Open alert: ${a.title}`}
+                    >
+                      <AlertBanner
+                        severity={a.severity}
+                        title={a.title}
+                        message={a.message}
+                        timestamp={new Date(a.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dismiss(a.id);
+                      }}
                       className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-secondary"
                       aria-label="Dismiss"
                     >
@@ -372,6 +406,14 @@ export default function Overview() {
                     </button>
                   </div>
                 ))}
+                {alerts.length > 4 && (
+                  <Link
+                    to="/journals"
+                    className="block text-xs text-primary hover:underline pt-1 text-center"
+                  >
+                    View all {alerts.length} alerts in Journals →
+                  </Link>
+                )}
               </div>
             )}
           </div>
