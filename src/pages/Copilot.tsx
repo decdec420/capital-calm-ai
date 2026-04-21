@@ -173,21 +173,25 @@ export default function Copilot() {
 
   const send = async (text: string) => {
     if (!text.trim() || streaming) return;
-    const userMsg: Msg = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+
+    // Make sure we have an active conversation. If not, create one on the fly.
+    let convoId = activeId;
+    if (!convoId) {
+      convoId = await createConversation();
+      if (!convoId) {
+        toast.error("Could not start a new conversation.");
+        return;
+      }
+    }
+
+    appendLocalMessage({ role: "user", content: text });
     setInput("");
     setStreaming(true);
 
     let buffer = "";
     const upsert = (chunk: string) => {
       buffer += chunk;
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: buffer } : m));
-        }
-        return [...prev, { role: "assistant", content: buffer }];
-      });
+      updateLastAssistant(buffer);
     };
 
     try {
@@ -208,7 +212,8 @@ export default function Copilot() {
           apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
         body: JSON.stringify({
-          messages: [...messages, userMsg],
+          conversationId: convoId,
+          userMessage: text,
           context: buildContext(),
         }),
       });
@@ -254,6 +259,9 @@ export default function Copilot() {
           }
         }
       }
+
+      // Reload from server so we get canonical IDs and the auto-set title.
+      await reloadActiveMessages();
     } catch (e) {
       console.error(e);
       toast.error("Copilot connection error.");
