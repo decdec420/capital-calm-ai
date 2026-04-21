@@ -11,11 +11,14 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { Plus, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
 import { useGuardrails, type NewGuardrailInput } from "@/hooks/useGuardrails";
 import { useSystemState } from "@/hooks/useSystemState";
 import type { RiskGuardrail, RiskLevel } from "@/lib/domain-types";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+type GuardrailFilter = "all" | "blocked" | "caution";
 
 export default function RiskCenter() {
   const { guardrails, loading, create, update, remove } = useGuardrails();
@@ -23,11 +26,17 @@ export default function RiskCenter() {
   const [newOpen, setNewOpen] = useState(false);
   const [editing, setEditing] = useState<RiskGuardrail | null>(null);
   const [killOpen, setKillOpen] = useState(false);
+  const [filter, setFilter] = useState<GuardrailFilter>("all");
 
   const blocked = guardrails.filter((g) => g.level === "blocked").length;
   const caution = guardrails.filter((g) => g.level === "caution").length;
   const snapshot = system?.lastEngineSnapshot ?? null;
   const lastGateReasons = snapshot?.gateReasons ?? [];
+
+  const filtered =
+    filter === "all"
+      ? guardrails
+      : guardrails.filter((g) => g.level === filter);
 
   const confirmKill = async () => {
     if (!system) return;
@@ -67,7 +76,15 @@ export default function RiskCenter() {
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="panel p-4 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setFilter("all")}
+          aria-pressed={filter === "all"}
+          className={cn(
+            "panel p-4 flex items-center gap-3 text-left transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            filter === "all" && "border-primary/60 ring-1 ring-primary/30",
+          )}
+        >
           <div className={`h-10 w-10 rounded-md flex items-center justify-center ${blocked > 0 ? "bg-status-blocked/15 text-status-blocked" : "bg-status-safe/15 text-status-safe"}`}>
             {blocked > 0 ? <ShieldAlert className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />}
           </div>
@@ -77,15 +94,41 @@ export default function RiskCenter() {
               {blocked > 0 ? "Active blockers" : caution > 0 ? "Watch close" : "Capital protected"}
             </div>
           </div>
-        </div>
-        <div className="panel p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter(filter === "blocked" ? "all" : "blocked")}
+          aria-pressed={filter === "blocked"}
+          disabled={blocked === 0}
+          className={cn(
+            "panel p-4 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+            "hover:border-status-blocked/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-blocked/40",
+            filter === "blocked" && "border-status-blocked/60 ring-1 ring-status-blocked/40",
+          )}
+        >
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Blocked checks</div>
           <div className="text-2xl font-semibold tabular text-status-blocked">{blocked}</div>
-        </div>
-        <div className="panel p-4">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mt-1">
+            {filter === "blocked" ? "filter active · click to clear" : blocked > 0 ? "click to filter" : "—"}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter(filter === "caution" ? "all" : "caution")}
+          aria-pressed={filter === "caution"}
+          disabled={caution === 0}
+          className={cn(
+            "panel p-4 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+            "hover:border-status-caution/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-caution/40",
+            filter === "caution" && "border-status-caution/60 ring-1 ring-status-caution/40",
+          )}
+        >
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Caution checks</div>
           <div className="text-2xl font-semibold tabular text-status-caution">{caution}</div>
-        </div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mt-1">
+            {filter === "caution" ? "filter active · click to clear" : caution > 0 ? "click to filter" : "—"}
+          </div>
+        </button>
       </div>
 
       {/* Live engine gates from the last tick — not user-defined guardrails. */}
@@ -123,27 +166,44 @@ export default function RiskCenter() {
         />
       ) : (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">All guardrails</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {guardrails.map((g) => (
-              <div key={g.id} className="relative group">
-                <button type="button" onClick={() => setEditing(g)} className="w-full text-left">
-                  <GuardrailRow guardrail={g} />
-                </button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute top-3 right-3 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    remove(g.id).then(() => toast.success("Guardrail removed."));
-                  }}
-                >
-                  <Trash2 className="h-3 w-3 text-muted-foreground" />
-                </Button>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              {filter === "all" ? "All guardrails" : `${filter} guardrails`} · {filtered.length}
+            </span>
+            {filter !== "all" && (
+              <button
+                type="button"
+                onClick={() => setFilter("all")}
+                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+              >
+                Clear filter <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
+          {filtered.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No guardrails match this filter.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {filtered.map((g) => (
+                <div key={g.id} className="relative group">
+                  <button type="button" onClick={() => setEditing(g)} className="w-full text-left">
+                    <GuardrailRow guardrail={g} />
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-3 right-3 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remove(g.id).then(() => toast.success("Guardrail removed."));
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

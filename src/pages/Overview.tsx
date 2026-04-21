@@ -8,9 +8,12 @@ import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
+import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/MetricDrilldowns";
+import { AlertDetailSheet } from "@/components/trader/AlertDetailSheet";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
+  ArrowRight,
   DollarSign,
   Pause,
   Play,
@@ -33,7 +36,7 @@ import { computeRegime } from "@/lib/regime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
-import type { Regime } from "@/lib/domain-types";
+import type { Alert, Regime } from "@/lib/domain-types";
 
 export default function Overview() {
   const { data: account } = useAccountState();
@@ -46,6 +49,8 @@ export default function Overview() {
   const [brief, setBrief] = useState<string>("");
   const [briefLoading, setBriefLoading] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
+  const [drilldown, setDrilldown] = useState<DrilldownKind | null>(null);
+  const [activeAlert, setActiveAlert] = useState<Alert | null>(null);
   const activeSignal = pendingSignals[0];
 
   // Snapshot is the source of truth. Local computeRegime is the fallback
@@ -68,7 +73,14 @@ export default function Overview() {
   const openPosition = open[0];
   const closedToday = closed.filter((t) => t.closedAt && new Date(t.closedAt).toDateString() === new Date().toDateString());
   const realizedToday = closedToday.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const unrealizedToday = open.reduce((sum, t) => sum + (t.unrealizedPnl ?? 0), 0);
   const lossToday = Math.min(0, realizedToday);
+
+  const severityCounts = useMemo(() => {
+    const c = { critical: 0, warning: 0, info: 0 };
+    for (const a of alerts) c[a.severity] = (c[a.severity] ?? 0) + 1;
+    return c;
+  }, [alerts]);
 
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
@@ -253,6 +265,7 @@ export default function Overview() {
           icon={<DollarSign className="h-3.5 w-3.5" />}
           hint={account ? `cash $${account.cash.toFixed(0)}` : undefined}
           explain="Total account value: cash + open positions marked-to-market. The single number that matters most over time."
+          onClick={() => setDrilldown("equity")}
         />
         <MetricCard
           label="Daily PnL"
@@ -261,12 +274,14 @@ export default function Overview() {
           tone={dailyPnl >= 0 ? "safe" : "blocked"}
           icon={dailyPnl >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
           explain="Profit & Loss since the start-of-day equity snapshot. Includes realized + unrealized. Resets when you reset the day in Settings."
+          onClick={() => setDrilldown("dailyPnl")}
         />
         <MetricCard
           label="Trades today"
           value={String(closedToday.length + open.length)}
           hint="cap 6"
           explain="Open + closed positions opened today. Hard cap of 6 to stop revenge-trading after a bad fill."
+          onClick={() => setDrilldown("tradesToday")}
         />
         <MetricCard
           label="Loss vs cap"
@@ -274,12 +289,14 @@ export default function Overview() {
           hint="cap 1.50%"
           tone={lossVsCap > 1 ? "caution" : "safe"}
           explain="How much of today's max-loss budget you've already burned. At 100% the bot halts itself for the day."
+          onClick={() => setDrilldown("lossVsCap")}
         />
         <MetricCard
           label="Floor distance"
           value={account ? `${floorDistance.toFixed(1)}%` : "—"}
           hint={account ? `floor $${account.balanceFloor.toFixed(0)}` : undefined}
           explain="How far equity sits above the absolute balance floor. Hit the floor and the kill-switch trips automatically. Big number = comfortable."
+          onClick={() => setDrilldown("floorDistance")}
         />
         <MetricCard
           label="Live mode"
@@ -288,6 +305,7 @@ export default function Overview() {
           tone={liveGated ? "blocked" : "safe"}
           hint={liveGated ? "paper-only" : "operator-armed"}
           explain="Gated = paper money only, no real orders. Armed = real orders allowed (still subject to every guardrail). Toggle in Settings."
+          onClick={() => setDrilldown("liveMode")}
         />
       </div>
 
@@ -306,7 +324,11 @@ export default function Overview() {
           />
 
           {openPosition && (
-            <div className="panel p-4 space-y-3">
+            <Link
+              to="/trades"
+              className="panel p-4 space-y-3 block group hover:border-primary/40 transition-colors"
+              aria-label="Open position — view in Trades"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Open position</span>
@@ -314,9 +336,9 @@ export default function Overview() {
                     monitoring
                   </StatusBadge>
                 </div>
-                <Link to="/trades" className="text-xs text-primary hover:underline">
-                  Open trade →
-                </Link>
+                <span className="text-xs text-primary inline-flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
+                  Open in Trades <ArrowRight className="h-3 w-3" />
+                </span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <PosCell label="Symbol" value={openPosition.symbol} />
@@ -325,13 +347,33 @@ export default function Overview() {
                 <PosCell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} />
                 <PosCell label="TP" value={openPosition.takeProfit !== null ? `$${openPosition.takeProfit.toFixed(2)}` : "—"} />
               </div>
-            </div>
+            </Link>
           )}
 
           <div className="panel p-4">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Recent alerts</span>
-              <span className="text-xs text-muted-foreground">{alerts.length}</span>
+              <div className="flex items-center gap-2 text-[10px] tabular">
+                {severityCounts.critical > 0 && (
+                  <span className="inline-flex items-center gap-1 text-status-blocked">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-blocked" />
+                    {severityCounts.critical} critical
+                  </span>
+                )}
+                {severityCounts.warning > 0 && (
+                  <span className="inline-flex items-center gap-1 text-status-caution">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-caution" />
+                    {severityCounts.warning} warning
+                  </span>
+                )}
+                {severityCounts.info > 0 && (
+                  <span className="inline-flex items-center gap-1 text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-candidate" />
+                    {severityCounts.info} info
+                  </span>
+                )}
+                {alerts.length === 0 && <span className="text-muted-foreground">0</span>}
+              </div>
             </div>
             {alerts.length === 0 ? (
               <p className="text-xs text-muted-foreground italic">No alerts. Quiet is good.</p>
@@ -339,14 +381,24 @@ export default function Overview() {
               <div className="space-y-2">
                 {alerts.slice(0, 4).map((a) => (
                   <div key={a.id} className="relative group">
-                    <AlertBanner
-                      severity={a.severity}
-                      title={a.title}
-                      message={a.message}
-                      timestamp={new Date(a.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    />
                     <button
-                      onClick={() => dismiss(a.id)}
+                      type="button"
+                      onClick={() => setActiveAlert(a)}
+                      className="w-full text-left rounded-md transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      aria-label={`Open alert: ${a.title}`}
+                    >
+                      <AlertBanner
+                        severity={a.severity}
+                        title={a.title}
+                        message={a.message}
+                        timestamp={new Date(a.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dismiss(a.id);
+                      }}
                       className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-secondary"
                       aria-label="Dismiss"
                     >
@@ -354,6 +406,14 @@ export default function Overview() {
                     </button>
                   </div>
                 ))}
+                {alerts.length > 4 && (
+                  <Link
+                    to="/journals"
+                    className="block text-xs text-primary hover:underline pt-1 text-center"
+                  >
+                    View all {alerts.length} alerts in Journals →
+                  </Link>
+                )}
               </div>
             )}
           </div>
@@ -414,6 +474,29 @@ export default function Overview() {
             toast.error("Couldn't toggle kill-switch.");
           }
         }}
+      />
+
+      <MetricDrilldowns
+        open={drilldown}
+        onOpenChange={setDrilldown}
+        account={account ?? null}
+        system={system ?? null}
+        open_={open}
+        closed={closed}
+        closedToday={closedToday}
+        realizedToday={realizedToday}
+        unrealizedToday={unrealizedToday}
+        dailyPnl={dailyPnl}
+        dailyPnlPct={dailyPnlPct}
+        lossToday={lossToday}
+        lossVsCap={lossVsCap}
+        floorDistance={floorDistance}
+      />
+
+      <AlertDetailSheet
+        alert={activeAlert}
+        onClose={() => setActiveAlert(null)}
+        onDismiss={dismiss}
       />
     </div>
   );
