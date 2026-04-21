@@ -379,10 +379,35 @@ export default function Copilot() {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Context attached</div>
             <ul className="text-xs text-muted-foreground space-y-1.5">
               <li>• Mode: <span className="text-foreground capitalize">{system?.mode ?? "—"}</span></li>
-              <li>• Regime: <span className="text-foreground capitalize">{regime.regime.replace("_", " ")}</span></li>
+              <li>
+                • Engine pick:{" "}
+                <span className="text-foreground capitalize">
+                  {chosenSym ?? "none"}
+                  {chosenRow ? ` · ${String(chosenRow.regime).replace("_", " ")}` : ""}
+                </span>
+              </li>
               <li>• Open: <span className="text-foreground">{open[0] ? `${open[0].side} ${open[0].symbol}` : "none"}</span></li>
               <li>• Pending signal: <span className="text-foreground">{activeSignal ? `${activeSignal.side} (${(activeSignal.confidence*100).toFixed(0)}%)` : "none"}</span></li>
             </ul>
+          </div>
+
+          {/* Last engine gate readout — the operator's "why am I not trading?" panel */}
+          <div className="panel p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Last engine tick</div>
+              {snapshot && (
+                <span className="text-[10px] text-muted-foreground tabular">
+                  {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              )}
+            </div>
+            {!snapshot ? (
+              <p className="text-xs text-muted-foreground italic">No engine snapshot yet. Hit <span className="text-primary">Run engine now</span>.</p>
+            ) : lastGateReasons.length === 0 ? (
+              <p className="text-xs text-status-safe italic">All gates clear. Engine is free to act.</p>
+            ) : (
+              <GateReasonList reasons={lastGateReasons} max={4} />
+            )}
           </div>
         </div>
       </div>
