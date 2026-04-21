@@ -23,7 +23,7 @@ const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" 
 };
 
 export default function Learning() {
-  const { loading, create, setStatus, remove, promoteToStrategy, counts, needsReview, inFlight, recentlyAutoResolved } = useExperiments();
+  const { loading, create, setStatus, remove, promoteToStrategy, counts, needsReview, inFlight, accepted, recentlyAutoResolved } = useExperiments();
   const [newOpen, setNewOpen] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
 
