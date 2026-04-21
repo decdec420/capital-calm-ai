@@ -11,11 +11,14 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { Plus, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
 import { useGuardrails, type NewGuardrailInput } from "@/hooks/useGuardrails";
 import { useSystemState } from "@/hooks/useSystemState";
 import type { RiskGuardrail, RiskLevel } from "@/lib/domain-types";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+type GuardrailFilter = "all" | "blocked" | "caution";
 
 export default function RiskCenter() {
   const { guardrails, loading, create, update, remove } = useGuardrails();
@@ -23,11 +26,17 @@ export default function RiskCenter() {
   const [newOpen, setNewOpen] = useState(false);
   const [editing, setEditing] = useState<RiskGuardrail | null>(null);
   const [killOpen, setKillOpen] = useState(false);
+  const [filter, setFilter] = useState<GuardrailFilter>("all");
 
   const blocked = guardrails.filter((g) => g.level === "blocked").length;
   const caution = guardrails.filter((g) => g.level === "caution").length;
   const snapshot = system?.lastEngineSnapshot ?? null;
   const lastGateReasons = snapshot?.gateReasons ?? [];
+
+  const filtered =
+    filter === "all"
+      ? guardrails
+      : guardrails.filter((g) => g.level === filter);
 
   const confirmKill = async () => {
     if (!system) return;
