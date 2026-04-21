@@ -20,6 +20,38 @@ type Symbol = (typeof SYMBOLS)[number];
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
 
+// ─── Structured gate reasons ─────────────────────────────────────────────
+// Frontend can switch on `code` for icon/tone; render `message` as the human line.
+type GateSeverity = "halt" | "block" | "skip";
+type GateCode =
+  | "KILL_SWITCH"
+  | "BOT_HALTED"
+  | "GUARDRAIL_BLOCKED"
+  | "OPEN_POSITION"
+  | "PENDING_SIGNAL"
+  | "NO_CANDLES"
+  | "CHOP_REGIME"
+  | "RANGE_REGIME"
+  | "LOW_SETUP_SCORE"
+  | "EXTREME_VOLATILITY"
+  | "OUTSIDE_LIQUIDITY_WINDOW"
+  | "AI_SKIP"
+  | "AI_ERROR"
+  | "INSERT_ERROR"
+  | "NO_QUALIFYING_SETUP"
+  | "NO_SYSTEM_STATE";
+
+interface GateReason {
+  code: GateCode;
+  severity: GateSeverity;
+  message: string;
+  meta?: Record<string, unknown>;
+}
+
+function gate(code: GateCode, severity: GateSeverity, message: string, meta?: Record<string, unknown>): GateReason {
+  return meta ? { code, severity, message, meta } : { code, severity, message };
+}
+
 // EMA helper for pullback detection.
 function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
