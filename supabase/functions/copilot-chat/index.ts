@@ -1,5 +1,13 @@
 // Trader OS — AI Copilot edge function
-// Streams from Lovable AI Gateway. Injects current system context as system prompt.
+// Streams from Lovable AI Gateway. Persists conversations server-side so refreshes
+// don't nuke the thread.
+//
+// New contract:
+//   POST { conversationId: string, userMessage: string, context?: object }
+//   - Server loads full conversation history from DB (single source of truth).
+//   - Persists the user's new message before calling the model.
+//   - Tees the streaming response and persists the assistant's final text on close.
+//
 // Auth: validates Supabase JWT in-function (verify_jwt = false at gateway).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -15,11 +23,10 @@ interface ChatMessage {
   content: string;
 }
 
-// Hard limits to prevent credit-drain abuse
-const MAX_MESSAGES = 50;
-const MAX_MESSAGE_CHARS = 4000;
+const MAX_USER_MESSAGE_CHARS = 4000;
 const MAX_CONTEXT_CHARS = 8000;
-const ALLOWED_ROLES = new Set(["user", "assistant", "system"]);
+// Cap how many historical turns we send back to the model. Generous, but bounded.
+const MAX_HISTORY_TURNS = 80;
 
 const buildSystemPrompt = (context?: Record<string, unknown>) => {
   const ctxBlock = context ? JSON.stringify(context, null, 2) : "{}";
@@ -39,6 +46,7 @@ Style:
 - Use markdown sparingly. Prefer plain prose with the occasional list.
 - Cite the system state when relevant (e.g., "current regime is range, confidence 0.62").
 - If asked something the system context does not cover, say so honestly.
+- You have memory of this conversation. Reference earlier turns when it helps.
 
 Current Trader OS system context (JSON):
 ${ctxBlock}`;
@@ -54,11 +62,10 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // --- AuthN: validate JWT in-function (verify_jwt = false at gateway) ---
+    // --- AuthN ---
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return json({ error: "Unauthorized" }, 401);
-    }
+    if (!authHeader?.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
     if (!supabaseUrl || !supabaseAnonKey) {
@@ -70,43 +77,26 @@ Deno.serve(async (req: Request) => {
     });
     const token = authHeader.replace("Bearer ", "");
     const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims) {
-      return json({ error: "Unauthorized" }, 401);
-    }
+    if (claimsError || !claimsData?.claims) return json({ error: "Unauthorized" }, 401);
+    const userId = claimsData.claims.sub as string;
 
     // --- Input validation ---
-    let payload: { messages?: unknown; context?: unknown };
+    let payload: { conversationId?: unknown; userMessage?: unknown; context?: unknown };
     try {
       payload = await req.json();
     } catch {
       return json({ error: "Invalid JSON body" }, 400);
     }
+    const { conversationId, userMessage, context } = payload;
 
-    const { messages, context } = payload;
-
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return json({ error: "messages must be a non-empty array" }, 400);
+    if (typeof conversationId !== "string" || conversationId.length < 8) {
+      return json({ error: "conversationId required" }, 400);
     }
-    if (messages.length > MAX_MESSAGES) {
-      return json({ error: `Too many messages (max ${MAX_MESSAGES})` }, 400);
+    if (typeof userMessage !== "string" || userMessage.trim().length === 0) {
+      return json({ error: "userMessage required" }, 400);
     }
-
-    const cleanMessages: ChatMessage[] = [];
-    for (const m of messages) {
-      if (!m || typeof m !== "object") {
-        return json({ error: "Invalid message entry" }, 400);
-      }
-      const { role, content } = m as { role?: unknown; content?: unknown };
-      if (typeof role !== "string" || !ALLOWED_ROLES.has(role)) {
-        return json({ error: "Invalid message role" }, 400);
-      }
-      if (typeof content !== "string") {
-        return json({ error: "Message content must be a string" }, 400);
-      }
-      if (content.length > MAX_MESSAGE_CHARS) {
-        return json({ error: `Message exceeds ${MAX_MESSAGE_CHARS} chars` }, 400);
-      }
-      cleanMessages.push({ role: role as ChatMessage["role"], content });
+    if (userMessage.length > MAX_USER_MESSAGE_CHARS) {
+      return json({ error: `userMessage exceeds ${MAX_USER_MESSAGE_CHARS} chars` }, 400);
     }
 
     let safeContext: Record<string, unknown> | undefined;
@@ -126,6 +116,45 @@ Deno.serve(async (req: Request) => {
       safeContext = context as Record<string, unknown>;
     }
 
+    // --- Verify conversation belongs to this user (RLS will also enforce) ---
+    const { data: convo, error: convoErr } = await supabase
+      .from("chat_conversations")
+      .select("id, user_id")
+      .eq("id", conversationId)
+      .maybeSingle();
+    if (convoErr || !convo || convo.user_id !== userId) {
+      return json({ error: "Conversation not found" }, 404);
+    }
+
+    // --- Load existing history BEFORE inserting the new user message ---
+    const { data: historyRows, error: histErr } = await supabase
+      .from("chat_messages")
+      .select("role, content, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true })
+      .limit(MAX_HISTORY_TURNS);
+    if (histErr) {
+      console.error("history load failed", histErr);
+      return json({ error: "Could not load history" }, 500);
+    }
+    const history: ChatMessage[] = (historyRows ?? []).map((r) => ({
+      role: r.role as ChatMessage["role"],
+      content: r.content,
+    }));
+
+    // --- Persist user message (trigger handles auto-title + last_message_at) ---
+    const { error: insertUserErr } = await supabase.from("chat_messages").insert({
+      conversation_id: conversationId,
+      user_id: userId,
+      role: "user",
+      content: userMessage,
+    });
+    if (insertUserErr) {
+      console.error("insert user message failed", insertUserErr);
+      return json({ error: "Could not persist message" }, 500);
+    }
+
+    // --- Call the model ---
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       console.error("LOVABLE_API_KEY not configured");
@@ -140,24 +169,68 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
-        messages: [{ role: "system", content: buildSystemPrompt(safeContext) }, ...cleanMessages],
+        messages: [
+          { role: "system", content: buildSystemPrompt(safeContext) },
+          ...history,
+          { role: "user", content: userMessage },
+        ],
         stream: true,
       }),
     });
 
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       if (response.status === 429) {
         return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
       }
       if (response.status === 402) {
         return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
       }
-      const text = await response.text();
+      const text = await response.text().catch(() => "");
       console.error("Gateway error", response.status, text);
       return json({ error: "AI gateway error" }, 500);
     }
 
-    return new Response(response.body, {
+    // --- Tee the stream: pass through to client AND accumulate assistant text for DB ---
+    let assistantBuffer = "";
+    let textBuffer = "";
+    const decoder = new TextDecoder();
+
+    const transform = new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        controller.enqueue(chunk);
+        // Parse SSE deltas to capture the final assistant text
+        textBuffer += decoder.decode(chunk, { stream: true });
+        let idx: number;
+        while ((idx = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, idx);
+          textBuffer = textBuffer.slice(idx + 1);
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (typeof delta === "string") assistantBuffer += delta;
+          } catch {
+            // partial JSON — ignore, will be retried with next chunk
+          }
+        }
+      },
+      async flush() {
+        if (assistantBuffer.trim().length > 0) {
+          const { error } = await supabase.from("chat_messages").insert({
+            conversation_id: conversationId,
+            user_id: userId,
+            role: "assistant",
+            content: assistantBuffer,
+          });
+          if (error) console.error("persist assistant message failed", error);
+        }
+      },
+    });
+
+    return new Response(response.body.pipeThrough(transform), {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
