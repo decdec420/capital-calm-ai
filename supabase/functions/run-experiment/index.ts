@@ -4,7 +4,7 @@
 // the result and auto-resolves clear winners/losers.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { runSharedBacktest, type SharedCandle, type SharedParam } from "../../../src/lib/backtest-shared.ts";
+import { runSharedBacktest, type SharedCandle, type SharedParam } from "./backtest-shared.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
