@@ -65,6 +65,15 @@ export function useMarkToMarket(intervalMs = 30_000) {
               (t.tp1Price! - t.entryPrice) * halfSize * sideMult;
             realizedFromTp1 += realizedHalf;
 
+            const tp1Transition = {
+              phase: "tp1_hit",
+              at: new Date().toISOString(),
+              by: "engine",
+              reason: `TP1 filled @ $${t.tp1Price!.toFixed(2)} — half closed, stop→breakeven`,
+              realized: realizedHalf,
+            };
+            const nextTransitions = [...((t as any).lifecycleTransitions ?? []), tp1Transition];
+
             updates.push(
               supabase
                 .from("trades")
@@ -76,6 +85,8 @@ export function useMarkToMarket(intervalMs = 30_000) {
                   current_price: px,
                   unrealized_pnl: (px - t.entryPrice) * (fullSize - halfSize) * sideMult,
                   unrealized_pnl_pct: ((px - t.entryPrice) / t.entryPrice) * 100 * sideMult,
+                  lifecycle_phase: "tp1_hit",
+                  lifecycle_transitions: nextTransitions,
                   notes: `${t.notes ?? ""}\nTP1 hit @ $${t.tp1Price!.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked, runner active, stop→BE.`.trim(),
                 })
                 .eq("id", t.id)

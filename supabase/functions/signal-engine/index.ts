@@ -20,6 +20,38 @@ type Symbol = (typeof SYMBOLS)[number];
 
 type Candle = { t: number; o: number; h: number; l: number; c: number; v: number };
 
+// ─── Structured gate reasons ─────────────────────────────────────────────
+// Frontend can switch on `code` for icon/tone; render `message` as the human line.
+type GateSeverity = "halt" | "block" | "skip";
+type GateCode =
+  | "KILL_SWITCH"
+  | "BOT_HALTED"
+  | "GUARDRAIL_BLOCKED"
+  | "OPEN_POSITION"
+  | "PENDING_SIGNAL"
+  | "NO_CANDLES"
+  | "CHOP_REGIME"
+  | "RANGE_REGIME"
+  | "LOW_SETUP_SCORE"
+  | "EXTREME_VOLATILITY"
+  | "OUTSIDE_LIQUIDITY_WINDOW"
+  | "AI_SKIP"
+  | "AI_ERROR"
+  | "INSERT_ERROR"
+  | "NO_QUALIFYING_SETUP"
+  | "NO_SYSTEM_STATE";
+
+interface GateReason {
+  code: GateCode;
+  severity: GateSeverity;
+  message: string;
+  meta?: Record<string, unknown>;
+}
+
+function gate(code: GateCode, severity: GateSeverity, message: string, meta?: Record<string, unknown>): GateReason {
+  return meta ? { code, severity, message, meta } : { code, severity, message };
+}
+
 // EMA helper for pullback detection.
 function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
@@ -156,26 +188,31 @@ async function buildPatternMemory(admin: any, userId: string) {
   return { totalClosed: closed.length, bySymbol, byRegime };
 }
 
-// Sweep stale pending signals → mark expired + log a journal skip.
+// Sweep stale pending signals → mark expired + log a journal skip + lifecycle.
 async function expirePendingSignals(admin: any, userId: string) {
   const nowIso = new Date().toISOString();
   const { data: stale } = await admin
     .from("trade_signals")
-    .select("id,symbol,side,proposed_entry,confidence")
+    .select("id,symbol,side,proposed_entry,confidence,lifecycle_transitions")
     .eq("user_id", userId)
     .eq("status", "pending")
     .lt("expires_at", nowIso);
   if (!stale || stale.length === 0) return 0;
-  await admin
-    .from("trade_signals")
-    .update({
-      status: "expired",
-      decided_by: "expired",
-      decision_reason: "TTL elapsed without decision",
-      decided_at: nowIso,
-    })
-    .in("id", stale.map((s: any) => s.id));
+  // Update each row individually so we can append to its lifecycle_transitions array.
   for (const s of stale) {
+    const prev = Array.isArray(s.lifecycle_transitions) ? s.lifecycle_transitions : [];
+    const next = [...prev, { phase: "expired", at: nowIso, by: "engine", reason: "TTL elapsed without decision" }];
+    await admin
+      .from("trade_signals")
+      .update({
+        status: "expired",
+        decided_by: "expired",
+        decision_reason: "TTL elapsed without decision",
+        decided_at: nowIso,
+        lifecycle_phase: "expired",
+        lifecycle_transitions: next,
+      })
+      .eq("id", s.id);
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "skip",
@@ -318,26 +355,54 @@ async function runTickForUser(
       buildPatternMemory(admin, userId),
     ]);
 
-  if (!sys) return { userId, tick: "no_system_state", expiredCount, perSymbol: [] };
+  if (!sys) {
+    return {
+      userId,
+      tick: "no_system_state",
+      gateReasons: [gate("NO_SYSTEM_STATE", "halt", "User has no system_state row.")],
+      expiredCount,
+      perSymbol: [],
+    };
+  }
 
-  // Account-level halts (apply to ALL symbols)
-  const accountHalts: string[] = [];
-  if (sys.kill_switch_engaged) accountHalts.push("kill-switch engaged");
-  if (sys.bot === "halted") accountHalts.push("bot halted");
+  // Pick the persisted approved strategy (if any) so signals & trades carry identity.
+  const { data: approvedStrategy } = await admin
+    .from("strategies")
+    .select("id,version")
+    .eq("user_id", userId)
+    .eq("status", "approved")
+    .order("updated_at", { ascending: false })
+    .maybeSingle();
+  const strategyId: string | null = approvedStrategy?.id ?? null;
+  const strategyVersion: string = approvedStrategy?.version ?? "signal-engine v2 (ladder)";
+
+  // Account-level halts (apply to ALL symbols) — emit structured gate reasons.
+  const accountGates: GateReason[] = [];
+  if (sys.kill_switch_engaged) {
+    accountGates.push(gate("KILL_SWITCH", "halt", "Kill-switch is engaged. No new signals or orders."));
+  }
+  if (sys.bot === "halted") {
+    accountGates.push(gate("BOT_HALTED", "halt", "Bot is halted. Resume from the status footer to trade."));
+  }
   const blockedRail = (rails ?? []).find((g: any) => g.level === "blocked");
-  if (blockedRail) accountHalts.push(`guardrail blocked: ${blockedRail.label}`);
+  if (blockedRail) {
+    accountGates.push(
+      gate("GUARDRAIL_BLOCKED", "halt", `Guardrail blocked: ${blockedRail.label}.`, {
+        guardrailLabel: blockedRail.label,
+        current: blockedRail.current_value,
+        limit: blockedRail.limit_value,
+      }),
+    );
+  }
 
-  if (accountHalts.length > 0) {
-    return { userId, tick: "halted", reasons: accountHalts, expiredCount, perSymbol: [] };
+  if (accountGates.length > 0) {
+    await persistSnapshot(admin, userId, { gateReasons: accountGates, perSymbol: [], chosenSymbol: null });
+    return { userId, tick: "halted", gateReasons: accountGates, reasons: accountGates.map((g) => g.message), expiredCount, perSymbol: [] };
   }
 
   // Per-symbol gates: skip a symbol if it already has an open trade or pending signal.
   const symbolsWithOpen = new Set((openTrades ?? []).map((t: any) => t.symbol));
   const symbolsWithPending = new Set((pendingSignals ?? []).map((s: any) => s.symbol));
-
-  // We allow at most ONE new signal per tick, prioritizing the symbol with the
-  // best setupScore. This keeps the operator from getting buried in 3 alerts at once.
-  // (The other symbols still report their regime so the UI can show what was passed on.)
 
   const equity = acct ? Number(acct.equity) : 10000;
 
@@ -346,7 +411,7 @@ async function runTickForUser(
     symbol: Symbol;
     lastPrice: number;
     regime: ReturnType<typeof computeRegime>;
-    locked?: string;
+    lockGate?: GateReason;
   }> = [];
 
   for (const symbol of SYMBOLS) {
@@ -356,27 +421,27 @@ async function runTickForUser(
         symbol,
         lastPrice: 0,
         regime: { regime: "range", confidence: 0, volatility: "normal", setupScore: 0, todScore: 0, pctChange: 0, annualizedVolPct: 0, noTradeReasons: ["No candles"] } as any,
-        locked: "no_candles",
+        lockGate: gate("NO_CANDLES", "skip", `${symbol}: candle feed unavailable.`, { symbol }),
       });
       continue;
     }
     const lastPrice = candles[candles.length - 1].c;
     const r = computeRegime(candles);
-    let locked: string | undefined;
-    if (symbolsWithOpen.has(symbol)) locked = "position open";
-    else if (symbolsWithPending.has(symbol)) locked = "signal pending";
-    candidates.push({ symbol, lastPrice, regime: r, locked });
+    let lockGate: GateReason | undefined;
+    if (symbolsWithOpen.has(symbol)) {
+      lockGate = gate("OPEN_POSITION", "block", `${symbol}: position already open.`, { symbol });
+    } else if (symbolsWithPending.has(symbol)) {
+      lockGate = gate("PENDING_SIGNAL", "block", `${symbol}: signal pending operator decision.`, { symbol });
+    }
+    candidates.push({ symbol, lastPrice, regime: r, lockGate });
   }
 
   // Pick the best free candidate by setupScore. If none qualifies, every symbol
   // gets a "skipped" record but no AI calls are made (saves credits).
-  // Strict regime gate: only trending_up / trending_down / breakout qualify.
-  // Plus require a real setup score, not garbage.
   const TRADEABLE_REGIMES = new Set(["trending_up", "trending_down", "breakout"]);
   const tradable = candidates.filter(
-    (c) => !c.locked && TRADEABLE_REGIMES.has(c.regime.regime) && c.regime.setupScore >= 0.55,
+    (c) => !c.lockGate && TRADEABLE_REGIMES.has(c.regime.regime) && c.regime.setupScore >= 0.55,
   );
-  // Prefer pullback setups, then by setupScore
   tradable.sort((a, b) => {
     const pbA = a.regime.pullback ? 1 : 0;
     const pbB = b.regime.pullback ? 1 : 0;
@@ -385,35 +450,56 @@ async function runTickForUser(
   });
   const winner = tradable[0];
 
+  // Build per-symbol snapshot rows AND collect per-symbol gate reasons.
   const perSymbol: any[] = candidates.map((c) => ({
     symbol: c.symbol,
     lastPrice: c.lastPrice,
     regime: c.regime.regime,
+    confidence: c.regime.confidence,
     setupScore: c.regime.setupScore,
-    locked: c.locked ?? null,
+    volatility: c.regime.volatility,
+    todScore: c.regime.todScore,
+    pullback: (c.regime as any).pullback ?? false,
+    lockGate: c.lockGate ?? null,
     chosen: winner?.symbol === c.symbol,
   }));
 
   if (!winner) {
-    // Log a single account-level skip (don't spam the journal once per symbol).
+    // Build structured per-symbol gate reasons for the operator.
+    const gateReasons: GateReason[] = candidates.flatMap((c) => {
+      if (c.lockGate) return [c.lockGate];
+      if (c.regime.regime === "chop") return [gate("CHOP_REGIME", "skip", `${c.symbol}: chop — no edge.`, { symbol: c.symbol })];
+      if (c.regime.regime === "range") return [gate("RANGE_REGIME", "skip", `${c.symbol}: pure range — sitting out.`, { symbol: c.symbol })];
+      if (c.regime.setupScore < 0.55) {
+        return [gate("LOW_SETUP_SCORE", "skip", `${c.symbol}: setup ${c.regime.setupScore.toFixed(2)} below 0.55.`, { symbol: c.symbol, setupScore: c.regime.setupScore })];
+      }
+      return [];
+    });
+
+    await persistSnapshot(admin, userId, { gateReasons, perSymbol, chosenSymbol: null });
+
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "skip",
       title: `Engine tick · all ${SYMBOLS.length} symbols skipped`,
-      summary: candidates
-        .map((c) => `${c.symbol}: ${c.locked ?? `${c.regime.regime} setup ${c.regime.setupScore.toFixed(2)}`}`)
-        .join(" · "),
+      summary: gateReasons.map((g) => g.message).join(" · "),
       tags: ["multi-symbol", "skip"],
     });
-    return { userId, tick: "skipped", reason: "no qualifying setup", expiredCount, perSymbol };
+    return { userId, tick: "skipped", reason: "no qualifying setup", gateReasons, expiredCount, perSymbol };
   }
+
 
   // Build the context packet for the chosen symbol's AI call
   const contextPacket = {
     market: { symbol: winner.symbol, lastPrice: winner.lastPrice, ...winner.regime },
     otherSymbols: candidates
       .filter((c) => c.symbol !== winner.symbol)
-      .map((c) => ({ symbol: c.symbol, regime: c.regime.regime, setupScore: c.regime.setupScore, locked: c.locked ?? null })),
+      .map((c) => ({
+        symbol: c.symbol,
+        regime: c.regime.regime,
+        setupScore: c.regime.setupScore,
+        locked: c.lockGate?.message ?? null,
+      })),
     account: acct ? { equity, floor: Number(acct.balance_floor) } : null,
     guardrails: (rails ?? []).map((g: any) => ({
       label: g.label,
@@ -442,11 +528,18 @@ async function runTickForUser(
   });
 
   if ("error" in aiResult) {
-    return { userId, tick: "ai_error", symbol: winner.symbol, expiredCount, perSymbol, error: aiResult.error };
+    const aiErr = gate("AI_ERROR", "skip", `${winner.symbol}: AI gateway error (${aiResult.error}).`, { symbol: winner.symbol });
+    await persistSnapshot(admin, userId, { gateReasons: [aiErr], perSymbol, chosenSymbol: winner.symbol });
+    return { userId, tick: "ai_error", symbol: winner.symbol, gateReasons: [aiErr], expiredCount, perSymbol, error: aiResult.error };
   }
   const decision = aiResult.decision;
 
   if (decision.decision === "skip") {
+    const skipGate = gate("AI_SKIP", "skip", `${winner.symbol}: AI declined to enter.`, {
+      symbol: winner.symbol,
+      reasoning: decision.reasoning ?? "",
+    });
+    await persistSnapshot(admin, userId, { gateReasons: [skipGate], perSymbol, chosenSymbol: winner.symbol });
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "skip",
@@ -454,7 +547,7 @@ async function runTickForUser(
       summary: decision.reasoning ?? "AI chose to skip.",
       tags: [winner.symbol, winner.regime.regime, winner.regime.volatility],
     });
-    return { userId, tick: "skipped", symbol: winner.symbol, reasoning: decision.reasoning, expiredCount, perSymbol };
+    return { userId, tick: "skipped", symbol: winner.symbol, reasoning: decision.reasoning, gateReasons: [skipGate], expiredCount, perSymbol };
   }
 
   const sizePct = Math.max(0.05, Math.min(0.25, Number(decision.size_pct ?? 0.15)));
@@ -470,6 +563,9 @@ async function runTickForUser(
   );
   const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
   const fullSize = sizeUsd / entry;
+
+  const nowIso = new Date().toISOString();
+  const proposedTransition = { phase: "proposed", at: nowIso, by: "engine", reason: "AI proposed entry" };
 
   const { data: signalRow, error: insertErr } = await admin
     .from("trade_signals")
@@ -487,6 +583,10 @@ async function runTickForUser(
       size_pct: sizePct,
       ai_reasoning: decision.reasoning ?? "",
       ai_model: "google/gemini-3-flash-preview",
+      strategy_id: strategyId,
+      strategy_version: strategyVersion,
+      lifecycle_phase: "proposed",
+      lifecycle_transitions: [proposedTransition],
       context_snapshot: {
         regime: winner.regime,
         lastPrice: winner.lastPrice,
@@ -501,7 +601,9 @@ async function runTickForUser(
 
   if (insertErr) {
     console.error("signal insert failed", insertErr);
-    return { userId, tick: "insert_error", error: insertErr.message, expiredCount, perSymbol };
+    const insGate = gate("INSERT_ERROR", "halt", `Signal insert failed: ${insertErr.message}`);
+    await persistSnapshot(admin, userId, { gateReasons: [insGate], perSymbol, chosenSymbol: winner.symbol });
+    return { userId, tick: "insert_error", error: insertErr.message, gateReasons: [insGate], expiredCount, perSymbol };
   }
 
   // STAGE 6 — EXECUTE (autonomy-gated)
@@ -511,6 +613,7 @@ async function runTickForUser(
   if (autoApprove) {
     const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
     if (winner.regime.pullback) tags.push("pullback");
+    const tradeEnteredTransition = { phase: "entered", at: new Date().toISOString(), by: "auto", reason: `Auto-approved (${autonomy}, conf ${(conf * 100).toFixed(0)}%)` };
     const { data: tradeRow } = await admin
       .from("trades")
       .insert({
@@ -524,7 +627,10 @@ async function runTickForUser(
         take_profit: target,
         tp1_price: tp1,
         tp1_filled: false,
-        strategy_version: "signal-engine v2 (ladder)",
+        strategy_id: strategyId,
+        strategy_version: strategyVersion,
+        lifecycle_phase: "entered",
+        lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
         notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}`,
         status: "open",
@@ -533,6 +639,7 @@ async function runTickForUser(
       .select()
       .single();
 
+    const sigExecutedTransition = { phase: "executed", at: new Date().toISOString(), by: "auto", reason: `Auto-approved (${autonomy})`, tradeId: tradeRow?.id ?? null };
     await admin
       .from("trade_signals")
       .update({
@@ -541,6 +648,8 @@ async function runTickForUser(
         decision_reason: `Auto-approved (${autonomy}, conf ${(conf * 100).toFixed(0)}%)`,
         decided_at: new Date().toISOString(),
         executed_trade_id: tradeRow?.id ?? null,
+        lifecycle_phase: "executed",
+        lifecycle_transitions: [proposedTransition, sigExecutedTransition],
       })
       .eq("id", signalRow.id);
 
@@ -553,6 +662,9 @@ async function runTickForUser(
     });
   }
 
+  // Persist clean snapshot — winner chosen, no blocking gates.
+  await persistSnapshot(admin, userId, { gateReasons: [], perSymbol, chosenSymbol: winner.symbol });
+
   return {
     userId,
     tick: autoApprove ? "executed" : "proposed",
@@ -560,9 +672,29 @@ async function runTickForUser(
     signalId: signalRow.id,
     autonomy,
     confidence: conf,
+    gateReasons: [],
     expiredCount,
     perSymbol,
   };
+}
+
+// Persist the engine's per-tick snapshot to system_state.last_engine_snapshot.
+// Single source of truth for MultiSymbolStrip, Overview, Copilot, RiskCenter.
+async function persistSnapshot(
+  admin: any,
+  userId: string,
+  snap: { gateReasons: GateReason[]; perSymbol: any[]; chosenSymbol: string | null },
+) {
+  const payload = {
+    ranAt: new Date().toISOString(),
+    gateReasons: snap.gateReasons,
+    perSymbol: snap.perSymbol,
+    chosenSymbol: snap.chosenSymbol,
+  };
+  await admin
+    .from("system_state")
+    .update({ last_engine_snapshot: payload, last_heartbeat: payload.ranAt })
+    .eq("user_id", userId);
 }
 
 Deno.serve(async (req) => {

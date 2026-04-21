@@ -71,14 +71,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    const prevTransitions = Array.isArray(sig.lifecycle_transitions) ? sig.lifecycle_transitions : [];
+    const nowIso = new Date().toISOString();
+
     if (action === "reject") {
+      const transitions = [
+        ...prevTransitions,
+        { phase: "rejected", at: nowIso, by: "user", reason: reason ?? "Operator declined" },
+      ];
       await admin
         .from("trade_signals")
         .update({
           status: "rejected",
           decided_by: "user",
           decision_reason: reason ?? "Operator declined",
-          decided_at: new Date().toISOString(),
+          decided_at: nowIso,
+          lifecycle_phase: "rejected",
+          lifecycle_transitions: transitions,
         })
         .eq("id", signalId);
 
@@ -106,6 +115,14 @@ Deno.serve(async (req) => {
     const tags = ["ai-signal", sig.regime];
     if (wasPullback) tags.push("pullback");
 
+    const tradeEnteredTransition = {
+      phase: "entered",
+      at: nowIso,
+      by: "user",
+      reason: reason ?? "Operator approved",
+      fromSignalId: signalId,
+    };
+
     const { data: tradeRow, error: tradeErr } = await admin
       .from("trades")
       .insert({
@@ -119,7 +136,10 @@ Deno.serve(async (req) => {
         take_profit: sig.proposed_target !== null ? Number(sig.proposed_target) : null,
         tp1_price: tp1Price,
         tp1_filled: false,
-        strategy_version: "signal-engine v2 (ladder)",
+        strategy_id: sig.strategy_id ?? null,
+        strategy_version: sig.strategy_version ?? "signal-engine v2 (ladder)",
+        lifecycle_phase: "entered",
+        lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
         notes: `Operator-approved. AI confidence ${(Number(sig.confidence) * 100).toFixed(0)}%.${wasPullback ? " Pullback entry." : ""}`,
         status: "open",
@@ -136,14 +156,24 @@ Deno.serve(async (req) => {
       });
     }
 
+    const sigExecutedTransition = {
+      phase: "executed",
+      at: nowIso,
+      by: "user",
+      reason: reason ?? "Operator approved",
+      tradeId: tradeRow?.id ?? null,
+    };
+
     await admin
       .from("trade_signals")
       .update({
         status: "executed",
         decided_by: "user",
         decision_reason: reason ?? "Operator approved",
-        decided_at: new Date().toISOString(),
+        decided_at: nowIso,
         executed_trade_id: tradeRow?.id ?? null,
+        lifecycle_phase: "executed",
+        lifecycle_transitions: [...prevTransitions, sigExecutedTransition],
       })
       .eq("id", signalId);
 
