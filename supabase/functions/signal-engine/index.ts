@@ -489,7 +489,12 @@ async function runTickForUser(
     market: { symbol: winner.symbol, lastPrice: winner.lastPrice, ...winner.regime },
     otherSymbols: candidates
       .filter((c) => c.symbol !== winner.symbol)
-      .map((c) => ({ symbol: c.symbol, regime: c.regime.regime, setupScore: c.regime.setupScore, locked: c.locked ?? null })),
+      .map((c) => ({
+        symbol: c.symbol,
+        regime: c.regime.regime,
+        setupScore: c.regime.setupScore,
+        locked: c.lockGate?.message ?? null,
+      })),
     account: acct ? { equity, floor: Number(acct.balance_floor) } : null,
     guardrails: (rails ?? []).map((g: any) => ({
       label: g.label,
@@ -518,11 +523,18 @@ async function runTickForUser(
   });
 
   if ("error" in aiResult) {
-    return { userId, tick: "ai_error", symbol: winner.symbol, expiredCount, perSymbol, error: aiResult.error };
+    const aiErr = gate("AI_ERROR", "skip", `${winner.symbol}: AI gateway error (${aiResult.error}).`, { symbol: winner.symbol });
+    await persistSnapshot(admin, userId, { gateReasons: [aiErr], perSymbol, chosenSymbol: winner.symbol });
+    return { userId, tick: "ai_error", symbol: winner.symbol, gateReasons: [aiErr], expiredCount, perSymbol, error: aiResult.error };
   }
   const decision = aiResult.decision;
 
   if (decision.decision === "skip") {
+    const skipGate = gate("AI_SKIP", "skip", `${winner.symbol}: AI declined to enter.`, {
+      symbol: winner.symbol,
+      reasoning: decision.reasoning ?? "",
+    });
+    await persistSnapshot(admin, userId, { gateReasons: [skipGate], perSymbol, chosenSymbol: winner.symbol });
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "skip",
@@ -530,7 +542,7 @@ async function runTickForUser(
       summary: decision.reasoning ?? "AI chose to skip.",
       tags: [winner.symbol, winner.regime.regime, winner.regime.volatility],
     });
-    return { userId, tick: "skipped", symbol: winner.symbol, reasoning: decision.reasoning, expiredCount, perSymbol };
+    return { userId, tick: "skipped", symbol: winner.symbol, reasoning: decision.reasoning, gateReasons: [skipGate], expiredCount, perSymbol };
   }
 
   const sizePct = Math.max(0.05, Math.min(0.25, Number(decision.size_pct ?? 0.15)));
