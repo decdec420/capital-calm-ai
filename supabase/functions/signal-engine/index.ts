@@ -559,6 +559,9 @@ async function runTickForUser(
   const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
   const fullSize = sizeUsd / entry;
 
+  const nowIso = new Date().toISOString();
+  const proposedTransition = { phase: "proposed", at: nowIso, by: "engine", reason: "AI proposed entry" };
+
   const { data: signalRow, error: insertErr } = await admin
     .from("trade_signals")
     .insert({
@@ -575,6 +578,10 @@ async function runTickForUser(
       size_pct: sizePct,
       ai_reasoning: decision.reasoning ?? "",
       ai_model: "google/gemini-3-flash-preview",
+      strategy_id: strategyId,
+      strategy_version: strategyVersion,
+      lifecycle_phase: "proposed",
+      lifecycle_transitions: [proposedTransition],
       context_snapshot: {
         regime: winner.regime,
         lastPrice: winner.lastPrice,
@@ -589,7 +596,9 @@ async function runTickForUser(
 
   if (insertErr) {
     console.error("signal insert failed", insertErr);
-    return { userId, tick: "insert_error", error: insertErr.message, expiredCount, perSymbol };
+    const insGate = gate("INSERT_ERROR", "halt", `Signal insert failed: ${insertErr.message}`);
+    await persistSnapshot(admin, userId, { gateReasons: [insGate], perSymbol, chosenSymbol: winner.symbol });
+    return { userId, tick: "insert_error", error: insertErr.message, gateReasons: [insGate], expiredCount, perSymbol };
   }
 
   // STAGE 6 — EXECUTE (autonomy-gated)
@@ -599,6 +608,7 @@ async function runTickForUser(
   if (autoApprove) {
     const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
     if (winner.regime.pullback) tags.push("pullback");
+    const tradeEnteredTransition = { phase: "entered", at: new Date().toISOString(), by: "auto", reason: `Auto-approved (${autonomy}, conf ${(conf * 100).toFixed(0)}%)` };
     const { data: tradeRow } = await admin
       .from("trades")
       .insert({
@@ -612,7 +622,10 @@ async function runTickForUser(
         take_profit: target,
         tp1_price: tp1,
         tp1_filled: false,
-        strategy_version: "signal-engine v2 (ladder)",
+        strategy_id: strategyId,
+        strategy_version: strategyVersion,
+        lifecycle_phase: "entered",
+        lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
         notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}`,
         status: "open",
@@ -621,6 +634,7 @@ async function runTickForUser(
       .select()
       .single();
 
+    const sigExecutedTransition = { phase: "executed", at: new Date().toISOString(), by: "auto", reason: `Auto-approved (${autonomy})`, tradeId: tradeRow?.id ?? null };
     await admin
       .from("trade_signals")
       .update({
@@ -629,6 +643,8 @@ async function runTickForUser(
         decision_reason: `Auto-approved (${autonomy}, conf ${(conf * 100).toFixed(0)}%)`,
         decided_at: new Date().toISOString(),
         executed_trade_id: tradeRow?.id ?? null,
+        lifecycle_phase: "executed",
+        lifecycle_transitions: [proposedTransition, sigExecutedTransition],
       })
       .eq("id", signalRow.id);
 
@@ -641,6 +657,9 @@ async function runTickForUser(
     });
   }
 
+  // Persist clean snapshot — winner chosen, no blocking gates.
+  await persistSnapshot(admin, userId, { gateReasons: [], perSymbol, chosenSymbol: winner.symbol });
+
   return {
     userId,
     tick: autoApprove ? "executed" : "proposed",
@@ -648,9 +667,29 @@ async function runTickForUser(
     signalId: signalRow.id,
     autonomy,
     confidence: conf,
+    gateReasons: [],
     expiredCount,
     perSymbol,
   };
+}
+
+// Persist the engine's per-tick snapshot to system_state.last_engine_snapshot.
+// Single source of truth for MultiSymbolStrip, Overview, Copilot, RiskCenter.
+async function persistSnapshot(
+  admin: any,
+  userId: string,
+  snap: { gateReasons: GateReason[]; perSymbol: any[]; chosenSymbol: string | null },
+) {
+  const payload = {
+    ranAt: new Date().toISOString(),
+    gateReasons: snap.gateReasons,
+    perSymbol: snap.perSymbol,
+    chosenSymbol: snap.chosenSymbol,
+  };
+  await admin
+    .from("system_state")
+    .update({ last_engine_snapshot: payload, last_heartbeat: payload.ranAt })
+    .eq("user_id", userId);
 }
 
 Deno.serve(async (req) => {
