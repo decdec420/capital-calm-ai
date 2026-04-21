@@ -71,7 +71,11 @@ export default function Trades() {
             </div>
           </div>
 
-          <TradeLifecycleTimeline current="monitored" />
+          <TradeLifecycleTimeline
+            current={openPosition.lifecyclePhase}
+            transitions={openPosition.lifecycleTransitions}
+          />
+
 
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 pt-4 border-t border-border">
             <Cell label="Size" value={`${openPosition.size.toFixed(4)}`} />
@@ -175,7 +179,11 @@ export default function Trades() {
                 <SheetDescription>{selected.strategyVersion || "no strategy tagged"}</SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-4">
-                <TradeLifecycleTimeline current="archived" />
+                <TradeLifecycleTimeline
+                  current={selected.lifecyclePhase}
+                  transitions={selected.lifecycleTransitions}
+                />
+
                 <div className="grid grid-cols-2 gap-3">
                   <Cell label="Side" value={selected.side.toUpperCase()} />
                   <Cell label="Size" value={`${selected.size.toFixed(4)}`} />

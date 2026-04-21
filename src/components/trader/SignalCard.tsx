@@ -101,9 +101,13 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
       <div className="rounded-md bg-secondary/50 border border-border p-3">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">AI reasoning</div>
         <p className="text-sm text-foreground leading-relaxed">{signal.aiReasoning}</p>
-        <div className="text-[10px] text-muted-foreground mt-2">
-          Regime: <span className="text-foreground">{signal.regime}</span> · Setup score:{" "}
-          <span className="text-foreground tabular">{signal.setupScore.toFixed(2)}</span>
+        <div className="text-[10px] text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1">
+          <span>Regime: <span className="text-foreground">{signal.regime}</span></span>
+          <span>Setup: <span className="text-foreground tabular">{signal.setupScore.toFixed(2)}</span></span>
+          <span>Phase: <span className="text-foreground">{signal.lifecyclePhase}</span></span>
+          {signal.strategyVersion && (
+            <span>Strategy: <span className="text-foreground">{signal.strategyVersion}</span></span>
+          )}
         </div>
       </div>
 

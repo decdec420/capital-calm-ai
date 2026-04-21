@@ -1,7 +1,24 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { SystemState, SystemMode, BotStatus, ConnectionState, AutonomyLevel } from "@/lib/domain-types";
+import type {
+  SystemState,
+  SystemMode,
+  BotStatus,
+  ConnectionState,
+  AutonomyLevel,
+  EngineSnapshot,
+} from "@/lib/domain-types";
+
+function parseSnapshot(raw: any): EngineSnapshot | null {
+  if (!raw || typeof raw !== "object" || !raw.ranAt) return null;
+  return {
+    ranAt: String(raw.ranAt),
+    gateReasons: Array.isArray(raw.gateReasons) ? raw.gateReasons : [],
+    perSymbol: Array.isArray(raw.perSymbol) ? raw.perSymbol : [],
+    chosenSymbol: raw.chosenSymbol ?? null,
+  };
+}
 
 function mapRow(r: any): SystemState {
   return {
@@ -16,6 +33,7 @@ function mapRow(r: any): SystemState {
     lastHeartbeat: r.last_heartbeat,
     latencyMs: r.latency_ms,
     autonomyLevel: (r.autonomy_level ?? "manual") as AutonomyLevel,
+    lastEngineSnapshot: parseSnapshot(r.last_engine_snapshot),
   };
 }
 

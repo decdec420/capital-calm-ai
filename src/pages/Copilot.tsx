@@ -8,6 +8,7 @@ import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
 import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
+import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -15,12 +16,10 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { useTrades } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
-import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
-import { computeRegime } from "@/lib/regime";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { TradeSignal } from "@/lib/domain-types";
+import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -42,14 +41,30 @@ export default function Copilot() {
   const { data: account } = useAccountState();
   const { open, closed } = useTrades();
   const { strategies } = useStrategies();
-  const { candles } = useCandles();
   const { pending, history } = useSignals();
-  const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
+  const snapshot = system?.lastEngineSnapshot ?? null;
+  const chosenSym = snapshot?.chosenSymbol ?? null;
+  const chosenRow =
+    snapshot?.perSymbol.find((p) => p.symbol === chosenSym) ??
+    snapshot?.perSymbol[0] ??
+    null;
+  const lastGateReasons: GateReason[] = snapshot?.gateReasons ?? [];
   const activeSignal = pending[0];
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // Render a single structured gate reason as a sonner toast.
+  const toastForGate = (g: GateReason) => {
+    const Icon = gateIconFor(g.code);
+    const tone = gateToneFor(g.severity);
+    const fn = g.severity === "halt" ? toast.error : g.severity === "block" ? toast.warning : toast.info;
+    fn(g.message, {
+      description: `${g.code}${g.meta?.symbol ? ` · ${g.meta.symbol}` : ""}`,
+      icon: <Icon className={cn("h-4 w-4", tone.text)} />,
+    });
+  };
 
   const runEngine = async () => {
     if (running) return;
@@ -77,14 +92,30 @@ export default function Copilot() {
         else toast.error(json.error ?? "Engine failed");
         return;
       }
+      const reasons: GateReason[] = Array.isArray(json.gateReasons) ? json.gateReasons : [];
       if (json.tick === "halted") {
-        toast.info(`Halted: ${json.reasons.join(", ")}`);
+        // Account-level halt(s) — surface every reason so operator knows what tripped.
+        if (reasons.length === 0) toast.error("Engine halted.");
+        else reasons.forEach(toastForGate);
       } else if (json.tick === "skipped") {
-        toast.info("AI chose to skip. Logged to journal.");
+        // Per-symbol skip(s) — show first 2 inline, rest summarised.
+        if (reasons.length === 0) toast.info("AI chose to skip. Logged to journal.");
+        else {
+          reasons.slice(0, 2).forEach(toastForGate);
+          if (reasons.length > 2) {
+            toast.info(`+${reasons.length - 2} more skip reasons`, {
+              description: "See engine snapshot for the full list.",
+            });
+          }
+        }
+      } else if (json.tick === "ai_error") {
+        reasons.forEach(toastForGate);
       } else if (json.tick === "executed") {
         toast.success("Auto-executed!");
       } else if (json.tick === "proposed") {
         toast.success("New signal proposed.");
+      } else if (json.tick === "no_system_state") {
+        reasons.forEach(toastForGate);
       }
     } catch {
       toast.error("Engine connection error.");
@@ -93,6 +124,7 @@ export default function Copilot() {
     }
   };
 
+
   const buildContext = () => ({
     mode: system?.mode,
     bot: system?.bot,
@@ -100,7 +132,20 @@ export default function Copilot() {
     liveTradingEnabled: system?.liveTradingEnabled,
     killSwitchEngaged: system?.killSwitchEngaged,
     account: account ? { equity: account.equity, balanceFloor: account.balanceFloor } : null,
-    regime,
+    engineSnapshot: snapshot
+      ? {
+          ranAt: snapshot.ranAt,
+          chosenSymbol: snapshot.chosenSymbol,
+          gateReasons: snapshot.gateReasons,
+          perSymbol: snapshot.perSymbol.map((p) => ({
+            symbol: p.symbol,
+            regime: p.regime,
+            setupScore: p.setupScore,
+            confidence: p.confidence,
+            chosen: p.chosen,
+          })),
+        }
+      : null,
     openPosition: open[0] ?? null,
     pendingSignal: activeSignal ?? null,
     recentClosed: closed.slice(0, 5).map((t) => ({ side: t.side, outcome: t.outcome, pnlPct: t.pnlPct })),
@@ -334,10 +379,35 @@ export default function Copilot() {
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Context attached</div>
             <ul className="text-xs text-muted-foreground space-y-1.5">
               <li>• Mode: <span className="text-foreground capitalize">{system?.mode ?? "—"}</span></li>
-              <li>• Regime: <span className="text-foreground capitalize">{regime.regime.replace("_", " ")}</span></li>
+              <li>
+                • Engine pick:{" "}
+                <span className="text-foreground capitalize">
+                  {chosenSym ?? "none"}
+                  {chosenRow ? ` · ${String(chosenRow.regime).replace("_", " ")}` : ""}
+                </span>
+              </li>
               <li>• Open: <span className="text-foreground">{open[0] ? `${open[0].side} ${open[0].symbol}` : "none"}</span></li>
               <li>• Pending signal: <span className="text-foreground">{activeSignal ? `${activeSignal.side} (${(activeSignal.confidence*100).toFixed(0)}%)` : "none"}</span></li>
             </ul>
+          </div>
+
+          {/* Last engine gate readout — the operator's "why am I not trading?" panel */}
+          <div className="panel p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Last engine tick</div>
+              {snapshot && (
+                <span className="text-[10px] text-muted-foreground tabular">
+                  {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              )}
+            </div>
+            {!snapshot ? (
+              <p className="text-xs text-muted-foreground italic">No engine snapshot yet. Hit <span className="text-primary">Run engine now</span>.</p>
+            ) : lastGateReasons.length === 0 ? (
+              <p className="text-xs text-status-safe italic">All gates clear. Engine is free to act.</p>
+            ) : (
+              <GateReasonList reasons={lastGateReasons} max={4} />
+            )}
           </div>
         </div>
       </div>

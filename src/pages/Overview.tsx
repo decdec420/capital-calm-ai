@@ -7,6 +7,7 @@ import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
+import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
@@ -32,6 +33,7 @@ import { computeRegime } from "@/lib/regime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
+import type { Regime } from "@/lib/domain-types";
 
 export default function Overview() {
   const { data: account } = useAccountState();
@@ -46,8 +48,20 @@ export default function Overview() {
   const [killOpen, setKillOpen] = useState(false);
   const activeSignal = pendingSignals[0];
 
-  const regime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
-  const lastPrice = candles[candles.length - 1]?.c ?? 0;
+  // Snapshot is the source of truth. Local computeRegime is the fallback
+  // if the engine has never ticked yet (e.g. first-load before first run).
+  const snapshot = system?.lastEngineSnapshot ?? null;
+  const localRegime = useMemo(() => computeRegime("BTC-USD", candles), [candles]);
+  const btcSnap = snapshot?.perSymbol.find((p) => p.symbol === "BTC-USD") ?? null;
+  const regime = btcSnap
+    ? {
+        regime: (btcSnap.regime as Regime) ?? localRegime.regime,
+        confidence: btcSnap.confidence,
+        setupScore: btcSnap.setupScore,
+      }
+    : { regime: localRegime.regime, confidence: localRegime.confidence, setupScore: localRegime.setupScore };
+  const lastGateReasons = snapshot?.gateReasons ?? [];
+  const lastPrice = btcSnap?.lastPrice ?? candles[candles.length - 1]?.c ?? 0;
   const firstPrice = candles[0]?.c ?? lastPrice;
   const pctChange = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
 
@@ -209,6 +223,26 @@ export default function Overview() {
             Review →
           </div>
         </Link>
+      )}
+
+      {/* Why isn't the bot trading? — surfaced from the last engine snapshot */}
+      {!activeSignal && lastGateReasons.length > 0 && (
+        <div className="panel p-4 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Why the engine is sitting on hands
+            </span>
+            {snapshot && (
+              <span className="text-[10px] text-muted-foreground tabular">
+                last tick {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
+          <GateReasonList reasons={lastGateReasons} max={3} />
+          <Link to="/copilot" className="text-xs text-primary hover:underline inline-block">
+            Open Copilot to act →
+          </Link>
+        </div>
       )}
 
       {/* Metric grid */}

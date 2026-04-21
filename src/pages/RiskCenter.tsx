@@ -4,6 +4,7 @@ import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
+import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,8 @@ export default function RiskCenter() {
 
   const blocked = guardrails.filter((g) => g.level === "blocked").length;
   const caution = guardrails.filter((g) => g.level === "caution").length;
+  const snapshot = system?.lastEngineSnapshot ?? null;
+  const lastGateReasons = snapshot?.gateReasons ?? [];
 
   const confirmKill = async () => {
     if (!system) return;
@@ -83,6 +86,30 @@ export default function RiskCenter() {
           <div className="text-2xl font-semibold tabular text-status-caution">{caution}</div>
         </div>
       </div>
+
+      {/* Live engine gates from the last tick — not user-defined guardrails. */}
+      <div className="panel p-4 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Engine gates · last tick
+          </span>
+          {snapshot && (
+            <span className="text-[10px] text-muted-foreground tabular">
+              {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+        {!snapshot ? (
+          <p className="text-xs text-muted-foreground italic">
+            No engine snapshot yet. Run the engine from the Copilot page.
+          </p>
+        ) : lastGateReasons.length === 0 ? (
+          <p className="text-xs text-status-safe italic">All clear — engine has nothing blocking it right now.</p>
+        ) : (
+          <GateReasonList reasons={lastGateReasons} />
+        )}
+      </div>
+
 
       {loading ? (
         <p className="text-xs text-muted-foreground italic">Loading…</p>
