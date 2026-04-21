@@ -49,6 +49,8 @@ export default function Overview() {
   const [brief, setBrief] = useState<string>("");
   const [briefLoading, setBriefLoading] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
+  const [drilldown, setDrilldown] = useState<DrilldownKind | null>(null);
+  const [activeAlert, setActiveAlert] = useState<Alert | null>(null);
   const activeSignal = pendingSignals[0];
 
   // Snapshot is the source of truth. Local computeRegime is the fallback
@@ -71,7 +73,14 @@ export default function Overview() {
   const openPosition = open[0];
   const closedToday = closed.filter((t) => t.closedAt && new Date(t.closedAt).toDateString() === new Date().toDateString());
   const realizedToday = closedToday.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const unrealizedToday = open.reduce((sum, t) => sum + (t.unrealizedPnl ?? 0), 0);
   const lossToday = Math.min(0, realizedToday);
+
+  const severityCounts = useMemo(() => {
+    const c = { critical: 0, warning: 0, info: 0 };
+    for (const a of alerts) c[a.severity] = (c[a.severity] ?? 0) + 1;
+    return c;
+  }, [alerts]);
 
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
