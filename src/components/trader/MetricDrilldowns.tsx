@@ -49,7 +49,7 @@ export function MetricDrilldowns(props: MetricDrilldownsProps) {
   );
 }
 
-type Common = MetricDrilldownsProps & { open: boolean; onClose: () => void };
+type Common = Omit<MetricDrilldownsProps, "open" | "onOpenChange"> & { open: boolean; onClose: () => void };
 
 function fmtMoney(n: number, opts: Intl.NumberFormatOptions = {}) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...opts });
