@@ -90,8 +90,8 @@ export default function Learning() {
         <div className="panel">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wider text-status-warning font-semibold">Needs your call</span>
-              <StatusBadge tone="warning" size="sm">{needsReview.length}</StatusBadge>
+              <span className="text-[11px] uppercase tracking-wider text-status-caution font-semibold">Needs your call</span>
+              <StatusBadge tone="caution" size="sm">{needsReview.length}</StatusBadge>
             </div>
             <span className="text-xs text-muted-foreground">Borderline backtests — your judgement, not the machine's.</span>
           </div>
