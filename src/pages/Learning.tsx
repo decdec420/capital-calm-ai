@@ -78,7 +78,7 @@ export default function Learning() {
           </div>
           <div className="flex gap-3 text-right shrink-0">
             <CountStat label="Running" value={inFlight.length} />
-            <CountStat label="Needs you" value={counts.needsReview} tone="warning" />
+            <CountStat label="Needs you" value={counts.needsReview} tone="caution" />
             <CountStat label="Accepted" value={counts.accepted} tone="safe" />
             <CountStat label="Rejected" value={counts.rejected} tone="blocked" />
           </div>
@@ -185,8 +185,8 @@ export default function Learning() {
   );
 }
 
-function CountStat({ label, value, tone }: { label: string; value: number; tone?: "safe" | "warning" | "blocked" }) {
-  const toneClass = tone === "safe" ? "text-status-safe" : tone === "warning" ? "text-status-warning" : tone === "blocked" ? "text-status-blocked" : "text-foreground";
+function CountStat({ label, value, tone }: { label: string; value: number; tone?: "safe" | "caution" | "blocked" }) {
+  const toneClass = tone === "safe" ? "text-status-safe" : tone === "caution" ? "text-status-caution" : tone === "blocked" ? "text-status-blocked" : "text-foreground";
   return (
     <div>
       <div className={cn("text-2xl font-semibold tabular leading-none", toneClass)}>{value}</div>
