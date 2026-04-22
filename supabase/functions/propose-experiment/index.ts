@@ -159,9 +159,9 @@ Deno.serve(async (req: Request) => {
         global: { headers: { Authorization: authHeader } },
       });
       const token = authHeader.replace("Bearer ", "");
-      const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
-      if (claimsError || !claimsData?.claims) return json({ error: "Unauthorized" }, 401);
-      userIds = [claimsData.claims.sub as string];
+      const { data: userData, error: userErr } = await userClient.auth.getUser(token);
+      if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
+      userIds = [userData.user.id];
     }
 
     const results = await Promise.all(userIds.map((uid) => proposeForUser(admin, uid, LOVABLE_API_KEY).catch((e) => ({ userId: uid, error: String(e) }))));
