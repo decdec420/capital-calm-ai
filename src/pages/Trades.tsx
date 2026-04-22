@@ -368,43 +368,49 @@ function CloseTradeDialog({
   trade: Trade | null;
   defaultPrice: number;
   onClose: () => void;
-  onSubmit: (id: string, input: { exitPrice: number; reasonTags: string[]; notes: string | null }) => void;
+  onSubmit: (id: string, input: { reason: string }) => void;
 }) {
-  const [exit, setExit] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [notes, setNotes] = useState("");
+  const [reason, setReason] = useState("");
 
   // Reset on open
   useMemo(() => {
     if (trade) {
-      setExit(defaultPrice ? defaultPrice.toFixed(2) : "");
-      setTags(trade.reasonTags);
-      setNotes(trade.notes ?? "");
+      setReason("");
     }
-  }, [trade, defaultPrice]);
+  }, [trade]);
 
   return (
     <Dialog open={!!trade} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="bg-card border-border max-w-md">
         <DialogHeader>
           <DialogTitle>Close trade</DialogTitle>
-          <DialogDescription>{trade ? `${trade.side.toUpperCase()} ${trade.symbol} @ $${trade.entryPrice.toFixed(2)}` : ""}</DialogDescription>
+          <DialogDescription>
+            {trade ? `${trade.side.toUpperCase()} ${trade.symbol} @ $${trade.entryPrice.toFixed(2)}` : ""}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <Field label="Exit price"><NumberStepper value={exit} onChange={setExit} step={1} shiftMultiplier={10} min={0} precision={2} prefix="$" /></Field>
-          <Field label="Reason tags"><TagInput value={tags} onChange={setTags} /></Field>
-          <Field label="Notes"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} /></Field>
+          <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
+            Exit price is fetched live from Coinbase spot (~${defaultPrice.toFixed(2)}) when you confirm.
+            The server computes realized PnL and updates your cash balance.
+          </div>
+          <Field label="Reason (optional)">
+            <Textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Thesis broken, locking in the gain"
+            />
+          </Field>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button
             onClick={() => {
               if (!trade) return;
-              if (!exit) return toast.error("Exit price required.");
-              onSubmit(trade.id, { exitPrice: Number(exit), reasonTags: tags, notes: notes || null });
+              onSubmit(trade.id, { reason: reason || "Operator closed" });
             }}
           >
-            Close trade
+            Close at market
           </Button>
         </DialogFooter>
       </DialogContent>

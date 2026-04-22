@@ -56,7 +56,16 @@ export interface NewTradeInput {
 }
 
 export interface CloseTradeInput {
-  exitPrice: number;
+  /**
+   * Optional — ignored by the server. `trade-close` fetches the live
+   * Coinbase spot price and uses that as the fill. Kept here for
+   * backwards-compat with callers that still pass a price they saw
+   * in the UI.
+   */
+  exitPrice?: number;
+  /** Operator-supplied reason string (journaled). */
+  reason?: string;
+  /** Back-compat aliases; not forwarded anywhere meaningful. */
   reasonTags?: string[];
   notes?: string | null;
 }
@@ -118,47 +127,38 @@ export function useTrades() {
     if (err) throw err;
   };
 
-  const close = async (id: string, input: CloseTradeInput) => {
+  /**
+   * Close an open trade. The browser can no longer write to
+   * status/exit_price/pnl/closed_at/outcome directly (Phase 2
+   * trigger blocks it). This helper delegates to the `trade-close`
+   * edge function which fetches the live Coinbase spot price,
+   * computes realized P&L, transitions the lifecycle FSM, and
+   * banks the result to account_state.cash.
+   */
+  const close = async (id: string, input: CloseTradeInput = {}) => {
     if (!user) throw new Error("Not signed in");
     const trade = trades.find((t) => t.id === id);
     if (!trade) throw new Error("Trade not found");
-    const sideMult = trade.side === "long" ? 1 : -1;
-    const pnl = (input.exitPrice - trade.entryPrice) * trade.size * sideMult;
-    const pnlPct = ((input.exitPrice - trade.entryPrice) / trade.entryPrice) * 100 * sideMult;
-    const outcome: TradeOutcome = pnl > 0.0001 ? "win" : pnl < -0.0001 ? "loss" : "breakeven";
-    const { error: err } = await supabase
-      .from("trades")
-      .update({
-        status: "closed",
-        exit_price: input.exitPrice,
-        pnl,
-        pnl_pct: pnlPct,
-        outcome,
-        closed_at: new Date().toISOString(),
-        reason_tags: input.reasonTags ?? trade.reasonTags,
-        notes: input.notes ?? trade.notes,
-      })
-      .eq("id", id)
-      .eq("user_id", user.id);
-    if (err) throw err;
 
-    // Drop a journal entry for the close
-    await supabase.from("journal_entries").insert({
-      user_id: user.id,
-      kind: "trade",
-      title: `Closed ${trade.side} ${trade.symbol} ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%`,
-      summary: `Exited at $${input.exitPrice.toFixed(2)}. PnL ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}.`,
-      tags: [outcome, trade.strategyVersion].filter(Boolean),
+    const { data, error: err } = await supabase.functions.invoke("trade-close", {
+      body: {
+        tradeId: id,
+        reason: input.reason ?? "Operator closed",
+      },
     });
+    if (err) throw err;
+    if (data?.error) throw new Error(String(data.error));
 
-    // Update account equity
-    const { data: acct } = await supabase.from("account_state").select("equity, cash").eq("user_id", user.id).maybeSingle();
-    if (acct) {
-      await supabase
-        .from("account_state")
-        .update({ equity: Number(acct.equity) + pnl, cash: Number(acct.cash) + pnl })
-        .eq("user_id", user.id);
-    }
+    // The edge function already inserts the journal row and updates
+    // account_state.cash. Realtime on the trades table will kick the
+    // `refetch()` subscribed above, so the UI is self-refreshing.
+    return data as {
+      ok: boolean;
+      tradeId: string;
+      fillPrice: number;
+      pnl: number;
+      outcome: TradeOutcome;
+    };
   };
 
   const remove = async (id: string) => {

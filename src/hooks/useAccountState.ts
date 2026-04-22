@@ -52,15 +52,28 @@ export function useAccountState() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  const update = async (patch: Partial<AccountState>) => {
+  /**
+   * Update the settings fields on account_state.
+   *
+   * As of the Phase 0 truth-pass migration, `cash`, `equity`, and
+   * `start_of_day_equity` are server-only — attempts to patch them
+   * from a JWT'd client are silently reverted by the trigger. Those
+   * values only move when `mark-to-market` or `trade-close` fire.
+   *
+   * Client-writable here: `balance_floor` and `base_currency`.
+   */
+  const update = async (
+    patch: Pick<Partial<AccountState>, "balanceFloor" | "baseCurrency">,
+  ) => {
     if (!user || !data) return;
-    const dbPatch: any = {};
-    if (patch.equity !== undefined) dbPatch.equity = patch.equity;
-    if (patch.cash !== undefined) dbPatch.cash = patch.cash;
-    if (patch.startOfDayEquity !== undefined) dbPatch.start_of_day_equity = patch.startOfDayEquity;
+    const dbPatch: Record<string, unknown> = {};
     if (patch.balanceFloor !== undefined) dbPatch.balance_floor = patch.balanceFloor;
     if (patch.baseCurrency !== undefined) dbPatch.base_currency = patch.baseCurrency;
-    const { error: err } = await supabase.from("account_state").update(dbPatch).eq("user_id", user.id);
+    if (Object.keys(dbPatch).length === 0) return;
+    const { error: err } = await supabase
+      .from("account_state")
+      .update(dbPatch)
+      .eq("user_id", user.id);
     if (err) throw err;
     await refetch();
   };
