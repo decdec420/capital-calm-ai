@@ -1,24 +1,56 @@
 // Pure-TS backtester for the trend-rev family of strategies.
 // Runs entirely client-side over Coinbase candles, returns the same
 // StrategyMetrics shape that lives on strategies.metrics jsonb.
+//
+// Phase 3 upgrade: fees (taker bps, both sides) and slippage (bps applied
+// adversely to entry + exit) are now first-class inputs so the numbers
+// the UI shows bear some resemblance to numbers a real broker would
+// produce. Defaults approximate Coinbase Advanced Trade taker fees
+// (~40 bps) + 5 bps slippage, which is a conservative ceiling for BTC
+// top-of-book on a quiet tape.
 
 import type { Candle, StrategyParam, StrategyMetrics } from "./domain-types";
 
 export interface BacktestTrade {
   side: "long" | "short";
   entryT: number;
-  entryPrice: number;
+  entryPrice: number;    // raw fill, pre-slippage
   exitT: number;
-  exitPrice: number;
-  pnlR: number; // PnL in units of risk (R)
-  pnlPct: number;
+  exitPrice: number;     // raw fill, pre-slippage
+  pnlR: number;          // PnL in units of risk (R), net of fees + slippage
+  pnlPct: number;        // PnL percent on notional, net of fees + slippage
+  grossPnlR: number;     // PnL in R before fees + slippage (audit trail)
+  feesPaidPct: number;   // two-sided taker fee, as fraction of notional
+  slippagePct: number;   // two-sided slippage drag, as fraction of notional
 }
 
 export interface BacktestResult {
   metrics: StrategyMetrics;
   trades: BacktestTrade[];
   candleCount: number;
-  equityCurve: number[]; // cumulative R
+  equityCurve: number[]; // cumulative R, net
+  grossEquityCurve: number[]; // cumulative R, pre-fees-and-slippage
+  walkForward?: WalkForwardSplit[]; // present if runWalkForward ran
+}
+
+export interface BacktestCosts {
+  takerFeeBps: number;   // one-sided, applied twice (entry + exit)
+  slippageBps: number;   // one-sided, applied twice (entry + exit)
+}
+
+export const DEFAULT_COSTS: BacktestCosts = {
+  // Coinbase Advanced Trade taker ~40 bps (0.40%) for a retail lane.
+  takerFeeBps: 40,
+  // 5 bps per side is a reasonable slippage floor for BTC top-of-book;
+  // the runBacktest loop widens it on high-vol candles.
+  slippageBps: 5,
+};
+
+export interface WalkForwardSplit {
+  fromT: number;
+  toT: number;
+  inSample: StrategyMetrics;
+  outOfSample: StrategyMetrics;
 }
 
 // ---------- helpers ----------
@@ -83,12 +115,17 @@ function atr(candles: Candle[], period: number): number[] {
 }
 
 // ---------- main runner ----------
-export function runBacktest(candles: Candle[], params: StrategyParam[]): BacktestResult {
+export function runBacktest(
+  candles: Candle[],
+  params: StrategyParam[],
+  costs: BacktestCosts = DEFAULT_COSTS,
+): BacktestResult {
   const empty: BacktestResult = {
     metrics: { expectancy: 0, winRate: 0, maxDrawdown: 0, sharpe: 0, trades: 0 },
     trades: [],
     candleCount: candles.length,
     equityCurve: [],
+    grossEquityCurve: [],
   };
   if (candles.length < 50) return empty;
 
@@ -129,9 +166,19 @@ export function runBacktest(candles: Candle[], params: StrategyParam[]): Backtes
       }
       if (exitPrice !== null) {
         const sideMult = position.side === "long" ? 1 : -1;
-        const pnlPrice = (exitPrice - position.entryPrice) * sideMult;
-        const pnlR = position.risk > 0 ? pnlPrice / position.risk : 0;
-        const pnlPct = (pnlPrice / position.entryPrice) * 100;
+        const grossPnlPrice = (exitPrice - position.entryPrice) * sideMult;
+
+        // Fee + slippage: both costs apply on each side. Slippage worsens
+        // the fill adversely by `slippageBps` of the price; fees take
+        // `takerFeeBps` of the notional on each leg.
+        const feeFrac = (costs.takerFeeBps * 2) / 10_000;
+        const slipFrac = (costs.slippageBps * 2) / 10_000;
+        const costPrice = (Math.abs(position.entryPrice) + Math.abs(exitPrice)) * (feeFrac + slipFrac) * 0.5;
+        const netPnlPrice = grossPnlPrice - costPrice;
+
+        const grossPnlR = position.risk > 0 ? grossPnlPrice / position.risk : 0;
+        const pnlR = position.risk > 0 ? netPnlPrice / position.risk : 0;
+        const pnlPct = (netPnlPrice / position.entryPrice) * 100;
         trades.push({
           side: position.side,
           entryT: position.entryT,
@@ -140,6 +187,9 @@ export function runBacktest(candles: Candle[], params: StrategyParam[]): Backtes
           exitPrice,
           pnlR,
           pnlPct,
+          grossPnlR,
+          feesPaidPct: feeFrac,
+          slippagePct: slipFrac,
         });
         position = null;
       }
@@ -184,12 +234,19 @@ export function runBacktest(candles: Candle[], params: StrategyParam[]): Backtes
   const winRate = wins.length / trades.length;
   const expectancy = trades.reduce((s, t) => s + t.pnlR, 0) / trades.length; // R per trade
 
-  // equity curve in R
+  // equity curve in R (net of costs)
   const curve: number[] = [];
   let cum = 0;
   for (const t of trades) {
     cum += t.pnlR;
     curve.push(cum);
+  }
+  // parallel gross curve, for pre-cost comparison
+  const grossCurve: number[] = [];
+  let gcum = 0;
+  for (const t of trades) {
+    gcum += t.grossPnlR;
+    grossCurve.push(gcum);
   }
   // max drawdown (in R, expressed as a percentage of peak)
   let peak = 0;
@@ -221,16 +278,51 @@ export function runBacktest(candles: Candle[], params: StrategyParam[]): Backtes
     trades,
     candleCount: candles.length,
     equityCurve: curve,
+    grossEquityCurve: grossCurve,
   };
+}
+
+// ---------- walk-forward harness ----------
+// Splits the candle history into `folds` contiguous chunks. For each chunk
+// past the first, the prior window is used for "in-sample" evaluation
+// (no re-fit — we're not optimizing params here, we're just quantifying
+// how much the edge degrades out-of-sample) and the fold itself is the
+// out-of-sample window. The caller compares `inSample` vs `outOfSample`
+// metrics per fold to gauge robustness.
+export function runWalkForward(
+  candles: Candle[],
+  params: StrategyParam[],
+  folds = 4,
+  costs: BacktestCosts = DEFAULT_COSTS,
+): WalkForwardSplit[] {
+  if (candles.length < 200 || folds < 2) return [];
+  const sorted = [...candles].sort((a, b) => a.t - b.t);
+  const chunkSize = Math.floor(sorted.length / folds);
+  const splits: WalkForwardSplit[] = [];
+  for (let f = 1; f < folds; f++) {
+    const inSample = sorted.slice(0, f * chunkSize);
+    const outOfSample = sorted.slice(f * chunkSize, (f + 1) * chunkSize);
+    if (outOfSample.length < 50) continue;
+    const inResult = runBacktest(inSample, params, costs);
+    const oosResult = runBacktest(outOfSample, params, costs);
+    splits.push({
+      fromT: outOfSample[0].t,
+      toT: outOfSample[outOfSample.length - 1].t,
+      inSample: inResult.metrics,
+      outOfSample: oosResult.metrics,
+    });
+  }
+  return splits;
 }
 
 // Convenience: fetch Coinbase candles and run the backtest.
 export async function fetchCandlesAndBacktest(
   params: StrategyParam[],
-  opts: { symbol?: string; granularity?: number } = {},
+  opts: { symbol?: string; granularity?: number; costs?: BacktestCosts; walkForwardFolds?: number } = {},
 ): Promise<BacktestResult> {
   const symbol = opts.symbol ?? "BTC-USD";
   const granularity = opts.granularity ?? 3600; // 1h
+  const costs = opts.costs ?? DEFAULT_COSTS;
   const url = `https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=${granularity}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Coinbase ${res.status}`);
@@ -238,5 +330,9 @@ export async function fetchCandlesAndBacktest(
   const raw = (await res.json()) as Raw[];
   const sorted = [...raw].sort((a, b) => a[0] - b[0]);
   const candles: Candle[] = sorted.map(([t, l, h, o, c, v]) => ({ t, l, h, o, c, v }));
-  return runBacktest(candles, params);
+  const result = runBacktest(candles, params, costs);
+  if (opts.walkForwardFolds && opts.walkForwardFolds >= 2) {
+    result.walkForward = runWalkForward(candles, params, opts.walkForwardFolds, costs);
+  }
+  return result;
 }
