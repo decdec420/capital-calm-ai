@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/trader/AppLayout";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ExplainModeProvider } from "@/contexts/ExplainModeContext";
 import { ProtectedRoute } from "@/components/trader/ProtectedRoute";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -29,7 +30,8 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <Routes>
+          <ExplainModeProvider>
+            <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route
@@ -60,6 +62,7 @@ const App = () => (
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </ExplainModeProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

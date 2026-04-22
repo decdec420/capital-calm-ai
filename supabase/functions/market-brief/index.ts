@@ -71,24 +71,42 @@ RECENT CLOSED TRADES
 ${(closedTrades ?? []).map((t: any) => `- ${t.side} ${t.symbol} ${t.outcome} ${t.pnl_pct ?? 0}%`).join("\n") || "- (none yet)"}
 `.trim();
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are the Trader OS market brief. Be terse, witty, and risk-first. 2-3 sentences max. No emojis. Use trader vernacular but stay precise. If the setup is weak, say sit on hands. Do not invent prices or stats.",
-          },
-          { role: "user", content: `Generate today's brief.\n\n${context}` },
-        ],
-      }),
-    });
+    // Hard 25s timeout so we never sit on the 150s idle limit
+    const ac = new AbortController();
+    const timeoutId = setTimeout(() => ac.abort(), 25_000);
+
+    let aiResp: Response;
+    try {
+      aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        signal: ac.signal,
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash-lite",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are the Trader OS market brief. Be terse, witty, and risk-first. 2-3 sentences max. No emojis. Use trader vernacular but stay precise. If the setup is weak, say sit on hands. Do not invent prices or stats.",
+            },
+            { role: "user", content: `Generate today's brief.\n\n${context}` },
+          ],
+        }),
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === "AbortError") {
+        return new Response(JSON.stringify({ error: "Brief timed out. Try again." }), {
+          status: 504,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      throw err;
+    }
+    clearTimeout(timeoutId);
 
     if (!aiResp.ok) {
       if (aiResp.status === 429) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +9,7 @@ import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
 import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
+import { ConversationSidebar } from "@/components/trader/ConversationSidebar";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,12 +17,12 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { useTrades } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
+import { useExperiments } from "@/hooks/useExperiments";
 import { useSignals } from "@/hooks/useSignals";
+import { useConversations } from "@/hooks/useConversations";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
-
-type Msg = { role: "user" | "assistant"; content: string };
 
 const SUGGESTED = [
   "What's the current regime telling me?",
@@ -31,7 +32,6 @@ const SUGGESTED = [
 ];
 
 export default function Copilot() {
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
@@ -41,7 +41,22 @@ export default function Copilot() {
   const { data: account } = useAccountState();
   const { open, closed } = useTrades();
   const { strategies } = useStrategies();
+  const { counts: expCounts, needsReview: expNeedsReview, recentlyAutoResolved: expRecent } = useExperiments();
   const { pending, history } = useSignals();
+  const {
+    conversations,
+    activeId,
+    setActiveId,
+    messages,
+    loading: convLoading,
+    loadingMessages,
+    createConversation,
+    renameConversation,
+    deleteConversation,
+    appendLocalMessage,
+    updateLastAssistant,
+    reloadActiveMessages,
+  } = useConversations();
   const snapshot = system?.lastEngineSnapshot ?? null;
   const chosenSym = snapshot?.chosenSymbol ?? null;
   const chosenRow =
@@ -156,25 +171,37 @@ export default function Copilot() {
       decidedBy: s.decidedBy,
     })),
     approvedStrategy: strategies.find((s) => s.status === "approved"),
+    experiments: {
+      running: expCounts.running + expCounts.queued,
+      needsReview: expCounts.needsReview,
+      copilotProposed: expCounts.copilotProposed,
+      autoResolved: expCounts.autoResolved,
+      pendingReview: expNeedsReview.slice(0, 3).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta, hypothesis: e.hypothesis })),
+      recentlyAccepted: expRecent.filter((e) => e.status === "accepted").slice(0, 5).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta })),
+    },
   });
 
   const send = async (text: string) => {
     if (!text.trim() || streaming) return;
-    const userMsg: Msg = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+
+    // Make sure we have an active conversation. If not, create one on the fly.
+    let convoId = activeId;
+    if (!convoId) {
+      convoId = await createConversation();
+      if (!convoId) {
+        toast.error("Could not start a new conversation.");
+        return;
+      }
+    }
+
+    appendLocalMessage({ role: "user", content: text });
     setInput("");
     setStreaming(true);
 
     let buffer = "";
     const upsert = (chunk: string) => {
       buffer += chunk;
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: buffer } : m));
-        }
-        return [...prev, { role: "assistant", content: buffer }];
-      });
+      updateLastAssistant(buffer);
     };
 
     try {
@@ -195,7 +222,8 @@ export default function Copilot() {
           apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
         body: JSON.stringify({
-          messages: [...messages, userMsg],
+          conversationId: convoId,
+          userMessage: text,
           context: buildContext(),
         }),
       });
@@ -241,6 +269,9 @@ export default function Copilot() {
           }
         }
       }
+
+      // Reload from server so we get canonical IDs and the auto-set title.
+      await reloadActiveMessages();
     } catch (e) {
       console.error(e);
       toast.error("Copilot connection error.");
@@ -297,53 +328,74 @@ export default function Copilot() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* CONVERSATION SIDEBAR — your thread history, persistent across refreshes */}
+        <div className="lg:col-span-1 lg:row-span-2" style={{ minHeight: "55vh" }}>
+          <ConversationSidebar
+            conversations={conversations}
+            activeId={activeId}
+            onSelect={setActiveId}
+            onNew={async () => {
+              await createConversation();
+            }}
+            onRename={renameConversation}
+            onDelete={deleteConversation}
+            loading={convLoading}
+          />
+        </div>
+
         {/* CHAT */}
         <div className="lg:col-span-3 panel flex flex-col" style={{ minHeight: "55vh" }}>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center text-center py-12">
-                <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
-                  <Sparkles className="h-5 w-5" />
+          {loadingMessages && messages.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-xs text-muted-foreground italic">Loading thread…</p>
+            </div>
+          ) : (
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.length === 0 && (
+                <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                  <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                    Live context (mode, regime, position, signals, autonomy) is auto-attached. Threads persist across refreshes.
+                  </p>
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
+                    {SUGGESTED.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => send(s)}
+                        className="text-left text-xs px-3 py-2.5 rounded-md border border-border bg-card hover:bg-accent hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                  Live context (mode, regime, position, signals, autonomy) is auto-attached.
-                </p>
-                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
-                  {SUGGESTED.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => send(s)}
-                      className="text-left text-xs px-3 py-2.5 rounded-md border border-border bg-card hover:bg-accent hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
+              )}
+              {messages.map((m) => (
+                <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                  <div
+                    className={cn(
+                      "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
+                      m.role === "user"
+                        ? "bg-primary/15 border border-primary/25 text-foreground"
+                        : "bg-secondary border border-border text-foreground",
+                    )}
+                  >
+                    {m.role === "assistant" ? (
+                      <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
+                        <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-            {messages.map((m, i) => (
-              <div key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
-                    m.role === "user"
-                      ? "bg-primary/15 border border-primary/25 text-foreground"
-                      : "bg-secondary border border-border text-foreground",
-                  )}
-                >
-                  {m.role === "assistant" ? (
-                    <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
-                      <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           <form
             onSubmit={(e) => {

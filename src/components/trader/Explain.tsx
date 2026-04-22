@@ -1,16 +1,16 @@
 import type { ReactNode } from "react";
-import { Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useExplainMode } from "@/contexts/ExplainModeContext";
 
 interface ExplainProps {
-  /** Tooltip body — what this thing actually means in plain English. */
+  /** Plain-English meaning of this thing. */
   hint: ReactNode;
   /** Optional bold title shown above the hint. */
   title?: string;
-  /** Element being explained. Wrapped element triggers tooltip on hover/focus. */
+  /** Element being explained. */
   children: ReactNode;
-  /** Side of the tooltip. */
+  /** Side of the popover when open. */
   side?: "top" | "right" | "bottom" | "left";
   /** Render as inline-block when wrapping inline content. */
   inline?: boolean;
@@ -18,62 +18,82 @@ interface ExplainProps {
 }
 
 /**
- * Hover/focus tooltip — Robinhood-style info-label pattern. Always available,
- * no global mode. The wrapped element gets a `cursor-help` so users discover
- * that hovering reveals more context.
+ * Opt-in explainer. Invisible by default — children render bare, no cursor change,
+ * no icons, no hover tooltip. When the user enables Explain mode (⌘/ or the toggle
+ * in the TopBar), every Explain wrapper gets a subtle highlight and becomes
+ * click-to-reveal via a popover. Inspired by Figma's "?" overlay and Raycast's
+ * keyboard-first surfacing.
  */
-export function Explain({ hint, title, children, side = "top", inline, className }: ExplainProps) {
+export function Explain({ hint, title, children, side = "bottom", inline, className }: ExplainProps) {
+  const { enabled } = useExplainMode();
+
+  if (!enabled) {
+    // Off: render children completely bare. No wrapper styling at all to avoid
+    // shifting layout vs. when the component isn't used.
+    return <>{children}</>;
+  }
+
   return (
-    <Tooltip delayDuration={150}>
-      <TooltipTrigger asChild>
+    <Popover>
+      <PopoverTrigger asChild>
         <span
           tabIndex={0}
+          role="button"
+          aria-label={title ? `Explain: ${title}` : "Explain"}
           className={cn(
-            inline ? "inline-block" : "block",
-            "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-sm",
+            inline ? "inline-flex" : "flex",
+            "items-center cursor-pointer rounded-md outline-none transition-colors",
+            "ring-1 ring-primary/30 bg-primary/5 hover:bg-primary/10",
+            "focus-visible:ring-2 focus-visible:ring-primary/60",
             className,
           )}
         >
           {children}
         </span>
-      </TooltipTrigger>
-      <TooltipContent side={side} className="max-w-xs text-xs leading-relaxed">
+      </PopoverTrigger>
+      <PopoverContent side={side} className="w-72 text-xs leading-relaxed p-3">
         {title && <div className="font-semibold text-foreground mb-1">{title}</div>}
         <div className="text-muted-foreground">{hint}</div>
-      </TooltipContent>
-    </Tooltip>
+      </PopoverContent>
+    </Popover>
   );
 }
 
 /**
- * Tiny ⓘ icon for use inline next to a metric label. Shows tooltip on hover/focus.
- * Use this when you want the discoverability cue (the icon) rather than wrapping
- * the whole element.
+ * For places (like MetricCard labels) that previously rendered a tiny ⓘ icon
+ * even when no one was looking. We keep the API for backwards compat but it now
+ * just delegates to <Explain> wrapping a single space — when explain mode is on,
+ * a small chip appears next to the label; when off, nothing renders.
  */
 export function ExplainIcon({
   hint,
   title,
-  side = "top",
+  side = "bottom",
   className,
 }: Omit<ExplainProps, "children" | "inline">) {
+  const { enabled } = useExplainMode();
+  if (!enabled) return null;
+
   return (
-    <Tooltip delayDuration={150}>
-      <TooltipTrigger asChild>
+    <Popover>
+      <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={title ? `What is ${title}?` : "More info"}
+          aria-label={title ? `Explain ${title}` : "Explain"}
           className={cn(
-            "inline-flex items-center justify-center text-muted-foreground/60 hover:text-foreground transition-colors cursor-help outline-none focus-visible:text-foreground",
+            "inline-flex h-4 items-center justify-center rounded-full px-1.5 text-[9px] font-semibold uppercase tracking-wider",
+            "bg-primary/15 text-primary hover:bg-primary/25 transition-colors outline-none",
+            "focus-visible:ring-2 focus-visible:ring-primary/60",
             className,
           )}
         >
-          <Info className="h-3 w-3" />
+          ?
         </button>
-      </TooltipTrigger>
-      <TooltipContent side={side} className="max-w-xs text-xs leading-relaxed">
+      </PopoverTrigger>
+      <PopoverContent side={side} className="w-72 text-xs leading-relaxed p-3">
         {title && <div className="font-semibold text-foreground mb-1">{title}</div>}
         <div className="text-muted-foreground">{hint}</div>
-      </TooltipContent>
-    </Tooltip>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -1,6 +1,7 @@
-import { Activity, BookOpen, Brain, LayoutDashboard, LineChart, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
+import { Activity, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useLocation } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
+import { toast } from "sonner";
 import {
   Sidebar,
   SidebarContent,
@@ -14,7 +15,9 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 const sections = [
   {
@@ -38,15 +41,30 @@ const sections = [
     label: "Assistant",
     items: [
       { title: "AI Copilot", url: "/copilot", icon: Sparkles },
-      { title: "Settings", url: "/settings", icon: Settings },
     ],
   },
 ];
+
+const initialsFor = (name?: string | null, email?: string | null) => {
+  const source = (name || email || "OP").trim();
+  const parts = source.split(/[\s@._-]+/).filter(Boolean);
+  const initials = (parts[0]?.[0] ?? "O") + (parts[1]?.[0] ?? "");
+  return initials.toUpperCase().slice(0, 2);
+};
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const { user, profile, signOut } = useAuth();
+
+  const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
+  const initials = initialsFor(profile?.display_name, user?.email);
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out. Stay disciplined.");
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -101,12 +119,55 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border">
-        {!collapsed && (
-          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-            v0.1 · BTC-USD
-          </div>
-        )}
+      {/* User shelf — avatar + name + email; popover with Settings & Sign out */}
+      <SidebarFooter className="border-t border-sidebar-border p-2">
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "w-full flex items-center gap-2.5 rounded-md p-1.5 text-left transition-colors",
+                "hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                collapsed && "justify-center",
+              )}
+              aria-label="Open user menu"
+            >
+              <div className="h-8 w-8 shrink-0 rounded-full bg-secondary border border-border flex items-center justify-center text-[11px] font-medium text-foreground">
+                {initials}
+              </div>
+              {!collapsed && (
+                <div className="flex-1 min-w-0 leading-tight">
+                  <div className="text-sm text-sidebar-foreground truncate">{displayName}</div>
+                  <div className="text-[10px] text-muted-foreground truncate">{user?.email}</div>
+                </div>
+              )}
+              {!collapsed && <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            side="right"
+            align="end"
+            className="w-56 p-1 bg-popover border-border"
+          >
+            <div className="px-2 py-1.5 border-b border-border mb-1">
+              <div className="text-sm text-foreground truncate">{displayName}</div>
+              <div className="text-[11px] text-muted-foreground truncate">{user?.email}</div>
+            </div>
+            <Link
+              to="/settings"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-foreground hover:bg-accent"
+            >
+              <Settings className="h-4 w-4" /> Settings
+            </Link>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4" /> Sign out
+            </button>
+          </PopoverContent>
+        </Popover>
       </SidebarFooter>
     </Sidebar>
   );

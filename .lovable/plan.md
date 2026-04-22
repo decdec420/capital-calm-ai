@@ -1,89 +1,142 @@
 
 
-## Wire Trader OS to live data
+## Make experiments AI-run, not user-run
 
-Goodbye `src/mocks/data.ts`. Every page gets real prices, real per-user persistence, and real AI — all behind your auth. New users land on a clean slate with one starter strategy and the default guardrails so the app is immediately usable.
+Right now Experiments is a glorified spreadsheet — you type the parameter, you compute the delta, you flip the status. The Copilot is silent throughout. Let's flip it so the AI proposes, runs, and reports — the operator just reviews.
 
-### What you'll get
+### The new model
 
-**1. Real BTC-USD prices**
-- `PriceChart` and `marketRegime` swap mock candles for live Coinbase public API data (`/products/BTC-USD/candles`, no key needed).
-- A `useCandles(symbol, granularity)` hook polls every 30s and recomputes regime (trending/range/chop), volatility, and a setup score from the actual candles.
-- The Overview hero, MarketIntel page, and StrategyLab all read from this single source.
+```text
+                    ┌──────────────────────────────────┐
+ Copilot tick  ───▶ │ propose-experiment edge function │
+ (cron, hourly)     │  · scans recent trades + regime  │
+                    │  · picks ONE param to test       │
+                    │  · writes row: status=queued     │
+                    └─────────────┬────────────────────┘
+                                  │
+                    ┌─────────────▼──────────────────┐
+ run-experiment  ◀──┤ pg_cron picks queued rows      │
+ edge function      │  · pulls candles, runs backtest│
+                    │  · fills before/after/delta    │
+                    │  · status=accepted|rejected    │
+                    │  · status=needs_review (close) │
+                    └─────────────┬──────────────────┘
+                                  │
+                    ┌─────────────▼──────────────────┐
+ Operator UI    ◀───┤ Copilot weekly digest          │
+ (only when         │  · "I tested 4 things this wk" │
+  attention needed) │  · 1 needs your call           │
+                    └────────────────────────────────┘
+```
 
-**2. Per-user persistence in Lovable Cloud**
-Eight new tables, all RLS-locked to `auth.uid()`, every page reads/writes the operator's own data:
+Three moving parts: a **proposer**, a **runner**, and a **digest** the user sees. The first two are silent.
 
-| Table | Drives |
-|---|---|
-| `account_state` | Equity, cash, daily PnL, balance floor (one row per user) |
-| `system_state` | Bot mode, status, kill-switch, live-trading gate (one row per user) |
-| `strategies` | Strategy Lab cards, versions, params (jsonb), metrics (jsonb) |
-| `trades` | Trades page table + open position (status: open/closed) |
-| `journal_entries` | Journals page (kind, title, summary, tags, llm_explanation) |
-| `guardrails` | Risk Center rows (label, current, limit, level, utilization) |
-| `experiments` | Strategy Lab experiment list |
-| `alerts` | Overview alert banner stack |
+### What changes for the user
 
-**3. Auto-seed on signup**
-The existing `handle_new_user` trigger gets extended to also seed:
-- 1 row in `account_state` ($10,000 paper equity, $9,500 floor)
-- 1 row in `system_state` (paper mode, bot paused)
-- 1 strategy: `trend-rev v1.3` approved, with the same params from the mock
-- 8 default guardrails (max order size, daily loss cap, spread filter, etc.)
+**Learning page becomes a digest, not a workbench.** No "Queue experiment" dialog up top. Instead:
 
-Trades, journals, experiments, alerts all start empty — pages render the existing `EmptyState` component with a punchy copy line and a "create" CTA.
+- **Hero card**: *"Copilot is running 3 experiments in the background. 1 needs your review."*
+- **"Needs review" lane** (only shown when non-empty) — significant deltas where stats are borderline; user clicks Accept / Reject / Promote-to-strategy.
+- **"Recently auto-resolved" lane** — collapsed by default. Clear winners auto-accepted, clear losers auto-rejected. Two-line summary each. Click to expand and see backtest detail.
+- **Copilot's reasoning** — every experiment row gets a "Why did Copilot try this?" expander showing the AI's hypothesis, the evidence it pulled from recent trades, and the backtest result.
 
-**4. Full CRUD across the board**
-Every entity gets create/edit/delete forms behind dialogs:
-- **Trades** — "Log trade" dialog (symbol, side, size, entry, stop, TP, strategy). Open trades have "Close trade" → fills exit price + outcome.
-- **Journals** — "New entry" dialog with kind selector, tags input, optional "Generate LLM explanation" button.
-- **Strategies** — "New version" dialog (clone params from selected version, edit jsonb params), promote/archive actions hit the row's `status` column.
-- **Guardrails** — Inline edit dialog for limit + level.
-- **Experiments** — "Queue experiment" dialog, status transitions (queued → running → accepted/rejected).
-- **Alerts** — Auto-created by other actions (trade closed, guardrail tripped); manual dismiss removes them.
-- **Account/System state** — edited from Settings → Workspace (paper equity, floor, kill-switch toggle, mode selector).
+The **manual "Queue experiment" button moves to a kebab menu** for power users who want to suggest one — but it's no longer the default action.
 
-**5. Real AI insights via Lovable AI**
-- New `market-brief` edge function: takes recent candles + open trades + recent journals, returns a brief via `google/gemini-3-flash-preview`. Powers the Overview AIInsightPanel.
-- New `journal-explain` edge function: takes a journal entry, returns the `llm_explanation` field. Triggered from the "Generate explanation" button.
-- The existing `copilot-chat` function stays as-is.
-- Both new functions handle 429/402 with toasts.
+### What changes under the hood
 
-**6. Real-time updates**
-`trades`, `alerts`, `account_state` get added to the realtime publication so the Overview page reacts instantly when a trade closes or an alert fires (handy when you eventually plug in a real bot).
+#### 1. `experiments` table — small additions
+```sql
+ALTER TABLE experiments
+  ADD COLUMN proposed_by text NOT NULL DEFAULT 'user',  -- 'user' | 'copilot'
+  ADD COLUMN hypothesis text,                            -- AI's reasoning
+  ADD COLUMN backtest_result jsonb,                      -- full BacktestResult
+  ADD COLUMN strategy_id uuid,                           -- which strategy it targets
+  ADD COLUMN auto_resolved boolean NOT NULL DEFAULT false,
+  ADD COLUMN needs_review boolean NOT NULL DEFAULT false;
+```
+Add `'needs_review'` as a valid `status` value alongside the existing four.
 
-### Pages that change
+#### 2. New edge function: `propose-experiment`
+- Reads: approved strategy + last 30 days of trades + recent gate-reasons + regime history
+- Calls Lovable AI (`google/gemini-3-flash-preview`) with a tool-call schema asking for: `{ parameter, before, after, hypothesis, expected_effect }`
+- Writes one `experiments` row with `proposed_by='copilot'`, `status='queued'`
+- Idempotent: skips if there are already ≥2 queued copilot experiments for this user
 
-- `Overview` — live equity, live regime badge, live alerts, real AI brief
-- `Trades` — real trade history, log/close dialogs, real open position
-- `Journals` — real entries, new entry dialog, AI-explain button
-- `StrategyLab` — real versions, new-version dialog, promote/archive buttons
-- `RiskCenter` — real guardrails, edit dialog
-- `MarketIntel` — live candles, live regime
-- `Settings` → Workspace — adds "Account state" + "System controls" cards
-- `Copilot` — unchanged (already live)
-- `Learning` — reads from `experiments` table
+#### 3. New edge function: `run-experiment`
+- Picks oldest `queued` experiment row
+- Pulls Coinbase candles (reuses the fetch from `lib/backtest.ts`, ported to Deno — or we lift the pure logic to a shared helper)
+- Runs backtest with **before** params → baseline metrics
+- Runs backtest with **after** params → candidate metrics
+- Computes delta + a simple significance check: trade count ≥ 30, expectancy delta > 1 stdev
+- Decision tree:
+  - Clear improvement → `status='accepted'`, `auto_resolved=true`
+  - Clear regression → `status='rejected'`, `auto_resolved=true`
+  - Borderline / interesting → `status='needs_review'`, `needs_review=true` → fires an alert
+- Writes `backtest_result` jsonb so the UI can render the full breakdown
 
-`src/mocks/data.ts` gets deleted. `src/mocks/types.ts` stays as the shared TypeScript domain types (renamed to `src/lib/domain-types.ts`).
+#### 4. Schedule both with pg_cron
+- `propose-experiment`: every 6h
+- `run-experiment`: every 15m (drains the queue)
 
-### Technical details
+Both use the existing `signal_engine_cron_token` pattern from the vault.
 
-**Data layer:** A `src/hooks/` folder gets `useTrades`, `useJournals`, `useStrategies`, `useGuardrails`, `useExperiments`, `useAlerts`, `useAccountState`, `useSystemState`, `useCandles`. Each returns `{ data, loading, error, refetch }` and (for Supabase-backed ones) subscribes to realtime changes. React Query is not added — plain `useEffect` + supabase client to keep the bundle lean.
+#### 5. Copilot context awareness
+Extend the `buildContext()` payload in `Copilot.tsx` with:
+```ts
+experiments: {
+  running: count,
+  needsReview: count,
+  recentlyAccepted: [{ parameter, delta }, ...],
+}
+```
+So when you ask the Copilot *"what have you been testing?"* it actually knows.
 
-**Migrations:** One migration creates all 8 tables with RLS (`auth.uid() = user_id` for SELECT/INSERT/UPDATE/DELETE), an `update_updated_at_column` trigger on each, and an updated `handle_new_user` function that seeds the starter rows in a single transaction.
+#### 6. New "Promote to strategy" action
+On any `accepted` experiment, a button creates a new `strategies` row (status `candidate`) with the **after** params copied in. Closes the loop: idea → test → ship.
 
-**Edge functions:**
-- `market-brief` (verify_jwt = true): reads request user's recent trades/journals via service-role client, calls Lovable AI Gateway with a system prompt tuned for terse trader-style briefs.
-- `journal-explain` (verify_jwt = true): same pattern, scoped to one entry id, writes the result back to `journal_entries.llm_explanation`.
+### What the user actually sees on the Learning page
 
-**Coinbase candles:** fetched directly from the browser (no edge function needed — public CORS-enabled endpoint). Cached in component state, refreshed every 30s.
+```text
+┌────────────────────────────────────────────────────────┐
+│  Copilot R&D                          ⓘ how this works │
+│                                                        │
+│  Running 3 · 1 needs your call · 12 auto-resolved this │
+│  week (8 rejected, 4 accepted)                         │
+└────────────────────────────────────────────────────────┘
 
-**Backwards-compat shim:** since types live in `src/mocks/types.ts` and many components import from there, I'll move them to `src/lib/domain-types.ts` and update the ~12 affected imports in one pass.
+┌─ NEEDS REVIEW ─────────────────────────────────────────┐
+│ ► Tighten stop_atr_mult 1.5 → 1.3                      │
+│   Win rate +4%, expectancy −0.08R · borderline         │
+│   Why Copilot tried this · Accept · Reject · Promote   │
+└────────────────────────────────────────────────────────┘
 
-### What's NOT in this pass
+┌─ RECENTLY AUTO-RESOLVED  (click to expand)  ────────  ▼│
+└────────────────────────────────────────────────────────┘
 
-- No real broker integration (no actual orders sent anywhere — paper-only by design, matches the existing UI gating).
-- No bot telemetry (latency/uptime in the StatusFooter stays as a friendly placeholder showing "paper mode" instead of fake numbers).
-- Email branding stays on Lovable defaults — I'll remind you when you add a custom domain.
+[ ⋯ menu: Suggest experiment manually ]
+```
+
+### Out of scope (call out, build later)
+- Forward-testing in paper mode (after backtest passes, run the param in paper for N days)
+- Multi-parameter / grid search experiments — start with one knob at a time
+- A dedicated Copilot "research log" feed (could fold into Journals with `kind=research`)
+
+### Files touched
+- New migration: `experiments` columns + cron schedule
+- New: `supabase/functions/propose-experiment/index.ts`
+- New: `supabase/functions/run-experiment/index.ts`
+- New: `src/lib/backtest-shared.ts` (lift pure backtest logic so Deno can use it; existing `lib/backtest.ts` re-exports for client use)
+- Edit: `src/hooks/useExperiments.ts` (add `needsReview`, `runningByCopilot`, `promoteToStrategy`)
+- Edit: `src/pages/Learning.tsx` (rewrite as digest)
+- Edit: `supabase/functions/copilot-chat/index.ts` (accept experiments context)
+- Edit: `src/pages/Copilot.tsx` (attach experiments context)
+- Edit: `src/lib/domain-types.ts` (`ExperimentStatus` += `needs_review`, new fields)
+
+### Build order (one PR each)
+1. Migration + extend `useExperiments` + rewrite Learning page as digest reading existing data (UI lands first, even with no copilot rows yet)
+2. `run-experiment` function + pg_cron — drains any manually-queued rows automatically
+3. `propose-experiment` function + pg_cron — Copilot starts seeding the queue
+4. Copilot context wiring + "Promote to strategy" button — closes the loop
+
+After step 1 the page already feels different (read-only digest). After step 3 the AI is genuinely doing R&D in the background.
 

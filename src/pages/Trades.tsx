@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { NumberStepper } from "@/components/trader/NumberStepper";
 import { useTrades, type NewTradeInput } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
 import { useCandles } from "@/hooks/useCandles";
@@ -332,10 +333,10 @@ function LogTradeDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Size"><Input type="number" step="0.0001" value={size} onChange={(e) => setSize(e.target.value)} /></Field>
-            <Field label="Entry"><Input type="number" step="0.01" value={entry} onChange={(e) => setEntry(e.target.value)} /></Field>
-            <Field label="Stop loss"><Input type="number" step="0.01" value={stop} onChange={(e) => setStop(e.target.value)} placeholder="optional" /></Field>
-            <Field label="Take profit"><Input type="number" step="0.01" value={tp} onChange={(e) => setTp(e.target.value)} placeholder="optional" /></Field>
+            <Field label="Size"><NumberStepper value={size} onChange={setSize} step={0.001} shiftMultiplier={10} min={0} precision={4} /></Field>
+            <Field label="Entry"><NumberStepper value={entry} onChange={setEntry} step={1} shiftMultiplier={10} min={0} precision={2} prefix="$" /></Field>
+            <Field label="Stop loss"><NumberStepper value={stop} onChange={setStop} step={1} shiftMultiplier={10} min={0} precision={2} prefix="$" placeholder="optional" /></Field>
+            <Field label="Take profit"><NumberStepper value={tp} onChange={setTp} step={1} shiftMultiplier={10} min={0} precision={2} prefix="$" placeholder="optional" /></Field>
           </div>
           <Field label="Strategy">
             <Select value={strategy} onValueChange={setStrategy}>
