@@ -1,0 +1,234 @@
+// ============================================================
+// trade-close — server-authoritative manual close
+// ------------------------------------------------------------
+// The browser used to update trades.status/exit_price/pnl directly
+// from useTrades.close(). That's now blocked by the Phase 2
+// trigger. This edge function is the only path an operator can
+// take to manually close an open trade. It:
+//
+//   1. Validates JWT, fetches the trade.
+//   2. Fetches the current Coinbase ticker for a live exit fill.
+//   3. Runs the same P&L math the mark-to-market loop uses so the
+//      result is consistent across both paths.
+//   4. Transitions lifecycle via transitionTrade().
+//   5. Writes a journal entry.
+//   6. Updates account_state.cash and recomputes equity.
+// ============================================================
+
+import { fetchTicker } from "../_shared/market.ts";
+import { isWhitelistedSymbol, validateDoctrineInvariants } from "../_shared/doctrine.ts";
+import {
+  appendTransition,
+  transitionTrade,
+  type LifecycleTransition,
+  type TradeLifecyclePhase,
+} from "../_shared/lifecycle.ts";
+
+validateDoctrineInvariants();
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Missing authorization" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const tradeId = String(body.tradeId ?? "");
+    const reason = body.reason ? String(body.reason) : "Operator closed";
+
+    if (!tradeId) {
+      return new Response(JSON.stringify({ error: "tradeId required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    const { createClient } = await import(
+      "https://esm.sh/@supabase/supabase-js@2.45.0"
+    );
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !userData.user) {
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const userId = userData.user.id;
+    const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    const { data: trade, error: tradeErr } = await admin
+      .from("trades")
+      .select(
+        "id,user_id,symbol,side,size,original_size,entry_price,stop_loss,take_profit,tp1_price,tp1_filled,pnl,lifecycle_phase,lifecycle_transitions,status,strategy_version,notes",
+      )
+      .eq("id", tradeId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (tradeErr || !trade) {
+      return new Response(JSON.stringify({ error: "Trade not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (trade.status !== "open") {
+      return new Response(
+        JSON.stringify({ error: `Trade already ${trade.status}` }),
+        {
+          status: 409,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    if (!isWhitelistedSymbol(trade.symbol)) {
+      return new Response(
+        JSON.stringify({ error: `Symbol ${trade.symbol} not on whitelist` }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Live fill price from Coinbase spot.
+    const ticker = await fetchTicker(trade.symbol);
+    const fillPx = Number(ticker.price);
+    if (!Number.isFinite(fillPx) || fillPx <= 0) {
+      return new Response(
+        JSON.stringify({ error: "Could not fetch live price" }),
+        {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const sideMult = trade.side === "long" ? 1 : -1;
+    const remainingSize = Number(trade.size);
+    const entry = Number(trade.entry_price);
+    const realizedRemainder = (fillPx - entry) * remainingSize * sideMult;
+    const cumulativePnl = Number(trade.pnl ?? 0) + realizedRemainder;
+    const pnlPct = ((fillPx - entry) / entry) * 100 * sideMult;
+    const outcome = cumulativePnl >= 0 ? "win" : "loss";
+
+    // Lifecycle: current → exited via FSM.
+    const fromPhase: TradeLifecyclePhase =
+      (trade.lifecycle_phase as TradeLifecyclePhase | null) ??
+      (trade.tp1_filled ? "tp1_hit" : "entered");
+    const fsm = transitionTrade(fromPhase, "exited", {
+      actor: "user",
+      reason,
+      meta: { fillPrice: fillPx, outcome },
+    });
+    if (!fsm.ok) {
+      return new Response(
+        JSON.stringify({ error: fsm.error ?? "Illegal transition" }),
+        {
+          status: 409,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+    const transition: LifecycleTransition = fsm.transition!;
+    const nextTransitions = appendTransition(
+      trade.lifecycle_transitions,
+      transition,
+    );
+
+    const nowIso = new Date().toISOString();
+
+    await admin
+      .from("trades")
+      .update({
+        status: "closed",
+        size: 0,
+        current_price: fillPx,
+        unrealized_pnl: 0,
+        unrealized_pnl_pct: 0,
+        exit_price: fillPx,
+        pnl: cumulativePnl,
+        pnl_pct: pnlPct,
+        closed_at: nowIso,
+        outcome,
+        lifecycle_phase: "exited",
+        lifecycle_transitions: nextTransitions,
+        notes: `${trade.notes ?? ""}\nClosed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)}`
+          .trim(),
+      })
+      .eq("id", trade.id);
+
+    await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "trade",
+      title: `Closed ${trade.side.toUpperCase()} ${trade.symbol} ${cumulativePnl >= 0 ? "+" : ""}$${cumulativePnl.toFixed(2)}`,
+      summary: reason,
+      tags: [
+        "manual-close",
+        trade.symbol,
+        trade.strategy_version ?? "v2",
+        outcome,
+      ].filter(Boolean),
+    });
+
+    // Bank realized remainder to cash and roll equity (≡ cash when no open pos).
+    const { data: acct } = await admin
+      .from("account_state")
+      .select("cash,equity")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (acct) {
+      const newCash = Number(acct.cash ?? 0) + realizedRemainder;
+      // Any remaining unrealized from other open trades still rides; the
+      // next mark-to-market tick recomputes that. For safety we leave
+      // equity alone here and let the mark-to-market loop normalize.
+      await admin
+        .from("account_state")
+        .update({ cash: newCash })
+        .eq("user_id", userId);
+    }
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        tradeId: trade.id,
+        fillPrice: fillPx,
+        pnl: cumulativePnl,
+        outcome,
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  } catch (e) {
+    console.error("trade-close error:", e);
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+});

@@ -1,6 +1,24 @@
-// signal-decide — handle user approve/reject on a pending signal.
-// Approve → open a trade row, mark signal executed, journal it.
-// Reject → mark signal rejected, journal the skip with reason (AI learns).
+// ============================================================
+// signal-decide — operator approve/reject on a pending signal.
+// ------------------------------------------------------------
+// Approve → transitionSignal("proposed" → "approved" → "executed")
+//         + transitionTrade(seed "entered")
+// Reject  → transitionSignal("proposed" → "rejected")
+//
+// Every status change flows through the FSM in _shared/lifecycle.ts
+// so illegal jumps fail loudly instead of silently corrupting state.
+// ============================================================
+
+import {
+  appendTransition,
+  transitionSignal,
+  transitionTrade,
+  type LifecycleTransition,
+  type SignalLifecyclePhase,
+} from "../_shared/lifecycle.ts";
+import { validateDoctrineInvariants } from "../_shared/doctrine.ts";
+
+validateDoctrineInvariants();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +27,9 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -26,17 +46,24 @@ Deno.serve(async (req) => {
     const reason = body.reason ? String(body.reason) : null;
 
     if (!signalId || !["approve", "reject"].includes(action)) {
-      return new Response(JSON.stringify({ error: "signalId and action ('approve'|'reject') required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "signalId and action ('approve'|'reject') required",
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.45.0");
+    const { createClient } = await import(
+      "https://esm.sh/@supabase/supabase-js@2.45.0"
+    );
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -65,20 +92,41 @@ Deno.serve(async (req) => {
     }
 
     if (sig.status !== "pending") {
-      return new Response(JSON.stringify({ error: `Signal already ${sig.status}` }), {
-        status: 409,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: `Signal already ${sig.status}` }),
+        {
+          status: 409,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    const prevTransitions = Array.isArray(sig.lifecycle_transitions) ? sig.lifecycle_transitions : [];
+    const prevTransitions: LifecycleTransition[] = Array.isArray(
+      sig.lifecycle_transitions,
+    )
+      ? sig.lifecycle_transitions
+      : [];
+    const currentPhase: SignalLifecyclePhase =
+      (sig.lifecycle_phase as SignalLifecyclePhase | null) ?? "proposed";
     const nowIso = new Date().toISOString();
 
+    // ── REJECT ──────────────────────────────────────────────
     if (action === "reject") {
-      const transitions = [
-        ...prevTransitions,
-        { phase: "rejected", at: nowIso, by: "user", reason: reason ?? "Operator declined" },
-      ];
+      const result = transitionSignal(currentPhase, "rejected", {
+        actor: "user",
+        reason: reason ?? "Operator declined",
+      });
+      if (!result.ok) {
+        return new Response(
+          JSON.stringify({ error: result.error ?? "Illegal transition" }),
+          {
+            status: 409,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      const transitions = appendTransition(prevTransitions, result.transition!);
+
       await admin
         .from("trade_signals")
         .update({
@@ -95,33 +143,66 @@ Deno.serve(async (req) => {
         user_id: userId,
         kind: "skip",
         title: `Declined ${sig.side} @ $${Number(sig.proposed_entry).toFixed(0)}`,
-        summary: reason ?? `Operator rejected the AI proposal. AI confidence was ${(Number(sig.confidence) * 100).toFixed(0)}%.`,
+        summary:
+          reason ??
+          `Operator rejected the AI proposal. AI confidence was ${(Number(sig.confidence) * 100).toFixed(0)}%.`,
         tags: [sig.regime, "rejected"],
       });
 
-      return new Response(JSON.stringify({ ok: true, status: "rejected" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ ok: true, status: "rejected" }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
-    // APPROVE → open trade
+    // ── APPROVE: proposed → approved → executed ───────────────────
+    const approveStep = transitionSignal(currentPhase, "approved", {
+      actor: "user",
+      reason: reason ?? "Operator approved",
+    });
+    if (!approveStep.ok) {
+      return new Response(
+        JSON.stringify({
+          error: approveStep.error ?? "Illegal approval transition",
+        }),
+        {
+          status: 409,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     const entry = Number(sig.proposed_entry);
     const sizeUsd = Number(sig.size_usd);
     const size = sizeUsd / entry;
-    const ctx = (sig.context_snapshot ?? {}) as any;
+    const ctx = (sig.context_snapshot ?? {}) as {
+      tp1?: number;
+      pullback?: boolean;
+    };
     const tp1Price = ctx?.tp1 != null ? Number(ctx.tp1) : null;
     const wasPullback = ctx?.pullback === true;
 
     const tags = ["ai-signal", sig.regime];
     if (wasPullback) tags.push("pullback");
 
-    const tradeEnteredTransition = {
-      phase: "entered",
-      at: nowIso,
-      by: "user",
+    // Trade FSM seed: always "entered"
+    const tradeEnteredResult = transitionTrade("entered", "entered", {
+      actor: "user",
       reason: reason ?? "Operator approved",
-      fromSignalId: signalId,
-    };
+      meta: { fromSignalId: signalId },
+    });
+    const tradeEnteredTransition: LifecycleTransition =
+      tradeEnteredResult.ok && tradeEnteredResult.transition
+        ? tradeEnteredResult.transition
+        : {
+          phase: "entered",
+          at: nowIso,
+          by: "user",
+          reason: reason ?? "Operator approved",
+          meta: { fromSignalId: signalId },
+        };
 
     const { data: tradeRow, error: tradeErr } = await admin
       .from("trades")
@@ -133,7 +214,8 @@ Deno.serve(async (req) => {
         original_size: size,
         entry_price: entry,
         stop_loss: sig.proposed_stop !== null ? Number(sig.proposed_stop) : null,
-        take_profit: sig.proposed_target !== null ? Number(sig.proposed_target) : null,
+        take_profit:
+          sig.proposed_target !== null ? Number(sig.proposed_target) : null,
         tp1_price: tp1Price,
         tp1_filled: false,
         strategy_id: sig.strategy_id ?? null,
@@ -156,13 +238,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    const sigExecutedTransition = {
-      phase: "executed",
-      at: nowIso,
-      by: "user",
+    // approved → executed
+    const executeStep = transitionSignal("approved", "executed", {
+      actor: "user",
       reason: reason ?? "Operator approved",
-      tradeId: tradeRow?.id ?? null,
-    };
+      meta: { tradeId: tradeRow?.id ?? null },
+    });
+
+    const nextTransitions: LifecycleTransition[] = [
+      ...prevTransitions,
+      approveStep.transition!,
+      ...(executeStep.ok && executeStep.transition
+        ? [executeStep.transition]
+        : []),
+    ];
 
     await admin
       .from("trade_signals")
@@ -173,7 +262,7 @@ Deno.serve(async (req) => {
         decided_at: nowIso,
         executed_trade_id: tradeRow?.id ?? null,
         lifecycle_phase: "executed",
-        lifecycle_transitions: [...prevTransitions, sigExecutedTransition],
+        lifecycle_transitions: nextTransitions,
       })
       .eq("id", signalId);
 
@@ -185,14 +274,20 @@ Deno.serve(async (req) => {
       tags: [sig.regime, "ai-signal"],
     });
 
-    return new Response(JSON.stringify({ ok: true, status: "executed", trade: tradeRow }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ ok: true, status: "executed", trade: tradeRow }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } catch (e) {
     console.error("signal-decide error:", e);
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   }
 });

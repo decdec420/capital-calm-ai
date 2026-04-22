@@ -53,20 +53,12 @@ export default function Settings() {
             cash={account.cash}
             startOfDayEquity={account.startOfDayEquity}
             balanceFloor={account.balanceFloor}
-            onSave={async (patch) => {
+            onSaveFloor={async (floor) => {
               try {
-                await updateAccount(patch);
-                toast.success("Account updated.");
+                await updateAccount({ balanceFloor: floor });
+                toast.success("Balance floor updated.");
               } catch {
-                toast.error("Couldn't update account.");
-              }
-            }}
-            onDailyReset={async () => {
-              try {
-                await updateAccount({ startOfDayEquity: account.equity });
-                toast.success(`Day reset · start-of-day = $${account.equity.toFixed(2)}.`);
-              } catch {
-                toast.error("Couldn't reset the day.");
+                toast.error("Couldn't update balance floor.");
               }
             }}
           />
@@ -197,23 +189,16 @@ function AccountControls({
   cash,
   startOfDayEquity,
   balanceFloor,
-  onSave,
-  onDailyReset,
+  onSaveFloor,
 }: {
   equity: number;
   cash: number;
   startOfDayEquity: number;
   balanceFloor: number;
-  onSave: (patch: { equity?: number; cash?: number; startOfDayEquity?: number; balanceFloor?: number }) => void;
-  onDailyReset: () => void;
+  onSaveFloor: (floor: number) => void;
 }) {
-  const [eq, setEq] = useState(String(equity));
-  const [csh, setCsh] = useState(String(cash));
-  const [sod, setSod] = useState(String(startOfDayEquity));
   const [floor, setFloor] = useState(String(balanceFloor));
-
-  const dirty =
-    Number(eq) !== equity || Number(csh) !== cash || Number(sod) !== startOfDayEquity || Number(floor) !== balanceFloor;
+  const dirty = Number(floor) !== balanceFloor;
 
   const dailyPnl = equity - startOfDayEquity;
   const dailyPnlPct = startOfDayEquity > 0 ? (dailyPnl / startOfDayEquity) * 100 : 0;
@@ -221,36 +206,43 @@ function AccountControls({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <NumField label="Equity" value={eq} onChange={setEq} />
-        <NumField label="Cash" value={csh} onChange={setCsh} />
-        <NumField label="Start of day" value={sod} onChange={setSod} />
+        <ReadOnlyField label="Equity" value={`$${equity.toFixed(2)}`} />
+        <ReadOnlyField label="Cash" value={`$${cash.toFixed(2)}`} />
+        <ReadOnlyField label="Start of day" value={`$${startOfDayEquity.toFixed(2)}`} />
         <NumField label="Balance floor" value={floor} onChange={setFloor} />
       </div>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground italic">
-          Numbers are paper. Adjust to simulate any starting condition.
+          Equity, cash, and start-of-day are computed server-side from real fills — the
+          browser can't edit them. Only the balance floor is yours to move.
         </p>
         <Button
           size="sm"
           disabled={!dirty}
-          onClick={() => onSave({ equity: Number(eq), cash: Number(csh), startOfDayEquity: Number(sod), balanceFloor: Number(floor) })}
+          onClick={() => onSaveFloor(Number(floor))}
         >
-          Save
+          Save floor
         </Button>
       </div>
 
-      <div className="rounded-md border border-border/60 bg-muted/20 p-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-foreground">Daily reset</div>
-          <div className="text-xs text-muted-foreground">
-            Snapshots current equity into <span className="tabular">start-of-day</span> so today's PnL starts at zero.
-            Currently <span className="tabular">{dailyPnl >= 0 ? "+" : ""}${dailyPnl.toFixed(2)}</span>{" "}
-            ({dailyPnlPct >= 0 ? "+" : ""}{dailyPnlPct.toFixed(2)}%) on the day.
-          </div>
+      <div className="rounded-md border border-border/60 bg-muted/20 p-3">
+        <div className="text-sm font-medium text-foreground">Today's P&amp;L</div>
+        <div className="text-xs text-muted-foreground">
+          <span className="tabular">{dailyPnl >= 0 ? "+" : ""}${dailyPnl.toFixed(2)}</span>{" "}
+          ({dailyPnlPct >= 0 ? "+" : ""}{dailyPnlPct.toFixed(2)}%) on the day.
+          Start-of-day snapshot is rolled automatically by the mark-to-market cron at 00:00 UTC.
         </div>
-        <Button size="sm" variant="outline" onClick={onDailyReset} className="shrink-0">
-          Reset day
-        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <div className="text-sm tabular rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-foreground">
+        {value}
       </div>
     </div>
   );
