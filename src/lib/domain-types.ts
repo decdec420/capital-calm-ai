@@ -206,6 +206,8 @@ export interface JournalEntry {
 
 export interface StrategyParam {
   key: string;
+  /** Optional human label for UI / tests. */
+  label?: string;
   value: number | string | boolean;
   unit?: string;
 }

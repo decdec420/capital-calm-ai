@@ -72,7 +72,7 @@ export function useAccountState() {
     if (Object.keys(dbPatch).length === 0) return;
     const { error: err } = await supabase
       .from("account_state")
-      .update(dbPatch)
+      .update(dbPatch as never)
       .eq("user_id", user.id);
     if (err) throw err;
     await refetch();

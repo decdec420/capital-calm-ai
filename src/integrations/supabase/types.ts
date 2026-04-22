@@ -77,6 +77,51 @@ export type Database = {
         }
         Relationships: []
       }
+      broker_credentials: {
+        Row: {
+          api_key_secret_name: string
+          api_passphrase_secret_name: string | null
+          api_secret_secret_name: string
+          broker: string
+          created_at: string
+          id: string
+          last_error: string | null
+          last_verified_at: string | null
+          mode: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_key_secret_name: string
+          api_passphrase_secret_name?: string | null
+          api_secret_secret_name: string
+          broker: string
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          last_verified_at?: string | null
+          mode?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_key_secret_name?: string
+          api_passphrase_secret_name?: string | null
+          api_secret_secret_name?: string
+          broker?: string
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          last_verified_at?: string | null
+          mode?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       chat_conversations: {
         Row: {
           created_at: string
@@ -139,12 +184,61 @@ export type Database = {
           },
         ]
       }
+      doctrine_settings: {
+        Row: {
+          consecutive_loss_limit: number
+          created_at: string
+          daily_loss_pct: number
+          floor_pct: number
+          id: string
+          loss_cooldown_minutes: number
+          max_order_abs_cap: number
+          max_order_pct: number
+          max_trades_per_day: number
+          mode: string
+          starting_equity_usd: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          consecutive_loss_limit?: number
+          created_at?: string
+          daily_loss_pct?: number
+          floor_pct?: number
+          id?: string
+          loss_cooldown_minutes?: number
+          max_order_abs_cap?: number
+          max_order_pct?: number
+          max_trades_per_day?: number
+          mode?: string
+          starting_equity_usd?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          consecutive_loss_limit?: number
+          created_at?: string
+          daily_loss_pct?: number
+          floor_pct?: number
+          id?: string
+          loss_cooldown_minutes?: number
+          max_order_abs_cap?: number
+          max_order_pct?: number
+          max_trades_per_day?: number
+          mode?: string
+          starting_equity_usd?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       experiments: {
         Row: {
           after_value: string
           auto_resolved: boolean
           backtest_result: Json | null
           before_value: string
+          confidence: number
           created_at: string
           delta: string
           hypothesis: string | null
@@ -152,6 +246,7 @@ export type Database = {
           needs_review: boolean
           notes: string | null
           parameter: string
+          priority: string
           proposed_by: string
           status: string
           strategy_id: string | null
@@ -164,6 +259,7 @@ export type Database = {
           auto_resolved?: boolean
           backtest_result?: Json | null
           before_value?: string
+          confidence?: number
           created_at?: string
           delta?: string
           hypothesis?: string | null
@@ -171,6 +267,7 @@ export type Database = {
           needs_review?: boolean
           notes?: string | null
           parameter?: string
+          priority?: string
           proposed_by?: string
           status?: string
           strategy_id?: string | null
@@ -183,6 +280,7 @@ export type Database = {
           auto_resolved?: boolean
           backtest_result?: Json | null
           before_value?: string
+          confidence?: number
           created_at?: string
           delta?: string
           hypothesis?: string | null
@@ -190,6 +288,7 @@ export type Database = {
           needs_review?: boolean
           notes?: string | null
           parameter?: string
+          priority?: string
           proposed_by?: string
           status?: string
           strategy_id?: string | null
@@ -251,6 +350,7 @@ export type Database = {
           kind: string
           llm_explanation: string | null
           raw: Json | null
+          source: string
           summary: string
           tags: string[]
           title: string
@@ -263,6 +363,7 @@ export type Database = {
           kind?: string
           llm_explanation?: string | null
           raw?: Json | null
+          source?: string
           summary?: string
           tags?: string[]
           title: string
@@ -275,9 +376,67 @@ export type Database = {
           kind?: string
           llm_explanation?: string | null
           raw?: Json | null
+          source?: string
           summary?: string
           tags?: string[]
           title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notification_preferences: {
+        Row: {
+          chat_id: number | null
+          created_at: string
+          daily_digest: boolean
+          guardrail_blocked: boolean
+          guardrail_caution: boolean
+          id: string
+          kill_switch: boolean
+          quiet_hours_end: number | null
+          quiet_hours_start: number | null
+          severity_floor: string
+          signal_proposed: boolean
+          telegram_username: string | null
+          trade_closed: boolean
+          trade_opened: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          chat_id?: number | null
+          created_at?: string
+          daily_digest?: boolean
+          guardrail_blocked?: boolean
+          guardrail_caution?: boolean
+          id?: string
+          kill_switch?: boolean
+          quiet_hours_end?: number | null
+          quiet_hours_start?: number | null
+          severity_floor?: string
+          signal_proposed?: boolean
+          telegram_username?: string | null
+          trade_closed?: boolean
+          trade_opened?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          chat_id?: number | null
+          created_at?: string
+          daily_digest?: boolean
+          guardrail_blocked?: boolean
+          guardrail_caution?: boolean
+          id?: string
+          kill_switch?: boolean
+          quiet_hours_end?: number | null
+          quiet_hours_start?: number | null
+          severity_floor?: string
+          signal_proposed?: boolean
+          telegram_username?: string | null
+          trade_closed?: boolean
+          trade_opened?: boolean
           updated_at?: string
           user_id?: string
         }
@@ -291,6 +450,8 @@ export type Database = {
           id: string
           updated_at: string
           user_id: string
+          weekly_digest_generated_at: string | null
+          weekly_digest_md: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -299,6 +460,8 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id: string
+          weekly_digest_generated_at?: string | null
+          weekly_digest_md?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -307,17 +470,22 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
+          weekly_digest_generated_at?: string | null
+          weekly_digest_md?: string | null
         }
         Relationships: []
       }
       strategies: {
         Row: {
           created_at: string
+          created_by: string
           description: string
           id: string
           metrics: Json
           name: string
           params: Json
+          parent_strategy_id: string | null
+          promotion_notes: string | null
           status: string
           updated_at: string
           user_id: string
@@ -325,11 +493,14 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          created_by?: string
           description?: string
           id?: string
           metrics?: Json
           name: string
           params?: Json
+          parent_strategy_id?: string | null
+          promotion_notes?: string | null
           status?: string
           updated_at?: string
           user_id: string
@@ -337,15 +508,71 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          created_by?: string
           description?: string
           id?: string
           metrics?: Json
           name?: string
           params?: Json
+          parent_strategy_id?: string | null
+          promotion_notes?: string | null
           status?: string
           updated_at?: string
           user_id?: string
           version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "strategies_parent_strategy_id_fkey"
+            columns: ["parent_strategy_id"]
+            isOneToOne: false
+            referencedRelation: "strategies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_audit_log: {
+        Row: {
+          action: string
+          actor: string
+          amount_usd: number | null
+          created_at: string
+          details: Json
+          hash: string
+          id: string
+          prev_hash: string
+          seq: number
+          symbol: string | null
+          trade_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          actor?: string
+          amount_usd?: number | null
+          created_at?: string
+          details?: Json
+          hash: string
+          id?: string
+          prev_hash: string
+          seq: number
+          symbol?: string | null
+          trade_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          actor?: string
+          amount_usd?: number | null
+          created_at?: string
+          details?: Json
+          hash?: string
+          id?: string
+          prev_hash?: string
+          seq?: number
+          symbol?: string | null
+          trade_id?: string | null
+          user_id?: string
         }
         Relationships: []
       }
@@ -360,9 +587,12 @@ export type Database = {
           kill_switch_engaged: boolean
           last_engine_snapshot: Json
           last_heartbeat: string
+          last_mark_to_market_at: string | null
           latency_ms: number
+          live_money_acknowledged_at: string | null
           live_trading_enabled: boolean
           mode: string
+          selected_broker: string | null
           updated_at: string
           uptime_hours: number
           user_id: string
@@ -377,9 +607,12 @@ export type Database = {
           kill_switch_engaged?: boolean
           last_engine_snapshot?: Json
           last_heartbeat?: string
+          last_mark_to_market_at?: string | null
           latency_ms?: number
+          live_money_acknowledged_at?: string | null
           live_trading_enabled?: boolean
           mode?: string
+          selected_broker?: string | null
           updated_at?: string
           uptime_hours?: number
           user_id: string
@@ -394,12 +627,63 @@ export type Database = {
           kill_switch_engaged?: boolean
           last_engine_snapshot?: Json
           last_heartbeat?: string
+          last_mark_to_market_at?: string | null
           latency_ms?: number
+          live_money_acknowledged_at?: string | null
           live_trading_enabled?: boolean
           mode?: string
+          selected_broker?: string | null
           updated_at?: string
           uptime_hours?: number
           user_id?: string
+        }
+        Relationships: []
+      }
+      telegram_bot_state: {
+        Row: {
+          id: number
+          update_offset: number
+          updated_at: string
+        }
+        Insert: {
+          id: number
+          update_offset?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          update_offset?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      telegram_messages: {
+        Row: {
+          chat_id: number
+          created_at: string
+          processed_at: string | null
+          raw_update: Json
+          text: string | null
+          update_id: number
+          user_id: string | null
+        }
+        Insert: {
+          chat_id: number
+          created_at?: string
+          processed_at?: string | null
+          raw_update: Json
+          text?: string | null
+          update_id: number
+          user_id?: string | null
+        }
+        Update: {
+          chat_id?: number
+          created_at?: string
+          processed_at?: string | null
+          raw_update?: Json
+          text?: string | null
+          update_id?: number
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -415,6 +699,9 @@ export type Database = {
           decision_reason: string | null
           executed_trade_id: string | null
           expires_at: string
+          horizon: string
+          horizon_confidence: number
+          horizon_reasoning: string
           id: string
           lifecycle_phase: string
           lifecycle_transitions: Json
@@ -443,6 +730,9 @@ export type Database = {
           decision_reason?: string | null
           executed_trade_id?: string | null
           expires_at?: string
+          horizon?: string
+          horizon_confidence?: number
+          horizon_reasoning?: string
           id?: string
           lifecycle_phase?: string
           lifecycle_transitions?: Json
@@ -471,6 +761,9 @@ export type Database = {
           decision_reason?: string | null
           executed_trade_id?: string | null
           expires_at?: string
+          horizon?: string
+          horizon_confidence?: number
+          horizon_reasoning?: string
           id?: string
           lifecycle_phase?: string
           lifecycle_transitions?: Json
@@ -497,6 +790,8 @@ export type Database = {
           current_price: number | null
           entry_price: number
           exit_price: number | null
+          horizon: string
+          horizon_history: Json
           id: string
           lifecycle_phase: string
           lifecycle_transitions: Json
@@ -507,6 +802,7 @@ export type Database = {
           pnl: number | null
           pnl_pct: number | null
           reason_tags: string[]
+          scale_ins: Json
           side: string
           size: number
           status: string
@@ -517,6 +813,10 @@ export type Database = {
           take_profit: number | null
           tp1_filled: boolean
           tp1_price: number | null
+          tp2_filled: boolean
+          tp2_price: number | null
+          tp3_filled: boolean
+          tp3_price: number | null
           unrealized_pnl: number | null
           unrealized_pnl_pct: number | null
           updated_at: string
@@ -528,6 +828,8 @@ export type Database = {
           current_price?: number | null
           entry_price: number
           exit_price?: number | null
+          horizon?: string
+          horizon_history?: Json
           id?: string
           lifecycle_phase?: string
           lifecycle_transitions?: Json
@@ -538,6 +840,7 @@ export type Database = {
           pnl?: number | null
           pnl_pct?: number | null
           reason_tags?: string[]
+          scale_ins?: Json
           side: string
           size: number
           status?: string
@@ -548,6 +851,10 @@ export type Database = {
           take_profit?: number | null
           tp1_filled?: boolean
           tp1_price?: number | null
+          tp2_filled?: boolean
+          tp2_price?: number | null
+          tp3_filled?: boolean
+          tp3_price?: number | null
           unrealized_pnl?: number | null
           unrealized_pnl_pct?: number | null
           updated_at?: string
@@ -559,6 +866,8 @@ export type Database = {
           current_price?: number | null
           entry_price?: number
           exit_price?: number | null
+          horizon?: string
+          horizon_history?: Json
           id?: string
           lifecycle_phase?: string
           lifecycle_transitions?: Json
@@ -569,6 +878,7 @@ export type Database = {
           pnl?: number | null
           pnl_pct?: number | null
           reason_tags?: string[]
+          scale_ins?: Json
           side?: string
           size?: number
           status?: string
@@ -579,6 +889,10 @@ export type Database = {
           take_profit?: number | null
           tp1_filled?: boolean
           tp1_price?: number | null
+          tp2_filled?: boolean
+          tp2_price?: number | null
+          tp3_filled?: boolean
+          tp3_price?: number | null
           unrealized_pnl?: number | null
           unrealized_pnl_pct?: number | null
           updated_at?: string
@@ -591,7 +905,51 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      append_audit_log: {
+        Args: {
+          p_action: string
+          p_actor: string
+          p_amount_usd: number
+          p_details: Json
+          p_symbol: string
+          p_trade_id: string
+          p_user_id: string
+        }
+        Returns: {
+          action: string
+          actor: string
+          amount_usd: number | null
+          created_at: string
+          details: Json
+          hash: string
+          id: string
+          prev_hash: string
+          seq: number
+          symbol: string | null
+          trade_id: string | null
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "system_audit_log"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      get_journal_digest_cron_token: { Args: never; Returns: string }
+      get_mark_to_market_cron_token: { Args: never; Returns: string }
       get_signal_engine_cron_token: { Args: never; Returns: string }
+      notify_telegram: {
+        Args: {
+          p_event_type: string
+          p_message: string
+          p_severity: string
+          p_title: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
+      realized_pnl_today: { Args: { p_user_id: string }; Returns: number }
     }
     Enums: {
       [_ in never]: never

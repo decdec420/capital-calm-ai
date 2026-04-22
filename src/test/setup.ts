@@ -4,6 +4,7 @@
 // transitive dep tree in CI won't nuke the pure-logic suite.
 async function loadJestDom() {
   try {
+    // @ts-ignore — optional dep, types may not resolve in all envs
     await import("@testing-library/jest-dom");
   } catch {
     // Optional — fine for logic-only tests.
