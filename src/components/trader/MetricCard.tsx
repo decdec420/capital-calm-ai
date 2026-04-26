@@ -19,6 +19,8 @@ interface MetricCardProps {
   onClick?: () => void;
   /** Optional aria label for the interactive surface. */
   interactiveLabel?: string;
+  /** When true, render a skeleton placeholder instead of content. */
+  loading?: boolean;
 }
 
 const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
