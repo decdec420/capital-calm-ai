@@ -324,9 +324,9 @@ export default function Welcome() {
                   <ArrowRight className="h-3.5 w-3.5" />
                 </Button>
               ) : (
-                <Button size="sm" onClick={finish}>
+                <Button size="sm" onClick={finish} disabled={finishDisabled}>
                   <Check className="h-3.5 w-3.5" />
-                  Take me to Overview
+                  {saving ? "Setting up…" : "Take me to Overview"}
                 </Button>
               )}
             </div>
