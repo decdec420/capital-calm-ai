@@ -17,6 +17,8 @@ interface AIInsightPanelProps {
    * Defaults to "ai" for backwards compatibility with existing callers.
    */
   kind?: "ai" | "computed";
+  /** When true, render skeleton placeholders instead of the body text. */
+  loading?: boolean;
 }
 
 export function AIInsightPanel({
@@ -26,6 +28,7 @@ export function AIInsightPanel({
   className,
   footer,
   kind = "ai",
+  loading,
 }: AIInsightPanelProps) {
   const isAi = kind === "ai";
   return (
