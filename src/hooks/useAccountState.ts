@@ -18,6 +18,7 @@ function mapRow(r: any): AccountState {
 export function useAccountState() {
   const { user } = useAuth();
   const [data, setData] = useState<AccountState | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +30,10 @@ export function useAccountState() {
       .eq("user_id", user.id)
       .maybeSingle();
     if (err) setError(err.message);
-    else setData(row ? mapRow(row) : null);
+    else {
+      setData(row ? mapRow(row) : null);
+      if (row) setLastUpdatedAt(Date.now());
+    }
     setLoading(false);
   };
 
