@@ -281,7 +281,10 @@ describe("evaluateTradeInCandle — equity roll across candles", () => {
     const realizedAfterTp2 = (a2.fillPrice - entry) * a2.closedQty;
     expect(realizedAfterTp2).toBeCloseTo((110 - 100) * 1, 9); // runner = 1
 
-    const totalR = (realizedAfterTp1 + realizedAfterTp2) / (entry - stop);
+    // Trade-level R = full size × per-share risk. Half closed at +1R/share
+    // contributes 0.5R; runner half at +2R/share contributes 1.0R; total 1.5R.
+    const oneR = originalSize * (entry - stop);
+    const totalR = (realizedAfterTp1 + realizedAfterTp2) / oneR;
     expect(totalR).toBeCloseTo(1.5, 9);
   });
 
@@ -320,7 +323,9 @@ describe("evaluateTradeInCandle — equity roll across candles", () => {
     if (a2.type !== "stop_hit") throw new Error();
     const realized2 = (a2.fillPrice - entry) * a2.closedQty; // 0
 
-    const totalR = (realized1 + realized2) / (entry - 95);
+    // Half closed at +1R/share = 0.5R; runner stopped at BE = 0R; total 0.5R.
+    const oneR = originalSize * (entry - 95);
+    const totalR = (realized1 + realized2) / oneR;
     expect(totalR).toBeCloseTo(0.5, 9);
   });
 
@@ -346,6 +351,10 @@ describe("evaluateTradeInCandle — equity roll across candles", () => {
     if (a1.type !== "tp1_fill") throw new Error();
     const realized1 = (entry - a1.fillPrice) * a1.closedQty; // sign-flipped
 
+    // Bar 2: clean down-move that reaches TP2 without ever touching the
+    // BE stop at 100. (high: 101 would have tripped the BE stop because
+    // for shorts, hitsStop = candle.high >= stopPrice, and stop-first
+    // precedence would then take over.)
     const a2 = evaluateTradeInCandle({
       side: "short",
       entryPrice: entry,
@@ -355,13 +364,14 @@ describe("evaluateTradeInCandle — equity roll across candles", () => {
       originalSize,
       remainingSize: originalSize - a1.closedQty,
       tp1Filled: true,
-      candle: { high: 101, low: 89, close: 90 },
+      candle: { high: 99, low: 89, close: 90 },
     });
     expect(a2.type).toBe("tp2_hit");
     if (a2.type !== "tp2_hit") throw new Error();
     const realized2 = (entry - a2.fillPrice) * a2.closedQty;
 
-    const totalR = (realized1 + realized2) / (stop - entry);
+    const oneR = originalSize * (stop - entry);
+    const totalR = (realized1 + realized2) / oneR;
     expect(totalR).toBeCloseTo(1.5, 9);
   });
 });
