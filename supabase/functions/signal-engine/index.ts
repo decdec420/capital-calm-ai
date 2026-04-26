@@ -669,6 +669,7 @@ async function runTickForUser(
       }),
     ),
     patternMemory,
+    strategyParams: liveParams,
   };
 
   const aiResult = await decideForSymbol({
