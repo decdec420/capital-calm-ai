@@ -267,6 +267,10 @@ export interface StrategyVersion {
   id: string;
   name: string;
   version: string;
+  /** Friendly nickname surfaced in the UI (e.g. "Steady Trender"). Falls back to `name` when null. */
+  displayName: string | null;
+  /** One-line plain-English summary (e.g. "Wider stops experiment"). Optional. */
+  friendlySummary: string | null;
   status: StrategyStatus;
   createdAt: string;
   description: string;
