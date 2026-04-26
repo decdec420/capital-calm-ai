@@ -321,6 +321,7 @@ function ExperimentRow({
   onPromote,
   onRemove,
   showChecklist,
+  isPromoted,
 }: {
   exp: Experiment;
   onAccept?: () => void;
@@ -328,6 +329,7 @@ function ExperimentRow({
   onPromote?: () => void;
   onRemove?: () => void;
   showChecklist?: boolean;
+  isPromoted?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isCopilot = exp.proposedBy === "copilot";
@@ -337,6 +339,11 @@ function ExperimentRow({
     <div className="px-4 py-3 group">
       <div className="flex items-center gap-3 flex-wrap">
         <StatusBadge tone={statusTone[exp.status]} size="sm" dot>{exp.status.replace("_", " ")}</StatusBadge>
+        {isPromoted && (
+          <StatusBadge tone="accent" size="sm">
+            <Rocket className="h-2.5 w-2.5" /> promoted
+          </StatusBadge>
+        )}
         {isCopilot && (
           <StatusBadge tone="accent" size="sm">
             <Sparkles className="h-2.5 w-2.5" /> copilot
