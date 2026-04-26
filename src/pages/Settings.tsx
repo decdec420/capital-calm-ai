@@ -16,7 +16,7 @@ import { AlertTriangle, Compass, Plug } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
-import type { SystemMode } from "@/lib/domain-types";
+
 import { toast } from "sonner";
 
 export default function Settings() {
