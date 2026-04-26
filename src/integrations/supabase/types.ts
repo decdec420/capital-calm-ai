@@ -938,6 +938,8 @@ export type Database = {
       }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
+      get_post_trade_learn_token: { Args: never; Returns: string }
+      get_rollover_day_cron_token: { Args: never; Returns: string }
       get_signal_engine_cron_token: { Args: never; Returns: string }
       notify_telegram: {
         Args: {

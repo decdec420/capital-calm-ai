@@ -105,6 +105,16 @@ export default function Overview() {
   const floorDistance = account ? ((account.equity - account.balanceFloor) / account.equity) * 100 : 0;
   const lossVsCap = account ? (Math.abs(lossToday) / account.startOfDayEquity) * 100 : 0;
 
+  // Adaptive precision: when amounts are small (typical for tiny paper accounts
+  // or fractional crypto sizing), 2 decimals hides all the action. Show 4
+  // decimals below $1 and 2 decimals above. Equity always at 2.
+  const fmtMoney = (n: number, alwaysTwo = false) => {
+    const abs = Math.abs(n);
+    const digits = alwaysTwo ? 2 : abs < 1 ? 4 : 2;
+    return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  };
+
+
   const requestBrief = async () => {
     setBriefLoading(true);
     try {
@@ -282,21 +292,31 @@ export default function Overview() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <MetricCard
           label="Equity"
-          value={account ? `$${account.equity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+          value={account ? `$${fmtMoney(account.equity, true)}` : "—"}
           icon={<DollarSign className="h-3.5 w-3.5" />}
-          hint={account ? `cash $${account.cash.toFixed(0)}` : undefined}
-          explain="Total account value: cash + open positions marked-to-market. The single number that matters most over time."
+          hint={account ? `cash $${fmtMoney(account.cash, true)}` : undefined}
+          explain={
+            account ? (
+              <>
+                Total account value: cash + open positions marked-to-market.
+                <br />
+                Realized today: ${fmtMoney(realizedToday)} · Unrealized: ${fmtMoney(unrealizedToday)}
+              </>
+            ) : (
+              "Total account value: cash + open positions marked-to-market."
+            )
+          }
           onClick={() => setDrilldown("equity")}
           loading={accountLoading}
           freshness={<FreshnessDot timestamp={accountUpdatedAt} />}
         />
         <MetricCard
           label="Daily PnL"
-          value={`${dailyPnl >= 0 ? "+" : ""}$${dailyPnl.toFixed(2)}`}
+          value={`${dailyPnl >= 0 ? "+" : "-"}$${fmtMoney(Math.abs(dailyPnl))}`}
           delta={{ value: `${dailyPnlPct >= 0 ? "+" : ""}${dailyPnlPct.toFixed(2)}%`, direction: dailyPnl >= 0 ? "up" : "down" }}
           tone={dailyPnl >= 0 ? "safe" : "blocked"}
           icon={dailyPnl >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-          explain="Profit & Loss since the start-of-day equity snapshot. Includes realized + unrealized. Resets when you reset the day in Settings."
+          explain="Profit & Loss since the start-of-day equity snapshot. Resets daily at 00:05 UTC via automatic rollover."
           onClick={() => setDrilldown("dailyPnl")}
           loading={accountLoading}
         />
@@ -320,11 +340,12 @@ export default function Overview() {
         <MetricCard
           label="Floor distance"
           value={account ? `${floorDistance.toFixed(1)}%` : "—"}
-          hint={account ? `floor $${account.balanceFloor.toFixed(0)}` : undefined}
-          explain="How far equity sits above the absolute balance floor. Hit the floor and the kill-switch trips automatically. Big number = comfortable."
+          hint={account ? `floor $${fmtMoney(account.balanceFloor, true)}` : undefined}
+          explain="How far equity sits above the absolute balance floor. Hit the floor and the kill-switch trips automatically."
           onClick={() => setDrilldown("floorDistance")}
           loading={accountLoading}
         />
+
         <MetricCard
           label="Live mode"
           value={liveGated ? "Gated" : "Armed"}
