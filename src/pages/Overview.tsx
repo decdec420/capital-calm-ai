@@ -55,7 +55,7 @@ function FreshnessDot({ timestamp }: { timestamp: number | null }) {
 }
 
 export default function Overview() {
-  const { data: account, loading: accountLoading } = useAccountState();
+  const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
   const { open, closed } = useTrades();
   const { alerts, dismiss } = useAlerts();
