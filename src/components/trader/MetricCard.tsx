@@ -46,6 +46,7 @@ export function MetricCard({
   onClick,
   interactiveLabel,
   loading,
+  freshness,
 }: MetricCardProps) {
   if (loading) {
     return (
