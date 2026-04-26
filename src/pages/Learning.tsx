@@ -37,6 +37,7 @@ export default function Learning() {
   const [newOpen, setNewOpen] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [showPromoted, setShowPromoted] = useState(false);
 
   const heroLine = (() => {
     const bits: string[] = [];
