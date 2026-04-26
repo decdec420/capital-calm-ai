@@ -46,11 +46,11 @@ export function BrokerStatusInline({
         <span className="tabular">{meta.label}</span>
       </Link>
 
-      {showWarning && (
+      {liveArmed && (
         <div className="flex items-start gap-2 rounded-md border border-status-blocked/30 bg-status-blocked/5 px-3 py-2 text-xs text-status-blocked">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>
-            Live trading is armed but the broker is not connected — orders will fail.
+            Live trading is armed but no real broker is connected yet — orders will be paper-simulated until a broker integration ships.
           </span>
         </div>
       )}

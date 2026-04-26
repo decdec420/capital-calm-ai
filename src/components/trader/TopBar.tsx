@@ -63,18 +63,16 @@ export function TopBar() {
             </StatusBadge>
           </Link>
 
-          {/* Broker connection → settings */}
+          {/* Broker status — until a real broker integration ships, this
+              always reads "Paper Mode" so the UI doesn't lie about a
+              connection that doesn't exist. */}
           <Link
             to="/settings"
             className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-accent outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            aria-label={`Broker ${s.brokerConnection}. Open settings.`}
+            aria-label="Paper Mode — no real broker connected. Open settings."
           >
-            {s.brokerConnection === "connected" ? (
-              <Wifi className="h-3.5 w-3.5 text-status-safe" />
-            ) : (
-              <WifiOff className="h-3.5 w-3.5 text-status-blocked" />
-            )}
-            <span className="tabular capitalize">{s.brokerConnection}</span>
+            <WifiOff className="h-3.5 w-3.5 text-status-caution" />
+            <span className="tabular">Paper Mode</span>
           </Link>
         </>
       )}
