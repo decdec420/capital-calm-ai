@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
