@@ -145,6 +145,7 @@ export default function Learning() {
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       <th className="text-left px-4 py-2 font-medium">Parameter</th>
+                      <th className="text-left px-2 py-2 font-medium">Symbol</th>
                       <th className="text-left px-2 py-2 font-medium">Direction</th>
                       <th className="text-right px-2 py-2 font-medium">Tries</th>
                       <th className="text-left px-2 py-2 font-medium">Last outcome</th>
@@ -159,6 +160,9 @@ export default function Learning() {
                       return (
                         <tr key={m.id} className="hover:bg-accent/20">
                           <td className="px-4 py-2 font-mono text-foreground">{m.parameter}</td>
+                          <td className="px-2 py-2">
+                            <StatusBadge tone="neutral" size="sm">{m.symbol}</StatusBadge>
+                          </td>
                           <td className="px-2 py-2 text-muted-foreground capitalize">{m.direction}</td>
                           <td className="px-2 py-2 text-right tabular text-foreground">{m.attemptCount}</td>
                           <td className="px-2 py-2">

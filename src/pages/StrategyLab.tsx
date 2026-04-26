@@ -48,6 +48,7 @@ import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
 import { Link } from "react-router-dom";
+import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel";
 
 const TRADES_TO_PROMOTE = 50;
 
@@ -217,6 +218,9 @@ export default function StrategyLab() {
             onBacktest={runBacktest}
             backtestingId={backtestingId}
           />
+
+          {/* ─── Scaling readiness checklist (collapsed by default) ──── */}
+          <ScalingReadinessPanel />
 
           {/* ─── 2. IN TESTING ──────────────────────────────────────── */}
           <InTestingPanel

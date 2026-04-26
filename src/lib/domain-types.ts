@@ -145,6 +145,7 @@ export interface CopilotMemoryRow {
   id: string;
   parameter: string;
   direction: "increase" | "decrease";
+  symbol: string;
   fromValue: number;
   toValue: number;
   outcome: "accepted" | "rejected" | "noise";
