@@ -521,53 +521,6 @@ export default function Copilot() {
         </div>
       </div>
 
-      {/* CALIBRATION — is the AI honest about its edge? */}
-      <CalibrationChart signals={history} />
-
-      {/* SIGNAL HISTORY — the AI's report card */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Signal history</div>
-          <span className="text-xs text-muted-foreground">{history.length} decisions</span>
-        </div>
-        {history.length === 0 ? (
-          <div className="panel p-6 text-center text-xs text-muted-foreground italic">
-            No history yet. Every tick — propose, skip, or halt — lands here.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {history.slice(0, 10).map((s) => (
-              <div key={s.id} className="panel p-3 flex items-center gap-3 text-sm">
-                <StatusIcon status={s.status} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-foreground capitalize">{s.side} {s.symbol}</span>
-                    <span className="text-xs text-muted-foreground">@ ${s.proposedEntry.toFixed(0)}</span>
-                    <StatusBadge tone={statusTone(s.status)} size="sm">{s.status}</StatusBadge>
-                    {s.decidedBy && <span className="text-[10px] text-muted-foreground">by {s.decidedBy}</span>}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{s.aiReasoning || s.decisionReason}</p>
-                </div>
-                <div className="text-right shrink-0 flex items-center gap-2">
-                  <div>
-                    <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
-                    <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setExplainSignal(s)}
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-                    title="Explain this decision"
-                  >
-                    <Telescope className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       <SignalExplainDialog
         signal={explainSignal}
