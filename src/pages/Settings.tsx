@@ -45,7 +45,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <SectionHeader eyebrow="Settings" title="Workspace & runtime" description="Manage paper account, mode controls, and runtime config." />
+      <SectionHeader eyebrow="Settings" title="Workspace & runtime" description="Manage paper account, bot controls, and runtime config." />
 
       <Section title="Workspace">
         <ProfileEditor />
@@ -71,7 +71,7 @@ export default function Settings() {
       )}
 
       {system && (
-        <Section title="Mode controls">
+        <Section title="Bot controls">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
