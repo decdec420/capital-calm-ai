@@ -245,7 +245,33 @@ function ParamDiff({ title, params, other, side }: { title: string; params: Stra
   );
 }
 
-function DiffMetric({ label, a, b, suffix = "", inverse = false }: { label: string; a: number; b: number; suffix?: string; inverse?: boolean }) {
+function DiffMetric({
+  label,
+  a,
+  b,
+  suffix = "",
+  inverse = false,
+  untested = false,
+  baselineUntested = false,
+}: {
+  label: string;
+  a: number;
+  b: number;
+  suffix?: string;
+  inverse?: boolean;
+  /** Candidate side has no backtest data yet — render the value cell as "—". */
+  untested?: boolean;
+  /** Approved side has no backtest data either — suppress the delta entirely. */
+  baselineUntested?: boolean;
+}) {
+  if (untested) {
+    return (
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-sm tabular text-muted-foreground" title="Not yet measured — run a backtest">—</div>
+      </div>
+    );
+  }
   const delta = b - a;
   const better = inverse ? delta < 0 : delta > 0;
   return (
@@ -253,9 +279,13 @@ function DiffMetric({ label, a, b, suffix = "", inverse = false }: { label: stri
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="text-sm tabular text-foreground">
         {b.toFixed(2)}{suffix}{" "}
-        <span className={`text-xs ${better ? "text-status-safe" : delta === 0 ? "text-muted-foreground" : "text-status-blocked"}`}>
-          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
-        </span>
+        {baselineUntested ? (
+          <span className="text-xs text-muted-foreground">(no baseline)</span>
+        ) : (
+          <span className={`text-xs ${better ? "text-status-safe" : delta === 0 ? "text-muted-foreground" : "text-status-blocked"}`}>
+            ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
+          </span>
+        )}
       </div>
     </div>
   );
