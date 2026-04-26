@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { SignalCard } from "@/components/trader/SignalCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
