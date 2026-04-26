@@ -30,7 +30,7 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    eyebrow: "Step 1 of 4",
+    eyebrow: "Step 1 of 5",
     title: "Welcome to Trader OS",
     pitch:
       "Your AI-assisted cockpit for running a disciplined trading bot. Three groups, nine tabs, zero guesswork. We'll walk you through it in 60 seconds.",
