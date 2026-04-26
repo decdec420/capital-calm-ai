@@ -48,6 +48,7 @@ import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
 import { Link } from "react-router-dom";
+import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel";
 
 const TRADES_TO_PROMOTE = 50;
 
