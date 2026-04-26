@@ -141,8 +141,8 @@ export default function Overview() {
     try {
       await updateSystem({ bot: next });
       toast.success(`Bot ${next}.`);
-    } catch (e: any) {
-      toast.error(e?.message ?? "Couldn't toggle bot.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't toggle bot.");
     }
   };
 

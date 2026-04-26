@@ -236,7 +236,7 @@ function ExperimentRow({
   return (
     <div className="px-4 py-3 group">
       <div className="flex items-center gap-3 flex-wrap">
-        <StatusBadge tone={statusTone[exp.status] as any} size="sm" dot>{exp.status.replace("_", " ")}</StatusBadge>
+        <StatusBadge tone={statusTone[exp.status]} size="sm" dot>{exp.status.replace("_", " ")}</StatusBadge>
         {isCopilot && (
           <StatusBadge tone="accent" size="sm">
             <Sparkles className="h-2.5 w-2.5" /> copilot
