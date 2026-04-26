@@ -10,7 +10,7 @@ const statusBadgeVariants = cva(
         caution: "border-status-caution/30 bg-status-caution/10 text-status-caution",
         blocked: "border-status-blocked/30 bg-status-blocked/10 text-status-blocked",
         candidate: "border-status-candidate/30 bg-status-candidate/10 text-status-candidate",
-        disabled: "border-status-disabled/30 bg-status-disabled/10 text-status-disabled",
+        
         neutral: "border-border bg-secondary text-muted-foreground",
         accent: "border-primary/30 bg-primary/10 text-primary",
       },

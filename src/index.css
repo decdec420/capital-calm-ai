@@ -48,8 +48,6 @@
     --status-blocked-foreground: 0 30% 95%;
     --status-candidate: 210 60% 55%;
     --status-candidate-foreground: 210 30% 95%;
-    --status-disabled: 270 40% 55%;
-    --status-disabled-foreground: 270 30% 95%;
 
     /* Surfaces */
     --surface-1: 30 10% 7%;
