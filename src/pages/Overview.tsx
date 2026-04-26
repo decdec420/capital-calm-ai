@@ -105,6 +105,22 @@ export default function Overview() {
   const floorDistance = account ? ((account.equity - account.balanceFloor) / account.equity) * 100 : 0;
   const lossVsCap = account ? (Math.abs(lossToday) / account.startOfDayEquity) * 100 : 0;
 
+  // Adaptive precision: when amounts are small (typical for tiny paper accounts
+  // or fractional crypto sizing), 2 decimals hides all the action. Show 4
+  // decimals below $1 and 2 decimals above. Equity always at 2.
+  const fmtMoney = (n: number, alwaysTwo = false) => {
+    const abs = Math.abs(n);
+    const digits = alwaysTwo ? 2 : abs < 1 ? 4 : 2;
+    return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  };
+
+  // Daily PnL window staleness — if start_of_day_equity hasn't been updated
+  // in > 36h, the rollover cron is late or the account was rebased manually.
+  // We surface this so users don't read "Daily" PnL as today's number when
+  // it's really cumulative-since-last-rollover.
+  const dailyWindowStale = !!(account && accountUpdatedAt && false); // placeholder: per-row sod timestamp not exposed yet
+
+
   const requestBrief = async () => {
     setBriefLoading(true);
     try {
