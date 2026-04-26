@@ -302,4 +302,13 @@ export default function Welcome() {
   );
 }
 
+function PreviewStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-sm font-mono text-foreground tabular">{value}</div>
+    </div>
+  );
+}
+
 export { WELCOME_KEY };
