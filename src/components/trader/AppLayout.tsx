@@ -3,7 +3,7 @@ import { AppSidebar } from "@/components/trader/AppSidebar";
 import { TopBar } from "@/components/trader/TopBar";
 import { StatusFooter } from "@/components/trader/StatusFooter";
 import { FloatingKillSwitch } from "@/components/trader/FloatingKillSwitch";
-import { KeyboardShortcutsOverlay } from "@/components/trader/KeyboardShortcutsOverlay";
+import { ShortcutsOverlay } from "@/components/trader/ShortcutsOverlay";
 import { Outlet } from "react-router-dom";
 import { useMarkToMarket } from "@/hooks/useMarkToMarket";
 
@@ -28,7 +28,7 @@ export function AppLayout() {
         {/* Always-visible kill switch — reachable in <2s from any page. */}
         <FloatingKillSwitch />
         {/* Global keyboard shortcuts (?, k). */}
-        <KeyboardShortcutsOverlay />
+        <ShortcutsOverlay />
       </div>
     </SidebarProvider>
   );
