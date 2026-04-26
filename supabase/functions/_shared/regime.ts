@@ -77,10 +77,25 @@ export function sma(values: number[], length: number): number | null {
   return sum / length;
 }
 
+export interface RegimeOpts {
+  nowIso?: string;
+  /** Fast EMA period (defaults to 9). Comes from the approved strategy's
+   * `ema_fast` param so changing the strategy actually changes the live
+   * regime detection — not just the backtest. */
+  emaFast?: number;
+  /** Slow EMA period (defaults to 21). Source: strategy `ema_slow`. */
+  emaSlow?: number;
+  /** RSI lookback (defaults to 14). Source: strategy `rsi_period`. */
+  rsiPeriod?: number;
+}
+
 export function computeRegime(
   candles: Candle[],
-  opts: { nowIso?: string } = {},
+  opts: RegimeOpts = {},
 ): RegimeResult {
+  const fastP = Math.max(2, Math.round(opts.emaFast ?? 9));
+  const slowP = Math.max(fastP + 1, Math.round(opts.emaSlow ?? 21));
+  const rsiP = Math.max(2, Math.round(opts.rsiPeriod ?? 14));
   const fallback: RegimeResult = {
     regime: "no_trade",
     confidence: 0,
