@@ -132,7 +132,7 @@ export default function Settings() {
           <div className="mt-4 rounded-md border border-status-blocked/30 bg-status-blocked/5 p-3 flex items-start gap-3">
             <AlertTriangle className="h-4 w-4 text-status-blocked mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Lovable doesn't ship a broker integration. Toggling live mode arms the UI gate but no real orders are sent — wire your own bot to read these flags.
+              Live mode arms the server-side gate. The execution path exists but stays paper-only until a broker is configured and the autonomy acknowledgment is signed. Every order is still subject to the doctrine, sizing, and risk guardrails.
             </p>
           </div>
         </Section>
