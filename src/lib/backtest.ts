@@ -248,18 +248,20 @@ export function runBacktest(
     gcum += t.grossPnlR;
     grossCurve.push(gcum);
   }
-  // max drawdown (in R, expressed as a percentage of peak)
-  let peak = 0;
-  let maxDD = 0;
-  for (const v of curve) {
-    if (v > peak) peak = v;
-    const dd = peak - v;
-    if (dd > maxDD) maxDD = dd;
+  // Industry-standard drawdown: peak-to-trough on a compounded equity
+  // curve assuming 1% risk per trade. Replaces the old "% of gross profit"
+  // normalization that produced misleading numbers (e.g., -310%).
+  const RISK_PER_TRADE = 0.01;
+  let eq = 1.0;
+  let peakEq = 1.0;
+  let maxDDFrac = 0;
+  for (const t of trades) {
+    eq = Math.max(0, eq * (1 + t.pnlR * RISK_PER_TRADE));
+    if (eq > peakEq) peakEq = eq;
+    const dd = peakEq > 0 ? (peakEq - eq) / peakEq : 0;
+    if (dd > maxDDFrac) maxDDFrac = dd;
   }
-  // Express maxDrawdown as a negative fraction (e.g. -0.05 = -5%) using
-  // peak-to-trough R as a share of total positive R, capped to keep it sane.
-  const totalUp = trades.filter((t) => t.pnlR > 0).reduce((s, t) => s + t.pnlR, 0);
-  const maxDrawdown = totalUp > 0 ? -Math.min(1, maxDD / totalUp) : 0;
+  const maxDrawdown = -Math.min(1, maxDDFrac);
 
   // sharpe-ish: mean(pnlR) / stdev(pnlR) * sqrt(N) — annualization-agnostic
   const mean = expectancy;
