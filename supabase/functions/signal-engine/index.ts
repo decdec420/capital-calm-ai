@@ -315,9 +315,14 @@ async function runTickForUser(
   }
 
   // Persisted approved strategy (if any) so signals & trades carry identity.
+  // CRITICAL: we now load `params` too so the live engine actually uses
+  // ema_fast / ema_slow / rsi_period / stop_atr_mult / tp_r_mult from the
+  // approved strategy. Previously the engine only loaded id/version, which
+  // meant the entire learning loop was tuning a backtest model that had
+  // zero effect on real trades.
   const { data: approvedStrategy } = await admin
     .from("strategies")
-    .select("id,version")
+    .select("id,version,params")
     .eq("user_id", userId)
     .eq("status", "approved")
     .order("updated_at", { ascending: false })
@@ -325,6 +330,30 @@ async function runTickForUser(
   const strategyId: string | null = approvedStrategy?.id ?? null;
   const strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
+
+  // Pull the live-tunable knobs out of the strategy params.
+  type StratParam = { key: string; value: number | string | boolean };
+  const stratParams: StratParam[] = Array.isArray(approvedStrategy?.params)
+    ? (approvedStrategy!.params as StratParam[])
+    : [];
+  const paramNum = (key: string, fallback: number): number => {
+    const p = stratParams.find((p) => p.key === key);
+    if (!p) return fallback;
+    const n = typeof p.value === "number" ? p.value : Number(p.value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const stratEmaFast = paramNum("ema_fast", 9);
+  const stratEmaSlow = paramNum("ema_slow", 21);
+  const stratRsiPeriod = paramNum("rsi_period", 14);
+  const stratStopAtrMult = paramNum("stop_atr_mult", 1.5);
+  const stratTpRMult = paramNum("tp_r_mult", 2);
+  const liveParams = {
+    emaFast: stratEmaFast,
+    emaSlow: stratEmaSlow,
+    rsiPeriod: stratRsiPeriod,
+    stopAtrMult: stratStopAtrMult,
+    tpRMult: stratTpRMult,
+  };
 
   // Equity & daily counters for the risk gate.
   const equity = acct ? Number(acct.equity) : 0;
