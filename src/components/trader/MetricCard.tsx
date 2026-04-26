@@ -91,6 +91,7 @@ export function MetricCard({
             {delta.value}
           </span>
         )}
+        {freshness}
       </div>
       {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
       {children}
