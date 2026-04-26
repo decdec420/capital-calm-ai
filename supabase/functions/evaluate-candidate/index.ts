@@ -73,6 +73,7 @@ async function createAlert(
 async function evaluateForUser(
   admin: ReturnType<typeof createClient>,
   userId: string,
+  isCron: boolean,
 ) {
   // Pull approved + all candidates in one round-trip.
   const { data: rows } = await admin
@@ -112,7 +113,7 @@ async function evaluateForUser(
     };
   }
 
-  // Compare on the four criteria.
+  // Compare on the four criteria — now with real margins, not "≥".
   const aExp = metric(approved, "expectancy");
   const cExp = metric(inTesting, "expectancy");
   const aWin = metric(approved, "winRate");
@@ -122,8 +123,8 @@ async function evaluateForUser(
   const aSharpe = metric(approved, "sharpe");
   const cSharpe = metric(inTesting, "sharpe");
 
-  const expOk = cExp >= aExp;
-  const winOk = cWin >= aWin;
+  const expOk = (cExp - aExp) >= MIN_EXP_MARGIN;
+  const winOk = (cWin - aWin) >= MIN_WIN_RATE_MARGIN;
   // Drawdown is stored as a negative fraction. ddDelta > 0 means candidate is BETTER (less negative).
   const ddDelta = cDD - aDD;
   const ddOk = ddDelta >= -DRAWDOWN_TOLERANCE_PP;
@@ -144,16 +145,44 @@ async function evaluateForUser(
   }
 
   if (allPass) {
+    // Cooldown check (cron only — manual "Run check now" can still promote).
+    if (isCron) {
+      const { data: state } = await admin
+        .from("system_state")
+        .select("last_auto_promoted_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const last = (state as { last_auto_promoted_at: string | null } | null)?.last_auto_promoted_at;
+      if (last) {
+        const ageMs = Date.now() - new Date(last).getTime();
+        const cooldownMs = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+        if (ageMs < cooldownMs) {
+          const daysLeft = Math.ceil((cooldownMs - ageMs) / (24 * 60 * 60 * 1000));
+          return {
+            userId,
+            candidate: inTesting.version,
+            skipped: "cooldown",
+            trades,
+            cooldown_days_remaining: daysLeft,
+          };
+        }
+      }
+    }
+
     // Auto-promote: archive old approved, candidate becomes approved.
     await admin.from("strategies").update({ status: "archived" }).eq("id", approved.id);
     await admin.from("strategies").update({ status: "approved" }).eq("id", inTesting.id);
+    await admin
+      .from("system_state")
+      .update({ last_auto_promoted_at: new Date().toISOString() })
+      .eq("user_id", userId);
 
     await createAlert(
       admin,
       userId,
       "info",
       `🚀 Strategy auto-promoted to ${inTesting.version}`,
-      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${trades} paper trades.`,
+      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${trades} paper trades. Auto-promotions paused for ${COOLDOWN_DAYS} days.`,
     );
     return { userId, promoted: inTesting.version, trades };
   }
