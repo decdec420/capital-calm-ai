@@ -50,13 +50,27 @@ export function AutonomyToggle() {
             onClick={() => setLevel(l.value)}
             disabled={busy}
             className={cn(
-              "text-xs py-1.5 px-2 rounded-sm transition-colors",
+              "text-xs py-1.5 px-2 rounded-sm transition-colors flex items-center justify-center gap-1",
               current === l.value
                 ? "bg-primary text-primary-foreground font-medium"
                 : "text-muted-foreground hover:text-foreground hover:bg-background",
             )}
           >
-            {l.label}
+            <span>{l.label}</span>
+            <span
+              className={cn(
+                "text-[9px] uppercase tracking-wider font-semibold",
+                isLive
+                  ? current === l.value
+                    ? "text-status-blocked-foreground/90"
+                    : "text-status-blocked"
+                  : current === l.value
+                    ? "opacity-70"
+                    : "opacity-60",
+              )}
+            >
+              {isLive ? "(LIVE)" : "(paper)"}
+            </span>
           </button>
         ))}
       </div>
