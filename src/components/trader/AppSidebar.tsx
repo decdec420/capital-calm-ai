@@ -61,6 +61,22 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { user, profile, signOut } = useAuth();
+  const { alerts } = useAlerts();
+  const { pending } = useSignals();
+  const { counts: expCounts } = useExperiments();
+  const { guardrails } = useGuardrails();
+
+  const alertCount = alerts.length;
+  const signalCount = pending.length;
+  const reviewCount = expCounts.needsReview;
+  const blockedCount = guardrails.filter((g) => g.level === "blocked").length;
+
+  const badgeFor: Record<string, { count: number; bg: string }> = {
+    "/": { count: alertCount, bg: "hsl(var(--status-blocked))" },
+    "/copilot": { count: signalCount, bg: "hsl(var(--primary))" },
+    "/risk": { count: blockedCount, bg: "hsl(var(--status-caution))" },
+    "/learning": { count: reviewCount, bg: "hsl(var(--status-caution))" },
+  };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
   const initials = initialsFor(profile?.display_name, user?.email);
