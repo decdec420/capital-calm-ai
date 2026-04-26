@@ -1,4 +1,4 @@
-import { ShieldAlert, Wifi, WifiOff } from "lucide-react";
+import { ShieldAlert, WifiOff } from "lucide-react";
 import { Link } from "react-router-dom";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusBadge } from "./StatusBadge";
