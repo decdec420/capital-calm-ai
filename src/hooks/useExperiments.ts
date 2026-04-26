@@ -242,6 +242,7 @@ export function useExperiments() {
     needsReview,
     inFlight,
     accepted,
+    promoted,
     recentlyAutoResolved,
     memory,
     memoryCount: memory.length,
