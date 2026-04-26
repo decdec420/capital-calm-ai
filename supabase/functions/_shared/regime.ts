@@ -162,15 +162,15 @@ export function computeRegime(
         : 0;
   const volBoost = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
 
-  // Pullback detection (buy-the-dip inside an uptrend)
-  const emaFastArr = ema(closes, 9);
-  const emaSlowArr = ema(closes, 21);
+  // Pullback detection (buy-the-dip inside an uptrend) — uses strategy params.
+  const emaFastArr = ema(closes, fastP);
+  const emaSlowArr = ema(closes, slowP);
   const emaFast = emaFastArr[emaFastArr.length - 1];
   const emaSlow = emaSlowArr[emaSlowArr.length - 1];
   const emaSlowPrev = emaSlowArr[emaSlowArr.length - 6] ?? emaSlow;
   const slowRising = emaSlow > emaSlowPrev;
-  const rsiNow = rsi(closes, 14);
-  const rsiPrev = rsi(closes.slice(0, -1), 14);
+  const rsiNow = rsi(closes, rsiP);
+  const rsiPrev = rsi(closes.slice(0, -1), rsiP);
   const recent = candles.slice(-3);
   const touchedFastEma = recent.some((c) => c.l <= emaFast * 1.004);
   const inUptrend = (regime === "trending_up" || regime === "breakout") && slowRising;
