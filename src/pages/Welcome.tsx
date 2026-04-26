@@ -38,7 +38,7 @@ const STEPS: Step[] = [
     tabs: [],
   },
   {
-    eyebrow: "Step 2 of 4 · Operations",
+    eyebrow: "Step 2 of 5 · Operations",
     title: "What's happening right now",
     pitch:
       "Your day-to-day cockpit. Start at Overview every session, scan the market, check your trades, review what the bot did and why.",
