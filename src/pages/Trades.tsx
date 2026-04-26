@@ -38,6 +38,7 @@ export default function Trades() {
   const [selected, setSelected] = useState<Trade | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [closeFor, setCloseFor] = useState<Trade | null>(null);
+  const [discardFor, setDiscardFor] = useState<Trade | null>(null);
 
   const lastPrice = candles[candles.length - 1]?.c ?? 0;
   const openPosition = open[0];
