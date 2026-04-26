@@ -142,8 +142,51 @@ export default function Copilot() {
     }
   };
 
+  const decide = async (action: "approve" | "reject") => {
+    if (!activeSignal || busy) return;
+    setBusy(action);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        toast.error("Sign in first.");
+        return;
+      }
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-decide`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ signalId: activeSignal.id, action }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error ?? `Failed to ${action}`);
+        return;
+      }
+      toast.success(action === "approve" ? "Trade opened." : "Signal declined. AI noted.");
+    } catch {
+      toast.error("Connection error.");
+    } finally {
+      setBusy(null);
+    }
+  };
 
-  const buildContext = () => ({
+  useKeyboardShortcuts({
+    a: () => {
+      if (activeSignal && !busy) decide("approve");
+    },
+    r: () => {
+      if (activeSignal && !busy) decide("reject");
+    },
+    e: () => {
+      if (!running) runEngine();
+    },
+  });
+
+
     mode: system?.mode,
     bot: system?.bot,
     autonomy: system?.autonomyLevel,
