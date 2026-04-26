@@ -288,6 +288,7 @@ export default function Overview() {
           explain="Total account value: cash + open positions marked-to-market. The single number that matters most over time."
           onClick={() => setDrilldown("equity")}
           loading={accountLoading}
+          freshness={<FreshnessDot timestamp={accountUpdatedAt} />}
         />
         <MetricCard
           label="Daily PnL"
