@@ -175,7 +175,7 @@ export default function Settings() {
         </Section>
       )}
 
-      <Section title="Brokers (placeholder)">
+      <Section id="brokers" title="Brokers (placeholder)">
         <Row label="Paper broker" value="Connected (UI only)" tone="safe" />
         <Row label="Live broker" value="Not configured" tone="blocked" />
       </Section>
@@ -229,6 +229,19 @@ export default function Settings() {
             toast.success("Live trading ARMED.");
           } catch {
             toast.error("Couldn't sign acknowledgment.");
+          }
+        }}
+      />
+
+      <ArmLiveConfirmDialog
+        open={armConfirmOpen}
+        onOpenChange={setArmConfirmOpen}
+        onConfirm={async () => {
+          try {
+            await updateSystem({ liveTradingEnabled: true });
+            toast.success("Live trading ARMED.");
+          } catch {
+            toast.error("Couldn't arm live trading.");
           }
         }}
       />
@@ -309,9 +322,9 @@ function NumField({ label, value, onChange }: { label: string; value: string; on
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, id }: { title: string; children: React.ReactNode; id?: string }) {
   return (
-    <div className="panel p-5">
+    <div id={id} className="panel p-5 scroll-mt-20">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">{title}</div>
       {children}
     </div>
