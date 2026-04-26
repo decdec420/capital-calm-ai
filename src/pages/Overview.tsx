@@ -39,7 +39,7 @@ import { Brain } from "lucide-react";
 import type { Alert, Regime } from "@/lib/domain-types";
 
 export default function Overview() {
-  const { data: account } = useAccountState();
+  const { data: account, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
   const { open, closed } = useTrades();
   const { alerts, dismiss } = useAlerts();
@@ -266,6 +266,7 @@ export default function Overview() {
           hint={account ? `cash $${account.cash.toFixed(0)}` : undefined}
           explain="Total account value: cash + open positions marked-to-market. The single number that matters most over time."
           onClick={() => setDrilldown("equity")}
+          loading={accountLoading}
         />
         <MetricCard
           label="Daily PnL"
@@ -275,6 +276,7 @@ export default function Overview() {
           icon={dailyPnl >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
           explain="Profit & Loss since the start-of-day equity snapshot. Includes realized + unrealized. Resets when you reset the day in Settings."
           onClick={() => setDrilldown("dailyPnl")}
+          loading={accountLoading}
         />
         <MetricCard
           label="Trades today"
@@ -282,6 +284,7 @@ export default function Overview() {
           hint="cap 6"
           explain="Open + closed positions opened today. Hard cap of 6 to stop revenge-trading after a bad fill."
           onClick={() => setDrilldown("tradesToday")}
+          loading={accountLoading}
         />
         <MetricCard
           label="Loss vs cap"
@@ -290,6 +293,7 @@ export default function Overview() {
           tone={lossVsCap > 1 ? "caution" : "safe"}
           explain="How much of today's max-loss budget you've already burned. At 100% the bot halts itself for the day."
           onClick={() => setDrilldown("lossVsCap")}
+          loading={accountLoading}
         />
         <MetricCard
           label="Floor distance"
@@ -297,6 +301,7 @@ export default function Overview() {
           hint={account ? `floor $${account.balanceFloor.toFixed(0)}` : undefined}
           explain="How far equity sits above the absolute balance floor. Hit the floor and the kill-switch trips automatically. Big number = comfortable."
           onClick={() => setDrilldown("floorDistance")}
+          loading={accountLoading}
         />
         <MetricCard
           label="Live mode"
@@ -306,6 +311,7 @@ export default function Overview() {
           hint={liveGated ? "paper-only" : "operator-armed"}
           explain="Gated = paper money only, no real orders. Armed = real orders allowed (still subject to every guardrail). Toggle in Settings."
           onClick={() => setDrilldown("liveMode")}
+          loading={accountLoading}
         />
       </div>
 
@@ -316,6 +322,7 @@ export default function Overview() {
             title="Today's market brief"
             body={brief || (briefLoading ? "Cooking up a brief…" : "No brief yet. Tap Request brief.")}
             timestamp={brief ? "now" : undefined}
+            loading={briefLoading && !brief}
             footer={
               <Link to="/copilot" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
                 Open Copilot <Zap className="h-3 w-3" />

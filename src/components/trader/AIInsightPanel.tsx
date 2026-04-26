@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Sparkles, Calculator } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface AIInsightPanelProps {
   title: string;
@@ -16,6 +17,8 @@ interface AIInsightPanelProps {
    * Defaults to "ai" for backwards compatibility with existing callers.
    */
   kind?: "ai" | "computed";
+  /** When true, render skeleton placeholders instead of the body text. */
+  loading?: boolean;
 }
 
 export function AIInsightPanel({
@@ -25,6 +28,7 @@ export function AIInsightPanel({
   className,
   footer,
   kind = "ai",
+  loading,
 }: AIInsightPanelProps) {
   const isAi = kind === "ai";
   return (
@@ -66,7 +70,15 @@ export function AIInsightPanel({
           )}
         </div>
         <p className="text-sm font-medium text-foreground">{title}</p>
-        <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{body}</p>
+        {loading ? (
+          <div className="mt-2 space-y-2">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-11/12" />
+            <Skeleton className="h-3 w-3/4" />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{body}</p>
+        )}
         {footer && <div className="mt-3 pt-3 border-t border-border">{footer}</div>}
       </div>
     </div>
