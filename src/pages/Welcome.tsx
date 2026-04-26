@@ -30,7 +30,7 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    eyebrow: "Step 1 of 4",
+    eyebrow: "Step 1 of 5",
     title: "Welcome to Trader OS",
     pitch:
       "Your AI-assisted cockpit for running a disciplined trading bot. Three groups, nine tabs, zero guesswork. We'll walk you through it in 60 seconds.",
@@ -38,7 +38,7 @@ const STEPS: Step[] = [
     tabs: [],
   },
   {
-    eyebrow: "Step 2 of 4 · Operations",
+    eyebrow: "Step 2 of 5 · Operations",
     title: "What's happening right now",
     pitch:
       "Your day-to-day cockpit. Start at Overview every session, scan the market, check your trades, review what the bot did and why.",
@@ -51,7 +51,7 @@ const STEPS: Step[] = [
     ],
   },
   {
-    eyebrow: "Step 3 of 4 · Strategy",
+    eyebrow: "Step 3 of 5 · Strategy",
     title: "Get better, don't blow up",
     pitch:
       "The lab and the seatbelt. Tweak rules, backtest, set guardrails, learn from your own patterns over time.",
@@ -63,7 +63,7 @@ const STEPS: Step[] = [
     ],
   },
   {
-    eyebrow: "Step 4 of 4 · Assistant",
+    eyebrow: "Step 4 of 5 · Assistant",
     title: "Your AI second opinion",
     pitch:
       "Copilot knows your trades, journals, and the current market. Ask it anything — 'why did I lose money this week?' is a great opener.",
@@ -71,6 +71,13 @@ const STEPS: Step[] = [
     tabs: [
       { icon: Sparkles, name: "AI Copilot", blurb: "Chat with context-aware AI. No vague answers." },
     ],
+  },
+  {
+    eyebrow: "Step 5 of 5 · Setup",
+    title: "Set your paper account",
+    pitch: "Takes 30 seconds. You can change these any time in Settings → Paper account.",
+    accent: "from-primary/20 to-primary/0",
+    tabs: [],
   },
 ];
 
