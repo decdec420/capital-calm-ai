@@ -158,6 +158,86 @@ export default function Welcome() {
             </div>
           )}
 
+          {/* Setup form for step 5 */}
+          {step === 4 && (
+            <div className="px-8 py-6 space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="welcome-equity" className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Starting paper equity
+                  </Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                    <Input
+                      id="welcome-equity"
+                      inputMode="decimal"
+                      type="number"
+                      min="0"
+                      value={equity}
+                      onChange={(e) => setEquity(e.target.value)}
+                      className="pl-7 font-mono"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="welcome-floor" className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Balance floor
+                  </Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+                    <Input
+                      id="welcome-floor"
+                      inputMode="decimal"
+                      type="number"
+                      min="0"
+                      value={floor}
+                      onChange={(e) => setFloor(e.target.value)}
+                      className="pl-7 font-mono"
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {floorPct !== null
+                      ? `${floorPct.toFixed(1)}% of starting equity. Bot halts if equity touches this.`
+                      : "Bot halts if equity touches this."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="welcome-losscap" className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Daily loss cap (%)
+                </Label>
+                <div className="relative max-w-[180px]">
+                  <Input
+                    id="welcome-losscap"
+                    inputMode="decimal"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={lossCap}
+                    onChange={(e) => setLossCap(e.target.value)}
+                    className="pr-7 font-mono"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Bot halts when daily loss exceeds this of starting equity.
+                </p>
+              </div>
+
+              {validSetup && (
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-4 grid grid-cols-3 gap-3">
+                  <PreviewStat label="Equity" value={`$${equityNum.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                  <PreviewStat label="Floor" value={`$${floorNum.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                  <PreviewStat
+                    label="Max daily loss"
+                    value={`$${(maxDailyLoss ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Hero illustration for step 1 */}
           {isFirst && (
             <div className="px-8 py-10 grid grid-cols-3 gap-3 text-center">
