@@ -268,7 +268,7 @@ Deno.serve(async (req: Request) => {
     const results: unknown[] = [];
     for (const uid of userIds) {
       try {
-        results.push(await evaluateForUser(admin, uid));
+        results.push(await evaluateForUser(admin, uid, isCron));
       } catch (e) {
         results.push({ userId: uid, error: e instanceof Error ? e.message : String(e) });
       }
