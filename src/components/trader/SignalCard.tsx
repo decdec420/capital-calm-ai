@@ -27,6 +27,8 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
 
   const mins = Math.floor(remaining / 60000);
   const secs = Math.floor((remaining % 60000) / 1000);
+  const isUrgent = remaining < 60_000;
+  const isExpiring = remaining < 30_000;
 
   const decide = async (action: "approve" | "reject") => {
     setBusy(action);
@@ -66,7 +68,16 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
     : 0;
 
   return (
-    <div className="panel p-5 space-y-4 border-primary/30 bg-gradient-to-br from-primary/5 to-transparent animate-fade-in">
+    <div
+      className={cn(
+        "panel p-5 space-y-4 bg-gradient-to-br from-primary/5 to-transparent animate-fade-in transition-colors",
+        isExpiring
+          ? "border-status-blocked animate-pulse-soft shadow-[0_0_20px_hsl(var(--status-blocked)/0.15)]"
+          : isUrgent
+            ? "border-status-caution"
+            : "border-primary/30",
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="h-8 w-8 rounded-md bg-primary/15 text-primary flex items-center justify-center">
@@ -83,7 +94,12 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
           <StatusBadge tone={sideTone} size="sm" dot>
             {signal.side}
           </StatusBadge>
-          <StatusBadge tone="neutral" size="sm">
+          <StatusBadge
+            tone={isExpiring ? "blocked" : isUrgent ? "caution" : "neutral"}
+            size="sm"
+            dot
+            pulse={isUrgent}
+          >
             <Clock className="h-3 w-3" />
             {mins}:{secs.toString().padStart(2, "0")}
           </StatusBadge>
@@ -130,6 +146,11 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
           {busy === "reject" ? "…" : "Reject"}
         </Button>
       </div>
+      {isExpiring && (
+        <p className="text-center text-[11px] font-bold uppercase tracking-wider text-status-blocked animate-pulse-soft">
+          ⚠ Signal expiring — decide now
+        </p>
+      )}
     </div>
   );
 }
