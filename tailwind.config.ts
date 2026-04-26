@@ -65,8 +65,6 @@ export default {
           "blocked-foreground": "hsl(var(--status-blocked-foreground))",
           candidate: "hsl(var(--status-candidate))",
           "candidate-foreground": "hsl(var(--status-candidate-foreground))",
-          disabled: "hsl(var(--status-disabled))",
-          "disabled-foreground": "hsl(var(--status-disabled-foreground))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
