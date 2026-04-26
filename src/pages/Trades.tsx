@@ -28,6 +28,8 @@ import { NumberStepper } from "@/components/trader/NumberStepper";
 import { useTrades, type NewTradeInput } from "@/hooks/useTrades";
 import { useStrategies } from "@/hooks/useStrategies";
 import { useCandles } from "@/hooks/useCandles";
+import { useSystemState } from "@/hooks/useSystemState";
+import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Plus, TrendingUp, X } from "lucide-react";
 import type { Trade, TradeSide } from "@/lib/domain-types";
 import { toast } from "sonner";
@@ -36,6 +38,7 @@ export default function Trades() {
   const { open, closed, create, close, remove, loading } = useTrades();
   const { strategies } = useStrategies();
   const { candles } = useCandles();
+  const { data: system } = useSystemState();
   const [selected, setSelected] = useState<Trade | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [closeFor, setCloseFor] = useState<Trade | null>(null);
@@ -64,6 +67,13 @@ export default function Trades() {
           </Button>
         }
       />
+
+      {system && (
+        <BrokerStatusInline
+          connection={system.brokerConnection}
+          liveArmed={system.liveTradingEnabled}
+        />
+      )}
 
       {openPosition ? (
         <div className="panel p-5 space-y-5">

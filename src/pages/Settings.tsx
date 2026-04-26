@@ -5,13 +5,14 @@ import { StatusBadge } from "@/components/trader/StatusBadge";
 import { ProfileEditor } from "@/components/trader/ProfileEditor";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { LiveMoneyAcknowledgmentDialog } from "@/components/trader/LiveMoneyAcknowledgmentDialog";
+import { ArmLiveConfirmDialog } from "@/components/trader/ArmLiveConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Compass } from "lucide-react";
+import { AlertTriangle, Compass, Plug } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
@@ -23,6 +24,7 @@ export default function Settings() {
   const { data: account, update: updateAccount } = useAccountState();
   const [killOpen, setKillOpen] = useState(false);
   const [ackOpen, setAckOpen] = useState(false);
+  const [armConfirmOpen, setArmConfirmOpen] = useState(false);
   const navigate = useNavigate();
 
   const replayTour = () => {
@@ -107,33 +109,60 @@ export default function Settings() {
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                  Live trading enabled
-                  <StatusBadge tone={system.liveTradingEnabled ? "safe" : "blocked"} size="sm">
-                    {system.liveTradingEnabled ? "armed" : "gated"}
-                  </StatusBadge>
+            <div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                    Live trading enabled
+                    <StatusBadge tone={system.liveTradingEnabled ? "safe" : "blocked"} size="sm">
+                      {system.liveTradingEnabled ? "armed" : "gated"}
+                    </StatusBadge>
+                  </div>
+                  <div className="text-xs text-muted-foreground">Requires every guardrail to pass. Real money. Be sure.</div>
                 </div>
-                <div className="text-xs text-muted-foreground">Requires every guardrail to pass. Real money. Be sure.</div>
+                <Switch
+                  checked={system.liveTradingEnabled}
+                  // P5-F: cannot arm without a real broker connection.
+                  // Disarming (on→off) is always allowed regardless.
+                  disabled={!system.liveTradingEnabled && system.brokerConnection !== "connected"}
+                  onCheckedChange={async (v) => {
+                    // Disarm path: free, instant, no friction.
+                    if (!v) {
+                      try {
+                        await updateSystem({ liveTradingEnabled: false });
+                        toast.success("Live trading disarmed.");
+                      } catch {
+                        toast.error("Couldn't toggle.");
+                      }
+                      return;
+                    }
+                    // Arm path: first-ever flip → type-to-confirm acknowledgment.
+                    if (!system.liveMoneyAcknowledgedAt) {
+                      setAckOpen(true);
+                      return;
+                    }
+                    // Arm path: every subsequent flip → simple click-to-confirm.
+                    setArmConfirmOpen(true);
+                  }}
+                />
               </div>
-              <Switch
-                checked={system.liveTradingEnabled}
-                onCheckedChange={async (v) => {
-                  // Turning ON for the first time? Require the one-time
-                  // acknowledgment. Every subsequent toggle flips freely.
-                  if (v && !system.liveMoneyAcknowledgedAt) {
-                    setAckOpen(true);
-                    return;
-                  }
-                  try {
-                    await updateSystem({ liveTradingEnabled: v });
-                    toast.success(v ? "Live trading ARMED." : "Live trading disarmed.");
-                  } catch {
-                    toast.error("Couldn't toggle.");
-                  }
-                }}
-              />
+
+              {system.brokerConnection !== "connected" && (
+                <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Plug className="h-3 w-3 text-status-caution shrink-0" />
+                  Connect a broker before arming live trading.{" "}
+                  <a
+                    href="#brokers"
+                    className="text-primary hover:underline"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById("brokers")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    Configure brokers →
+                  </a>
+                </p>
+              )}
             </div>
           </div>
 
@@ -146,7 +175,7 @@ export default function Settings() {
         </Section>
       )}
 
-      <Section title="Brokers (placeholder)">
+      <Section id="brokers" title="Brokers (placeholder)">
         <Row label="Paper broker" value="Connected (UI only)" tone="safe" />
         <Row label="Live broker" value="Not configured" tone="blocked" />
       </Section>
@@ -200,6 +229,19 @@ export default function Settings() {
             toast.success("Live trading ARMED.");
           } catch {
             toast.error("Couldn't sign acknowledgment.");
+          }
+        }}
+      />
+
+      <ArmLiveConfirmDialog
+        open={armConfirmOpen}
+        onOpenChange={setArmConfirmOpen}
+        onConfirm={async () => {
+          try {
+            await updateSystem({ liveTradingEnabled: true });
+            toast.success("Live trading ARMED.");
+          } catch {
+            toast.error("Couldn't arm live trading.");
           }
         }}
       />
@@ -280,9 +322,9 @@ function NumField({ label, value, onChange }: { label: string; value: string; on
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, id }: { title: string; children: React.ReactNode; id?: string }) {
   return (
-    <div className="panel p-5">
+    <div id={id} className="panel p-5 scroll-mt-20">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-3">{title}</div>
       {children}
     </div>

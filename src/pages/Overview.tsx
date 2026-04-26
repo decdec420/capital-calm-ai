@@ -10,6 +10,7 @@ import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/MetricDrilldowns";
 import { AlertDetailSheet } from "@/components/trader/AlertDetailSheet";
+import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
@@ -194,6 +195,13 @@ export default function Overview() {
           </>
         }
       />
+
+      {system && (
+        <BrokerStatusInline
+          connection={system.brokerConnection}
+          liveArmed={system.liveTradingEnabled}
+        />
+      )}
 
       {/* Hero strip */}
       <div className="panel p-5 flex flex-wrap items-center gap-4 bg-gradient-surface">

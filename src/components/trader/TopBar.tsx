@@ -4,6 +4,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusBadge } from "./StatusBadge";
 import { Explain } from "./Explain";
 import { ExplainModeToggle } from "./ExplainModeToggle";
+import { LiveModeIndicator } from "./LiveModeIndicator";
 import type { SystemMode } from "@/lib/domain-types";
 import { useSystemState } from "@/hooks/useSystemState";
 
@@ -43,6 +44,9 @@ export function TopBar() {
               </StatusBadge>
             </Link>
           </Explain>
+
+          {/* Persistent live/paper indicator — always visible, screams when armed. */}
+          <LiveModeIndicator liveTradingEnabled={s.liveTradingEnabled} />
 
           {/* Bot status → risk center (where kill-switch lives) */}
           <Link
