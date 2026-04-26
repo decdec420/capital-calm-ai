@@ -63,7 +63,7 @@ const STEPS: Step[] = [
     ],
   },
   {
-    eyebrow: "Step 4 of 4 · Assistant",
+    eyebrow: "Step 4 of 5 · Assistant",
     title: "Your AI second opinion",
     pitch:
       "Copilot knows your trades, journals, and the current market. Ask it anything — 'why did I lose money this week?' is a great opener.",
