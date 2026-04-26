@@ -49,8 +49,9 @@ import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
 import { Link } from "react-router-dom";
 import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel";
+import { displayNameFor, autoSummaryFromVersion } from "@/lib/strategy-naming";
 
-const TRADES_TO_PROMOTE = 50;
+const TRADES_TO_PROMOTE = 100;
 
 export default function StrategyLab() {
   const {
