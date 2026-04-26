@@ -214,10 +214,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Cron/trigger only — require service role bearer.
+    // Trigger-only entrypoint. Validate via vault-stored token, with the
+    // service role key as a fallback for manual testing.
     const authHeader = req.headers.get("Authorization") ?? "";
     const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
-    if (bearer !== SERVICE_KEY) {
+    let tokenOk = false;
+    if (bearer && bearer === SERVICE_KEY) {
+      tokenOk = true;
+    } else {
+      try {
+        const { data: tok } = await admin.rpc("get_post_trade_learn_token");
+        if (tok && tok === bearer) tokenOk = true;
+      } catch {
+        // RPC missing — only service-role fallback works.
+      }
+    }
+    if (!tokenOk) {
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         {
