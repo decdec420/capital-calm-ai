@@ -21,6 +21,8 @@ interface MetricCardProps {
   interactiveLabel?: string;
   /** When true, render a skeleton placeholder instead of content. */
   loading?: boolean;
+  /** Optional inline freshness indicator rendered beside the value. */
+  freshness?: ReactNode;
 }
 
 const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
