@@ -42,7 +42,7 @@
     /* Status semantics */
     --status-safe: 145 50% 45%;
     --status-safe-foreground: 145 30% 95%;
-    --status-caution: 38 92% 55%;
+    --status-caution: 25 85% 52%;
     --status-caution-foreground: 30 15% 8%;
     --status-blocked: 0 65% 48%;
     --status-blocked-foreground: 0 30% 95%;
