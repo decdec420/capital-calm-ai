@@ -215,8 +215,14 @@ export function useExperiments() {
 
   const needsReview = useMemo(() => experiments.filter((e) => e.needsReview), [experiments]);
   const inFlight = useMemo(() => experiments.filter((e) => e.status === "queued" || e.status === "running"), [experiments]);
+  // "Ready to ship" = accepted but not yet promoted into a candidate strategy.
+  // Once promoted (strategyId set), it moves to the Promoted section instead.
   const accepted = useMemo(
-    () => experiments.filter((e) => e.status === "accepted").slice(0, 20),
+    () => experiments.filter((e) => e.status === "accepted" && !e.strategyId).slice(0, 20),
+    [experiments],
+  );
+  const promoted = useMemo(
+    () => experiments.filter((e) => !!e.strategyId).slice(0, 20),
     [experiments],
   );
   const recentlyAutoResolved = useMemo(
