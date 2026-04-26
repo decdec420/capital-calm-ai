@@ -403,9 +403,16 @@ async function runTickForUser(
 
     // Compute regime even if candles missing — computeRegime returns a
     // fallback "no_trade" with noTradeReasons, which we surface below.
+    // Pass the approved strategy's EMA / RSI knobs so changing the
+    // strategy actually changes regime detection in the live engine.
+    const regimeOpts = {
+      emaFast: stratEmaFast,
+      emaSlow: stratEmaSlow,
+      rsiPeriod: stratRsiPeriod,
+    };
     const regime: RegimeResult = candles && candles.length > 0
-      ? computeRegime(candles)
-      : computeRegime([]);
+      ? computeRegime(candles, regimeOpts)
+      : computeRegime([], regimeOpts);
 
     // Full risk-gate evaluation per symbol.
     const riskCtx: RiskContext = {
