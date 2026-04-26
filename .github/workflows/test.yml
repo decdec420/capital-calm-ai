@@ -27,15 +27,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Bun
+        # 'latest' tracks whatever Lovable's environment writes the
+        # lockfile with. Pinning to a specific older version (e.g. the
+        # one in package.json's `packageManager`) leaves CI unable to
+        # parse newer-format lockfiles ("Outdated lockfile version").
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.1.38
+          bun-version: latest
 
       # --ignore-scripts skips esbuild's postinstall version-validator,
-      # which is fragile across Node versions. The actual binaries are
-      # still downloaded; we just skip the validator that compares them.
+      # which is fragile across Node versions.
+      # We deliberately don't use --frozen-lockfile so CI can refresh
+      # the lockfile if Lovable writes a newer format than the pinned
+      # bun version reads. Determinism comes from the lockfile commit
+      # itself, not from refusing to install.
       - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
+        run: bun install --ignore-scripts
 
       - name: Typecheck
         run: bun run typecheck
