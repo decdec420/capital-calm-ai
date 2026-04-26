@@ -97,7 +97,7 @@ export default function MarketIntel() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <AIInsightPanel className="lg:col-span-2" title="Market summary" body={regime.summary} timestamp="now" />
+        <AIInsightPanel kind="computed" className="lg:col-span-2" title="Market summary" body={regime.summary} timestamp="now" />
         <div className="panel p-4">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Signal conditions</div>
           <div className="space-y-2 text-sm">
