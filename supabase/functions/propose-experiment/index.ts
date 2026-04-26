@@ -21,6 +21,10 @@ const json = (b: unknown, s: number) =>
 // Numeric, Copilot-tweakable knobs only. Strings/bools stay off-limits for now.
 const TWEAKABLE = ["ema_fast", "ema_slow", "rsi_period", "stop_atr_mult", "tp_r_mult", "max_order_pct"] as const;
 
+// Symbols the copilot rotates through. Each gets its own learning lane so a
+// "noise" outcome on BTC doesn't block exploration on more volatile assets.
+const SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
+
 async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: string) {
   // 1. Idempotency — don't pile up
   const { count: queuedCount } = await admin
