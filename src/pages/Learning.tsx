@@ -31,7 +31,7 @@ const memOutcomeTone: Record<CopilotMemoryRow["outcome"], "safe" | "blocked" | "
 export default function Learning() {
   const {
     loading, create, setStatus, remove, promoteToStrategy,
-    counts, needsReview, inFlight, accepted, recentlyAutoResolved,
+    counts, needsReview, inFlight, accepted, promoted, recentlyAutoResolved,
     memory, memoryCount, clearMemory,
   } = useExperiments();
   const [newOpen, setNewOpen] = useState(false);
