@@ -79,7 +79,7 @@ export default function Trades() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setCloseFor(openPosition)}>Close at market</Button>
-              <Button size="sm" variant="destructive" onClick={() => remove(openPosition.id)}>Discard</Button>
+              <Button size="sm" variant="destructive" onClick={() => setDiscardFor(openPosition)}>Discard</Button>
             </div>
           </div>
 
