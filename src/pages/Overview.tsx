@@ -114,12 +114,6 @@ export default function Overview() {
     return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   };
 
-  // Daily PnL window staleness — if start_of_day_equity hasn't been updated
-  // in > 36h, the rollover cron is late or the account was rebased manually.
-  // We surface this so users don't read "Daily" PnL as today's number when
-  // it's really cumulative-since-last-rollover.
-  const dailyWindowStale = !!(account && accountUpdatedAt && false); // placeholder: per-row sod timestamp not exposed yet
-
 
   const requestBrief = async () => {
     setBriefLoading(true);
