@@ -326,21 +326,30 @@ export default function Copilot() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* LEFT COLUMN — multi-symbol watchlist + conversation history */}
-        <div className="lg:col-span-1 lg:row-span-2 space-y-3" style={{ minHeight: "55vh" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr_180px] gap-4 items-start">
+        {/* LEFT COLUMN — symbol context + gate readout */}
+        <div className="space-y-3">
           <MultiSymbolStrip />
-          <ConversationSidebar
-            conversations={conversations}
-            activeId={activeId}
-            onSelect={setActiveId}
-            onNew={async () => {
-              await createConversation();
-            }}
-            onRename={renameConversation}
-            onDelete={deleteConversation}
-            loading={convLoading}
-          />
+
+          <div className="panel p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Last engine tick</div>
+              {snapshot && (
+                <span className="text-[10px] text-muted-foreground tabular">
+                  {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              )}
+            </div>
+            {!snapshot ? (
+              <p className="text-xs text-muted-foreground italic">
+                No engine snapshot yet. Hit <span className="text-primary">Run engine now</span>.
+              </p>
+            ) : lastGateReasons.length === 0 ? (
+              <p className="text-xs text-status-safe italic">All gates clear. Engine is free to act.</p>
+            ) : (
+              <GateReasonList reasons={lastGateReasons} max={4} />
+            )}
+          </div>
         </div>
 
         {/* CHAT / HISTORY / CALIBRATION TABS */}
