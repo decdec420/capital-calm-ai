@@ -21,6 +21,8 @@ interface MetricCardProps {
   interactiveLabel?: string;
   /** When true, render a skeleton placeholder instead of content. */
   loading?: boolean;
+  /** Optional inline freshness indicator rendered beside the value. */
+  freshness?: ReactNode;
 }
 
 const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
@@ -44,6 +46,7 @@ export function MetricCard({
   onClick,
   interactiveLabel,
   loading,
+  freshness,
 }: MetricCardProps) {
   if (loading) {
     return (
@@ -88,6 +91,7 @@ export function MetricCard({
             {delta.value}
           </span>
         )}
+        {freshness}
       </div>
       {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
       {children}

@@ -36,10 +36,26 @@ import { computeRegime } from "@/lib/regime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
+import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
 import type { Alert, Regime } from "@/lib/domain-types";
 
+function FreshnessDot({ timestamp }: { timestamp: number | null }) {
+  const label = useRelativeTime(timestamp);
+  const stale = isStale(timestamp);
+  const tone = stale ? "text-status-caution" : "text-muted-foreground";
+  return (
+    <span className={`inline-flex items-center gap-1 font-mono text-[10px] ${tone}`}>
+      <span
+        className={`inline-block rounded-full ${stale ? "bg-status-caution" : "bg-muted-foreground"}`}
+        style={{ width: 5, height: 5 }}
+      />
+      {label}
+    </span>
+  );
+}
+
 export default function Overview() {
-  const { data: account, loading: accountLoading } = useAccountState();
+  const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
   const { open, closed } = useTrades();
   const { alerts, dismiss } = useAlerts();
@@ -81,6 +97,8 @@ export default function Overview() {
     for (const a of alerts) c[a.severity] = (c[a.severity] ?? 0) + 1;
     return c;
   }, [alerts]);
+
+  const lastCandleTime = candles[candles.length - 1]?.t != null ? candles[candles.length - 1].t * 1000 : null;
 
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
@@ -197,8 +215,11 @@ export default function Overview() {
         <div className="flex-1" />
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC-USD live</div>
-          <div className="text-sm font-medium text-foreground tabular">
-            ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-sm font-medium text-foreground tabular">
+              ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </span>
+            <FreshnessDot timestamp={lastCandleTime} />
           </div>
           <div className={`text-[11px] tabular ${pctChange >= 0 ? "text-status-safe" : "text-status-blocked"}`}>
             {pctChange >= 0 ? "+" : ""}
@@ -267,6 +288,7 @@ export default function Overview() {
           explain="Total account value: cash + open positions marked-to-market. The single number that matters most over time."
           onClick={() => setDrilldown("equity")}
           loading={accountLoading}
+          freshness={<FreshnessDot timestamp={accountUpdatedAt} />}
         />
         <MetricCard
           label="Daily PnL"
