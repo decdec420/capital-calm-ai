@@ -9,8 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useExperiments, type NewExperimentInput } from "@/hooks/useExperiments";
-import type { Experiment } from "@/lib/domain-types";
-import { Brain, Check, ChevronDown, FlaskConical, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket } from "lucide-react";
+import type { Experiment, CopilotMemoryRow, StrategyMetrics, ExperimentBacktestResult } from "@/lib/domain-types";
+import { Brain, Check, ChevronDown, FlaskConical, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -22,10 +22,21 @@ const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" 
   needs_review: "caution",
 };
 
+const memOutcomeTone: Record<CopilotMemoryRow["outcome"], "safe" | "blocked" | "neutral"> = {
+  accepted: "safe",
+  rejected: "blocked",
+  noise: "neutral",
+};
+
 export default function Learning() {
-  const { loading, create, setStatus, remove, promoteToStrategy, counts, needsReview, inFlight, accepted, recentlyAutoResolved } = useExperiments();
+  const {
+    loading, create, setStatus, remove, promoteToStrategy,
+    counts, needsReview, inFlight, accepted, recentlyAutoResolved,
+    memory, memoryCount, clearMemory,
+  } = useExperiments();
   const [newOpen, setNewOpen] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
 
   const heroLine = (() => {
     const bits: string[] = [];
@@ -40,7 +51,7 @@ export default function Learning() {
       <SectionHeader
         eyebrow="Learning · Copilot R&D"
         title="The lab runs itself"
-        description="Copilot proposes parameter tweaks, backtests them, and only bothers you when the numbers don't shout. You ship what survives."
+        description="Copilot proposes parameter tweaks, backtests them, remembers what worked, and only bothers you when the numbers don't shout."
         actions={
           <div className="flex items-center gap-2">
             <StatusBadge tone="accent" dot pulse>
@@ -62,7 +73,7 @@ export default function Learning() {
         }
       />
 
-      {/* HERO — what the lab is doing right now */}
+      {/* HERO */}
       <div className="panel p-5 bg-gradient-to-br from-primary/5 via-card to-card border-primary/20">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-start gap-3 min-w-0">
@@ -81,11 +92,12 @@ export default function Learning() {
             <CountStat label="Needs you" value={counts.needsReview} tone="caution" />
             <CountStat label="Accepted" value={counts.accepted} tone="safe" />
             <CountStat label="Rejected" value={counts.rejected} tone="blocked" />
+            <CountStat label="Learned" value={memoryCount} tone="accent" />
           </div>
         </div>
       </div>
 
-      {/* NEEDS REVIEW — only when non-empty */}
+      {/* NEEDS REVIEW */}
       {needsReview.length > 0 && (
         <div className="panel">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -97,7 +109,8 @@ export default function Learning() {
           </div>
           <div className="divide-y divide-border">
             {needsReview.map((e) => (
-              <ExperimentRow key={e.id} exp={e} onAccept={() => setStatus(e.id, "accepted").then(() => toast.success("Accepted."))}
+              <ExperimentRow key={e.id} exp={e}
+                onAccept={() => setStatus(e.id, "accepted").then(() => toast.success("Accepted."))}
                 onReject={() => setStatus(e.id, "rejected").then(() => toast.success("Rejected."))}
                 onPromote={() => promoteToStrategy(e.id).then((v) => toast.success(`Promoted as candidate ${v}`)).catch((err) => toast.error(err.message))}
                 onRemove={() => remove(e.id).then(() => toast.success("Removed."))}
@@ -106,6 +119,72 @@ export default function Learning() {
           </div>
         </div>
       )}
+
+      {/* COPILOT MEMORY — what the AI has learned, collapsed by default */}
+      <Collapsible open={showMemory} onOpenChange={setShowMemory}>
+        <div className="panel">
+          <CollapsibleTrigger asChild>
+            <button className="w-full px-4 py-3 border-b border-border flex items-center justify-between hover:bg-accent/40 transition-colors">
+              <div className="flex items-center gap-2">
+                <Brain className="h-3.5 w-3.5 text-primary" />
+                <span className="text-[11px] uppercase tracking-wider text-foreground font-semibold">Copilot memory</span>
+                <StatusBadge tone="accent" size="sm">{memoryCount}</StatusBadge>
+              </div>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", showMemory && "rotate-180")} />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            {memory.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic p-6 text-center">
+                Empty. Copilot hasn't tried anything yet — the first proposal hasn't run a backtest.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="text-left px-4 py-2 font-medium">Parameter</th>
+                      <th className="text-left px-2 py-2 font-medium">Direction</th>
+                      <th className="text-right px-2 py-2 font-medium">Tries</th>
+                      <th className="text-left px-2 py-2 font-medium">Last outcome</th>
+                      <th className="text-right px-2 py-2 font-medium">Exp Δ</th>
+                      <th className="text-left px-2 py-2 font-medium">Cooldown until</th>
+                      <th className="px-4 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {memory.map((m) => {
+                      const onCooldown = m.retryAfter && new Date(m.retryAfter) > new Date();
+                      return (
+                        <tr key={m.id} className="hover:bg-accent/20">
+                          <td className="px-4 py-2 font-mono text-foreground">{m.parameter}</td>
+                          <td className="px-2 py-2 text-muted-foreground capitalize">{m.direction}</td>
+                          <td className="px-2 py-2 text-right tabular text-foreground">{m.attemptCount}</td>
+                          <td className="px-2 py-2">
+                            <StatusBadge tone={memOutcomeTone[m.outcome]} size="sm">{m.outcome}</StatusBadge>
+                          </td>
+                          <td className={cn("px-2 py-2 text-right tabular", (m.expDelta ?? 0) > 0 ? "text-status-safe" : (m.expDelta ?? 0) < 0 ? "text-status-blocked" : "text-muted-foreground")}>
+                            {m.expDelta != null ? `${m.expDelta >= 0 ? "+" : ""}${m.expDelta.toFixed(3)}R` : "—"}
+                          </td>
+                          <td className="px-2 py-2 tabular text-muted-foreground">
+                            {onCooldown ? new Date(m.retryAfter!).toLocaleDateString() : <span className="text-status-safe">free</span>}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px] text-muted-foreground hover:text-status-blocked"
+                              onClick={() => clearMemory(m.parameter).then(() => toast.success(`Memory cleared for ${m.parameter}`))}>
+                              Clear
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CollapsibleContent>
+        </div>
+      </Collapsible>
 
       {/* IN FLIGHT */}
       {inFlight.length > 0 && (
@@ -124,7 +203,7 @@ export default function Learning() {
         </div>
       )}
 
-      {/* ACCEPTED — ready to ship */}
+      {/* ACCEPTED */}
       {accepted.length > 0 && (
         <div className="panel">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
@@ -136,7 +215,7 @@ export default function Learning() {
           </div>
           <div className="divide-y divide-border">
             {accepted.map((e) => (
-              <ExperimentRow key={e.id} exp={e}
+              <ExperimentRow key={e.id} exp={e} showChecklist
                 onPromote={() => promoteToStrategy(e.id).then((v) => toast.success(`Promoted as candidate ${v}`)).catch((err) => toast.error(err.message))}
                 onRemove={() => remove(e.id).then(() => toast.success("Removed."))}
               />
@@ -145,7 +224,7 @@ export default function Learning() {
         </div>
       )}
 
-      {/* AUTO-RESOLVED — collapsed by default */}
+      {/* AUTO-RESOLVED */}
       <Collapsible open={showResolved} onOpenChange={setShowResolved}>
         <div className="panel">
           <CollapsibleTrigger asChild>
@@ -176,8 +255,7 @@ export default function Learning() {
         </div>
       </Collapsible>
 
-      {/* Empty state */}
-      {!loading && inFlight.length === 0 && needsReview.length === 0 && recentlyAutoResolved.length === 0 && (
+      {!loading && inFlight.length === 0 && needsReview.length === 0 && recentlyAutoResolved.length === 0 && memoryCount === 0 && (
         <div className="panel p-8 text-center">
           <div className="h-12 w-12 rounded-md bg-secondary text-muted-foreground flex items-center justify-center mx-auto mb-3">
             <FlaskConical className="h-5 w-5" />
@@ -206,8 +284,8 @@ export default function Learning() {
   );
 }
 
-function CountStat({ label, value, tone }: { label: string; value: number; tone?: "safe" | "caution" | "blocked" }) {
-  const toneClass = tone === "safe" ? "text-status-safe" : tone === "caution" ? "text-status-caution" : tone === "blocked" ? "text-status-blocked" : "text-foreground";
+function CountStat({ label, value, tone }: { label: string; value: number; tone?: "safe" | "caution" | "blocked" | "accent" }) {
+  const toneClass = tone === "safe" ? "text-status-safe" : tone === "caution" ? "text-status-caution" : tone === "blocked" ? "text-status-blocked" : tone === "accent" ? "text-primary" : "text-foreground";
   return (
     <div>
       <div className={cn("text-2xl font-semibold tabular leading-none", toneClass)}>{value}</div>
@@ -222,12 +300,14 @@ function ExperimentRow({
   onReject,
   onPromote,
   onRemove,
+  showChecklist,
 }: {
   exp: Experiment;
   onAccept?: () => void;
   onReject?: () => void;
   onPromote?: () => void;
   onRemove?: () => void;
+  showChecklist?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isCopilot = exp.proposedBy === "copilot";
@@ -285,7 +365,7 @@ function ExperimentRow({
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <div className="mt-2 ml-4 space-y-2 text-xs border-l-2 border-border pl-3">
+            <div className="mt-2 ml-4 space-y-3 text-xs border-l-2 border-border pl-3">
               {exp.hypothesis && (
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Hypothesis</div>
@@ -305,11 +385,13 @@ function ExperimentRow({
                     <BacktestSide label="Before" m={bt.before.metrics} />
                     <BacktestSide label="After" m={bt.after.metrics} />
                   </div>
+                  {bt.outOfSample && <OutOfSampleRow oos={bt.outOfSample} />}
                   <p className="text-[10px] text-muted-foreground mt-2">
                     Sample: {bt.significantSample ? "✓ enough trades" : "× not enough trades"} · Delta: {bt.significantDelta ? "✓ above noise" : "× within noise"} · {bt.candleCount} candles
                   </p>
                 </div>
               )}
+              {showChecklist && bt && !bt.error && <PromotionChecklist bt={bt} />}
               {bt?.error && <p className="text-xs text-status-blocked italic">Backtest error: {bt.error}</p>}
             </div>
           </CollapsibleContent>
@@ -319,7 +401,7 @@ function ExperimentRow({
   );
 }
 
-function BacktestSide({ label, m }: { label: string; m: { expectancy: number; winRate: number; trades: number; sharpe: number; maxDrawdown: number } }) {
+function BacktestSide({ label, m }: { label: string; m: StrategyMetrics }) {
   return (
     <div className="text-[11px] space-y-0.5">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
@@ -327,7 +409,56 @@ function BacktestSide({ label, m }: { label: string; m: { expectancy: number; wi
       <div>win <span className="text-foreground tabular">{(m.winRate * 100).toFixed(1)}%</span></div>
       <div>sharpe <span className="text-foreground tabular">{m.sharpe.toFixed(2)}</span></div>
       <div>maxDD <span className="text-foreground tabular">{(m.maxDrawdown * 100).toFixed(1)}%</span></div>
+      {m.profitFactor != null && <div>PF <span className="text-foreground tabular">{m.profitFactor === 999 ? "∞" : m.profitFactor.toFixed(2)}</span></div>}
+      {m.avgWin != null && <div>avg win <span className="text-foreground tabular">{m.avgWin.toFixed(2)}R</span></div>}
+      {m.avgLoss != null && <div>avg loss <span className="text-foreground tabular">{m.avgLoss.toFixed(2)}R</span></div>}
       <div>n <span className="text-foreground tabular">{m.trades}</span></div>
+    </div>
+  );
+}
+
+function OutOfSampleRow({ oos }: { oos: NonNullable<ExperimentBacktestResult["outOfSample"]> }) {
+  const positive = oos.expDelta > 0;
+  const cautionFlag = oos.expDelta < 0;
+  return (
+    <div className={cn(
+      "mt-2 rounded-md border px-2.5 py-1.5 flex items-center justify-between gap-3",
+      cautionFlag ? "border-status-caution/30 bg-status-caution/5" : "border-border bg-muted/20",
+    )}>
+      <div className="flex items-center gap-1.5">
+        {cautionFlag && <AlertTriangle className="h-3 w-3 text-status-caution" />}
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Out-of-sample check</span>
+      </div>
+      <div className="text-[11px] tabular font-mono">
+        <span className={positive ? "text-status-safe" : cautionFlag ? "text-status-caution" : "text-muted-foreground"}>
+          exp Δ {oos.expDelta >= 0 ? "+" : ""}{oos.expDelta.toFixed(3)}R
+        </span>
+        <span className="text-muted-foreground"> · {oos.candleCount} candles</span>
+      </div>
+    </div>
+  );
+}
+
+function PromotionChecklist({ bt }: { bt: ExperimentBacktestResult }) {
+  const after = bt.after.metrics;
+  const items = [
+    { label: "In-sample expectancy delta ≥ 0.05R", pass: (bt.deltas?.expectancy ?? 0) >= 0.05 },
+    { label: "Out-of-sample delta positive", pass: (bt.outOfSample?.expDelta ?? 0) > 0 },
+    { label: "Max drawdown stable or improved", pass: !bt.drawdownWorsened },
+    { label: "Profit factor ≥ 1.0 after change", pass: (after.profitFactor ?? 0) >= 1 },
+    { label: "Sample size ≥ 30 trades", pass: !!bt.significantSample },
+  ];
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Promotion checklist</div>
+      <ul className="space-y-0.5">
+        {items.map((it) => (
+          <li key={it.label} className={cn("flex items-center gap-2 text-[11px]", it.pass ? "text-status-safe" : "text-status-caution")}>
+            {it.pass ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+            <span className={it.pass ? "text-foreground/80" : "text-muted-foreground"}>{it.label}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -352,11 +483,7 @@ function ExperimentDialog({
       open={open}
       onOpenChange={(o) => {
         if (!o) {
-          setTitle("");
-          setParameter("");
-          setBefore("");
-          setAfter("");
-          setNotes("");
+          setTitle(""); setParameter(""); setBefore(""); setAfter(""); setNotes("");
         }
         onOpenChange(o);
       }}
