@@ -9,9 +9,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useStrategies, type NewStrategyInput } from "@/hooks/useStrategies";
 import type { StrategyParam, StrategyStatus, StrategyVersion } from "@/lib/domain-types";
-import { ArrowRight, Beaker, Check, FlaskConical, Loader2, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowRight, Beaker, Check, FlaskConical, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
