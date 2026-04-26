@@ -33,9 +33,13 @@ const json = (b: unknown, s: number) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const MIN_TRADES_TO_EVALUATE = 50;
+// Tighter thresholds (Apr 2026 audit) — promotions should be rare and earned.
+const MIN_TRADES_TO_EVALUATE = 100;
+const MIN_EXP_MARGIN = 0.05;        // candidate must beat live by ≥0.05R expectancy
+const MIN_WIN_RATE_MARGIN = 0.03;   // …and ≥3pp on win rate
 const DRAWDOWN_TOLERANCE_PP = 0.10; // 10 percentage points
 const DRAWDOWN_CRITICAL_PP = 0.20;  // 20 pp → ask the human
+const COOLDOWN_DAYS = 7;            // lock auto-promotions for 7 days after one runs
 
 type StrategyRow = {
   id: string;
