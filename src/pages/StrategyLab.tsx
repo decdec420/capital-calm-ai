@@ -9,9 +9,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useStrategies, type NewStrategyInput } from "@/hooks/useStrategies";
 import type { StrategyParam, StrategyStatus, StrategyVersion } from "@/lib/domain-types";
-import { ArrowRight, Beaker, Check, FlaskConical, Loader2, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ArrowRight, Beaker, Check, FlaskConical, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
@@ -105,34 +112,53 @@ export default function StrategyLab() {
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
             {strategies.map((s) => (
-              <div key={s.id} className="relative group">
+              <div key={s.id} className="relative">
                 <StrategyVersionCard strategy={s} selected={selectedId === s.id} onSelect={() => setSelectedId(s.id)} />
-                <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-xs gap-1"
-                    disabled={backtestingId === s.id}
-                    onClick={(e) => { e.stopPropagation(); runBacktest(s); }}
-                    title="Replay strategy on BTC-USD 1h candles"
-                  >
-                    {backtestingId === s.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <FlaskConical className="h-3 w-3" />}
-                    Backtest
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={(e) => { e.stopPropagation(); setEditingId(s.id); }}>
-                    Edit
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); create(cloneFrom(s)).then(() => toast.success("Cloned as candidate.")); }}>
-                    <RotateCcw className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0"
-                    onClick={(e) => { e.stopPropagation(); remove(s.id).then(() => toast.success("Strategy removed.")); }}
-                  >
-                    <Trash2 className="h-3 w-3 text-muted-foreground" />
-                  </Button>
+                <div className="absolute top-3 right-3">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Strategy actions"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem
+                        disabled={backtestingId === s.id}
+                        onClick={() => runBacktest(s)}
+                      >
+                        {backtestingId === s.id ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <FlaskConical className="h-4 w-4 mr-2" />
+                        )}
+                        Run backtest
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setEditingId(s.id)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => create(cloneFrom(s)).then(() => toast.success("Cloned as candidate."))}
+                      >
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                        Clone as candidate
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => remove(s.id).then(() => toast.success("Strategy removed."))}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             ))}
