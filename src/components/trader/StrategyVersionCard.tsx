@@ -41,20 +41,36 @@ export function StrategyVersionCard({
         </StatusBadge>
       </div>
       <div className="grid grid-cols-4 gap-2 pt-2 border-t border-border">
-        <Metric label="Expectancy" value={strategy.metrics.expectancy.toFixed(2) + "R"} />
-        <Metric label="Win rate" value={(strategy.metrics.winRate * 100).toFixed(0) + "%"} />
-        <Metric label="Max DD" value={(strategy.metrics.maxDrawdown * 100).toFixed(1) + "%"} />
-        <Metric label="Sharpe" value={strategy.metrics.sharpe.toFixed(2)} />
+        {strategy.metrics.trades === 0 ? (
+          <>
+            <Metric label="Expectancy" value="—" untested />
+            <Metric label="Win rate" value="—" untested />
+            <Metric label="Max DD" value="—" untested />
+            <Metric label="Sharpe" value="—" untested />
+          </>
+        ) : (
+          <>
+            <Metric label="Expectancy" value={strategy.metrics.expectancy.toFixed(2) + "R"} />
+            <Metric label="Win rate" value={(strategy.metrics.winRate * 100).toFixed(0) + "%"} />
+            <Metric label="Max DD" value={(strategy.metrics.maxDrawdown * 100).toFixed(1) + "%"} />
+            <Metric label="Sharpe" value={strategy.metrics.sharpe.toFixed(2)} />
+          </>
+        )}
       </div>
+      {strategy.metrics.trades === 0 && (
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground italic pt-1">
+          Not yet backtested — hit Backtest to measure
+        </p>
+      )}
     </button>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, untested = false }: { label: string; value: string; untested?: boolean }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-sm tabular text-foreground">{value}</div>
+      <div className={cn("text-sm tabular", untested ? "text-muted-foreground" : "text-foreground")}>{value}</div>
     </div>
   );
 }

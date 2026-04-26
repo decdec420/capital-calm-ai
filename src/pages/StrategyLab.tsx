@@ -165,13 +165,16 @@ export default function StrategyLab() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-4 border-t border-border">
-                <DiffMetric label="Expectancy" a={approved.metrics.expectancy} b={candidate.metrics.expectancy} suffix="R" />
-                <DiffMetric label="Win rate" a={approved.metrics.winRate * 100} b={candidate.metrics.winRate * 100} suffix="%" />
-                <DiffMetric label="Max DD" a={approved.metrics.maxDrawdown * 100} b={candidate.metrics.maxDrawdown * 100} suffix="%" inverse />
-                <DiffMetric label="Sharpe" a={approved.metrics.sharpe} b={candidate.metrics.sharpe} />
+                <DiffMetric label="Expectancy" a={approved.metrics.expectancy} b={candidate.metrics.expectancy} suffix="R" untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
+                <DiffMetric label="Win rate" a={approved.metrics.winRate * 100} b={candidate.metrics.winRate * 100} suffix="%" untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
+                <DiffMetric label="Max DD" a={approved.metrics.maxDrawdown * 100} b={candidate.metrics.maxDrawdown * 100} suffix="%" inverse untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
+                <DiffMetric label="Sharpe" a={approved.metrics.sharpe} b={candidate.metrics.sharpe} untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trades</div>
-                  <div className="text-sm tabular text-foreground">{candidate.metrics.trades} <span className="text-muted-foreground">/ 50 needed</span></div>
+                  <div className="text-sm tabular text-foreground">
+                    {candidate.metrics.trades === 0 ? "—" : candidate.metrics.trades}{" "}
+                    <span className="text-muted-foreground">/ 50 needed</span>
+                  </div>
                 </div>
               </div>
 
@@ -242,7 +245,33 @@ function ParamDiff({ title, params, other, side }: { title: string; params: Stra
   );
 }
 
-function DiffMetric({ label, a, b, suffix = "", inverse = false }: { label: string; a: number; b: number; suffix?: string; inverse?: boolean }) {
+function DiffMetric({
+  label,
+  a,
+  b,
+  suffix = "",
+  inverse = false,
+  untested = false,
+  baselineUntested = false,
+}: {
+  label: string;
+  a: number;
+  b: number;
+  suffix?: string;
+  inverse?: boolean;
+  /** Candidate side has no backtest data yet — render the value cell as "—". */
+  untested?: boolean;
+  /** Approved side has no backtest data either — suppress the delta entirely. */
+  baselineUntested?: boolean;
+}) {
+  if (untested) {
+    return (
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-sm tabular text-muted-foreground" title="Not yet measured — run a backtest">—</div>
+      </div>
+    );
+  }
   const delta = b - a;
   const better = inverse ? delta < 0 : delta > 0;
   return (
@@ -250,9 +279,13 @@ function DiffMetric({ label, a, b, suffix = "", inverse = false }: { label: stri
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="text-sm tabular text-foreground">
         {b.toFixed(2)}{suffix}{" "}
-        <span className={`text-xs ${better ? "text-status-safe" : delta === 0 ? "text-muted-foreground" : "text-status-blocked"}`}>
-          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
-        </span>
+        {baselineUntested ? (
+          <span className="text-xs text-muted-foreground">(no baseline)</span>
+        ) : (
+          <span className={`text-xs ${better ? "text-status-safe" : delta === 0 ? "text-muted-foreground" : "text-status-blocked"}`}>
+            ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
+          </span>
+        )}
       </div>
     </div>
   );

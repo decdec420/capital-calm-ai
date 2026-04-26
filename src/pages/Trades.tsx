@@ -8,6 +8,16 @@ import { TagInput } from "@/components/trader/TagInput";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -28,6 +38,7 @@ export default function Trades() {
   const [selected, setSelected] = useState<Trade | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [closeFor, setCloseFor] = useState<Trade | null>(null);
+  const [discardFor, setDiscardFor] = useState<Trade | null>(null);
 
   const lastPrice = candles[candles.length - 1]?.c ?? 0;
   const openPosition = open[0];
@@ -68,7 +79,7 @@ export default function Trades() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setCloseFor(openPosition)}>Close at market</Button>
-              <Button size="sm" variant="destructive" onClick={() => remove(openPosition.id)}>Discard</Button>
+              <Button size="sm" variant="destructive" onClick={() => setDiscardFor(openPosition)}>Discard</Button>
             </div>
           </div>
 
@@ -257,6 +268,36 @@ export default function Trades() {
           }
         }}
       />
+
+      <AlertDialog open={!!discardFor} onOpenChange={(o) => !o && setDiscardFor(null)}>
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard trade?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the trade and its journal entry. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-status-blocked text-status-blocked-foreground hover:bg-status-blocked/90"
+              onClick={async () => {
+                if (!discardFor) return;
+                try {
+                  await remove(discardFor.id);
+                  toast.success("Trade discarded.");
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Couldn't discard trade");
+                } finally {
+                  setDiscardFor(null);
+                }
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
