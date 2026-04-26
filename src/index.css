@@ -131,3 +131,16 @@
     @apply tabular tracking-tight;
   }
 }
+
+@layer base {
+  /* Strip the up/down spinner arrows from number inputs — Tommy hates them. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
