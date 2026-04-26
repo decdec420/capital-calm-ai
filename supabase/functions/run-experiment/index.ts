@@ -199,6 +199,9 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
         p_drawdown_delta: Number(drawdownDelta.toFixed(4)),
         p_retry_after: retryAfter,
         p_experiment_id: exp.id,
+        // Symbol-isolated memory: a "noise" learning on BTC must not block
+        // the same exploration on ETH/SOL.
+        p_symbol: exp.symbol ?? "BTC-USD",
       });
     } catch (e) {
       // Memory write failures shouldn't tank the experiment row.

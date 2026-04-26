@@ -77,10 +77,25 @@ export function sma(values: number[], length: number): number | null {
   return sum / length;
 }
 
+export interface RegimeOpts {
+  nowIso?: string;
+  /** Fast EMA period (defaults to 9). Comes from the approved strategy's
+   * `ema_fast` param so changing the strategy actually changes the live
+   * regime detection — not just the backtest. */
+  emaFast?: number;
+  /** Slow EMA period (defaults to 21). Source: strategy `ema_slow`. */
+  emaSlow?: number;
+  /** RSI lookback (defaults to 14). Source: strategy `rsi_period`. */
+  rsiPeriod?: number;
+}
+
 export function computeRegime(
   candles: Candle[],
-  opts: { nowIso?: string } = {},
+  opts: RegimeOpts = {},
 ): RegimeResult {
+  const fastP = Math.max(2, Math.round(opts.emaFast ?? 9));
+  const slowP = Math.max(fastP + 1, Math.round(opts.emaSlow ?? 21));
+  const rsiP = Math.max(2, Math.round(opts.rsiPeriod ?? 14));
   const fallback: RegimeResult = {
     regime: "no_trade",
     confidence: 0,
@@ -147,15 +162,15 @@ export function computeRegime(
         : 0;
   const volBoost = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
 
-  // Pullback detection (buy-the-dip inside an uptrend)
-  const emaFastArr = ema(closes, 9);
-  const emaSlowArr = ema(closes, 21);
+  // Pullback detection (buy-the-dip inside an uptrend) — uses strategy params.
+  const emaFastArr = ema(closes, fastP);
+  const emaSlowArr = ema(closes, slowP);
   const emaFast = emaFastArr[emaFastArr.length - 1];
   const emaSlow = emaSlowArr[emaSlowArr.length - 1];
   const emaSlowPrev = emaSlowArr[emaSlowArr.length - 6] ?? emaSlow;
   const slowRising = emaSlow > emaSlowPrev;
-  const rsiNow = rsi(closes, 14);
-  const rsiPrev = rsi(closes.slice(0, -1), 14);
+  const rsiNow = rsi(closes, rsiP);
+  const rsiPrev = rsi(closes.slice(0, -1), rsiP);
   const recent = candles.slice(-3);
   const touchedFastEma = recent.some((c) => c.l <= emaFast * 1.004);
   const inUptrend = (regime === "trending_up" || regime === "breakout") && slowRising;

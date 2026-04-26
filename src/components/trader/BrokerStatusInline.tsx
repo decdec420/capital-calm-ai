@@ -20,26 +20,16 @@ export function BrokerStatusInline({
   connection: ConnectionState;
   liveArmed: boolean;
 }) {
-  const meta =
-    connection === "connected"
-      ? {
-          icon: <Wifi className="h-3.5 w-3.5" />,
-          label: "Broker: Connected",
-          cls: "border-status-safe/30 bg-status-safe/10 text-status-safe",
-        }
-      : connection === "degraded"
-      ? {
-          icon: <Wifi className="h-3.5 w-3.5" />,
-          label: "Broker: Degraded",
-          cls: "border-status-caution/30 bg-status-caution/10 text-status-caution",
-        }
-      : {
-          icon: <WifiOff className="h-3.5 w-3.5" />,
-          label: "Broker: Disconnected",
-          cls: "border-status-blocked/30 bg-status-blocked/10 text-status-blocked",
-        };
-
-  const showWarning = liveArmed && connection !== "connected";
+  // Until a real broker integration ships, EVERY trade is paper. Showing
+  // "Broker: Connected" reads as a hardcoded DB default lie. Until P4-E
+  // wires real broker keys via Vault, this badge always reads "Paper Mode".
+  const meta = {
+    icon: <Wifi className="h-3.5 w-3.5" />,
+    label: "Paper Mode · no broker",
+    cls: "border-status-caution/30 bg-status-caution/10 text-status-caution",
+  };
+  // connection arg retained for future wiring (real broker integration).
+  void connection;
 
   return (
     <div className="space-y-2 -mt-2">
@@ -56,11 +46,11 @@ export function BrokerStatusInline({
         <span className="tabular">{meta.label}</span>
       </Link>
 
-      {showWarning && (
+      {liveArmed && (
         <div className="flex items-start gap-2 rounded-md border border-status-blocked/30 bg-status-blocked/5 px-3 py-2 text-xs text-status-blocked">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>
-            Live trading is armed but the broker is not connected — orders will fail.
+            Live trading is armed but no real broker is connected yet — orders will be paper-simulated until a broker integration ships.
           </span>
         </div>
       )}

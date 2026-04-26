@@ -125,6 +125,16 @@ async function decideForSymbol(opts: {
   // deno-lint-ignore no-explicit-any
   contextPacket: any;
   LOVABLE_API_KEY: string;
+  /** Live strategy parameters that shape the prompt. The AI is told the
+   * stop band and TP-R multiple to use so changing the approved strategy
+   * actually changes how live trades get sized — not just the backtest. */
+  stratParams: {
+    emaFast: number;
+    emaSlow: number;
+    rsiPeriod: number;
+    stopAtrMult: number;
+    tpRMult: number;
+  };
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -140,7 +150,17 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY } = opts;
+  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY, stratParams } = opts;
+
+  // Translate stop_atr_mult into an approximate price-percent band so the
+  // AI has a concrete target. This is a heuristic — final stop is hard
+  // computed in Stage 4 from `regime.atrPct * stopAtrMult` — but the
+  // prompt needs *some* concrete number to anchor on.
+  const stopAtrMult = stratParams.stopAtrMult;
+  const tpRMult = stratParams.tpRMult;
+  // Rough conversion: an ATR-multiple of 1.5 on hourly BTC ≈ 1.0–1.5%.
+  const stopPctLow = Math.max(0.4, stopAtrMult * 0.7).toFixed(1);
+  const stopPctHigh = Math.max(0.6, stopAtrMult * 1.1).toFixed(1);
 
   const systemPrompt = `You are the Trader OS Signal Engine for ${symbol}.
 Disciplined, conservative, risk-first, compounding-focused. A SKIP is data, not failure.
@@ -153,13 +173,19 @@ PROPOSE_TRADE only when ALL are true:
 - no guardrail blocked or above 0.85 utilization
 - For LONGS: strongly prefer pullback==true (RSI dipped <45 then curled up while slow EMA still rising). A clean pullback is the highest-quality buy.
 
+STRATEGY PARAMETERS (from the live approved strategy):
+- EMA fast: ${stratParams.emaFast} · EMA slow: ${stratParams.emaSlow} · RSI period: ${stratParams.rsiPeriod}
+- stop_atr_mult: ${stopAtrMult} → place proposed_stop ~${stopPctLow}–${stopPctHigh}% from entry
+- tp_r_mult: ${tpRMult} → proposed_target should be ${tpRMult}R from entry (TP1 = 1R)
+These are the live knobs. If the strategy widens stops, your proposed_stop must reflect that.
+
 PATTERN MEMORY: review patternMemory in context. If a symbol or regime has been losing recently, raise your bar. If it has been winning, you may be slightly more aggressive on size (still capped by doctrine at $${MAX_ORDER_USD}/order).
 
 SIZING (compounding-friendly, survival-first):
 - size_pct: 0.10–0.25 of equity, scaled by confidence and pullback quality
-- proposed_stop: ~1.2–1.8% from entry
+- proposed_stop: ~${stopPctLow}–${stopPctHigh}% from entry (per stop_atr_mult above)
 - proposed_tp1: 1R from entry — half closes here, stop moves to breakeven
-- proposed_target (TP2): 2R from entry — runner exits here
+- proposed_target (TP2): ${tpRMult}R from entry — runner exits here
 
 Your numbers will be hard-clamped by the doctrine ($${MAX_ORDER_USD} max notional per order). Propose honestly.
 
@@ -315,9 +341,14 @@ async function runTickForUser(
   }
 
   // Persisted approved strategy (if any) so signals & trades carry identity.
+  // CRITICAL: we now load `params` too so the live engine actually uses
+  // ema_fast / ema_slow / rsi_period / stop_atr_mult / tp_r_mult from the
+  // approved strategy. Previously the engine only loaded id/version, which
+  // meant the entire learning loop was tuning a backtest model that had
+  // zero effect on real trades.
   const { data: approvedStrategy } = await admin
     .from("strategies")
-    .select("id,version")
+    .select("id,version,params")
     .eq("user_id", userId)
     .eq("status", "approved")
     .order("updated_at", { ascending: false })
@@ -325,6 +356,30 @@ async function runTickForUser(
   const strategyId: string | null = approvedStrategy?.id ?? null;
   const strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
+
+  // Pull the live-tunable knobs out of the strategy params.
+  type StratParam = { key: string; value: number | string | boolean };
+  const stratParams: StratParam[] = Array.isArray(approvedStrategy?.params)
+    ? (approvedStrategy!.params as StratParam[])
+    : [];
+  const paramNum = (key: string, fallback: number): number => {
+    const p = stratParams.find((p) => p.key === key);
+    if (!p) return fallback;
+    const n = typeof p.value === "number" ? p.value : Number(p.value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const stratEmaFast = paramNum("ema_fast", 9);
+  const stratEmaSlow = paramNum("ema_slow", 21);
+  const stratRsiPeriod = paramNum("rsi_period", 14);
+  const stratStopAtrMult = paramNum("stop_atr_mult", 1.5);
+  const stratTpRMult = paramNum("tp_r_mult", 2);
+  const liveParams = {
+    emaFast: stratEmaFast,
+    emaSlow: stratEmaSlow,
+    rsiPeriod: stratRsiPeriod,
+    stopAtrMult: stratStopAtrMult,
+    tpRMult: stratTpRMult,
+  };
 
   // Equity & daily counters for the risk gate.
   const equity = acct ? Number(acct.equity) : 0;
@@ -374,9 +429,16 @@ async function runTickForUser(
 
     // Compute regime even if candles missing — computeRegime returns a
     // fallback "no_trade" with noTradeReasons, which we surface below.
+    // Pass the approved strategy's EMA / RSI knobs so changing the
+    // strategy actually changes regime detection in the live engine.
+    const regimeOpts = {
+      emaFast: stratEmaFast,
+      emaSlow: stratEmaSlow,
+      rsiPeriod: stratRsiPeriod,
+    };
     const regime: RegimeResult = candles && candles.length > 0
-      ? computeRegime(candles)
-      : computeRegime([]);
+      ? computeRegime(candles, regimeOpts)
+      : computeRegime([], regimeOpts);
 
     // Full risk-gate evaluation per symbol.
     const riskCtx: RiskContext = {
@@ -607,6 +669,7 @@ async function runTickForUser(
       }),
     ),
     patternMemory,
+    strategyParams: liveParams,
   };
 
   const aiResult = await decideForSymbol({
@@ -615,6 +678,7 @@ async function runTickForUser(
     regime: winner.regime,
     contextPacket,
     LOVABLE_API_KEY,
+    stratParams: liveParams,
   });
 
   if ("error" in aiResult) {
@@ -724,15 +788,23 @@ async function runTickForUser(
   const sizeUsd = clamp.sizeUsd;
   const fullSize = clamp.qty;
 
+  // Stop fallback uses the strategy's stop_atr_mult so the param actually
+  // changes live trades, not just backtests. We approximate ATR as 1% of
+  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
+  // already exposes annualizedVolPct if a future revision wants tighter.
+  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
   const stop = Number(
     decision.proposed_stop ??
-      (side === "long" ? entry * 0.985 : entry * 1.015),
-  );
-  const target = Number(
-    decision.proposed_target ??
-      (side === "long" ? entry * 1.03 : entry * 0.97),
+      (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
   );
   const riskPerUnit = Math.abs(entry - stop);
+  // Target fallback honors the strategy's tp_r_mult.
+  const target = Number(
+    decision.proposed_target ??
+      (side === "long"
+        ? entry + riskPerUnit * stratTpRMult
+        : entry - riskPerUnit * stratTpRMult),
+  );
   const tp1 = Number(
     decision.proposed_tp1 ??
       (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),

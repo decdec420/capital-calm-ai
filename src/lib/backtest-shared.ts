@@ -164,18 +164,28 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
   const winRate = wins.length / trades.length;
   const expectancy = trades.reduce((s, t) => s + t.pnlR, 0) / trades.length;
 
+  // Industry-standard drawdown: peak-to-trough on a compounded equity
+  // curve assuming 1% risk per trade. Old version normalized against
+  // gross profits and produced misleading numbers like -310%.
+  const RISK_PER_TRADE = 0.01;
+  const equityCurve: number[] = [];
+  let equity = 1.0;
+  for (const t of trades) {
+    equity = Math.max(0, equity * (1 + t.pnlR * RISK_PER_TRADE));
+    equityCurve.push(equity);
+  }
   const curve: number[] = [];
   let cum = 0;
   for (const t of trades) { cum += t.pnlR; curve.push(cum); }
 
-  let peak = 0, maxDD = 0;
-  for (const v of curve) {
-    if (v > peak) peak = v;
-    const dd = peak - v;
-    if (dd > maxDD) maxDD = dd;
+  let peakEq = 1.0;
+  let maxDDFrac = 0;
+  for (const v of equityCurve) {
+    if (v > peakEq) peakEq = v;
+    const dd = peakEq > 0 ? (peakEq - v) / peakEq : 0;
+    if (dd > maxDDFrac) maxDDFrac = dd;
   }
-  const totalUp = trades.filter((t) => t.pnlR > 0).reduce((s, t) => s + t.pnlR, 0);
-  const maxDrawdown = totalUp > 0 ? -Math.min(1, maxDD / totalUp) : 0;
+  const maxDrawdown = -Math.min(1, maxDDFrac);
 
   const mean = expectancy;
   const variance = trades.reduce((s, t) => s + (t.pnlR - mean) ** 2, 0) / trades.length;

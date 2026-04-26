@@ -199,6 +199,7 @@ export type Database = {
           parameter: string
           retry_after: string | null
           sharpe_delta: number | null
+          symbol: string
           to_value: number
           updated_at: string
           user_id: string
@@ -218,6 +219,7 @@ export type Database = {
           parameter: string
           retry_after?: string | null
           sharpe_delta?: number | null
+          symbol?: string
           to_value: number
           updated_at?: string
           user_id: string
@@ -237,6 +239,7 @@ export type Database = {
           parameter?: string
           retry_after?: string | null
           sharpe_delta?: number | null
+          symbol?: string
           to_value?: number
           updated_at?: string
           user_id?: string
@@ -310,6 +313,7 @@ export type Database = {
           proposed_by: string
           status: string
           strategy_id: string | null
+          symbol: string
           title: string
           updated_at: string
           user_id: string
@@ -331,6 +335,7 @@ export type Database = {
           proposed_by?: string
           status?: string
           strategy_id?: string | null
+          symbol?: string
           title: string
           updated_at?: string
           user_id: string
@@ -352,6 +357,7 @@ export type Database = {
           proposed_by?: string
           status?: string
           strategy_id?: string | null
+          symbol?: string
           title?: string
           updated_at?: string
           user_id?: string
@@ -1013,23 +1019,42 @@ export type Database = {
         Returns: undefined
       }
       realized_pnl_today: { Args: { p_user_id: string }; Returns: number }
-      upsert_copilot_memory: {
-        Args: {
-          p_direction: string
-          p_drawdown_delta: number
-          p_exp_delta: number
-          p_experiment_id?: string
-          p_from_value: number
-          p_outcome: string
-          p_parameter: string
-          p_retry_after: string
-          p_sharpe_delta: number
-          p_to_value: number
-          p_user_id: string
-          p_win_rate_delta: number
-        }
-        Returns: undefined
-      }
+      upsert_copilot_memory:
+        | {
+            Args: {
+              p_direction: string
+              p_drawdown_delta: number
+              p_exp_delta: number
+              p_experiment_id?: string
+              p_from_value: number
+              p_outcome: string
+              p_parameter: string
+              p_retry_after: string
+              p_sharpe_delta: number
+              p_to_value: number
+              p_user_id: string
+              p_win_rate_delta: number
+            }
+            Returns: undefined
+          }
+        | {
+            Args: {
+              p_direction: string
+              p_drawdown_delta: number
+              p_exp_delta: number
+              p_experiment_id?: string
+              p_from_value: number
+              p_outcome: string
+              p_parameter: string
+              p_retry_after: string
+              p_sharpe_delta: number
+              p_symbol?: string
+              p_to_value: number
+              p_user_id: string
+              p_win_rate_delta: number
+            }
+            Returns: undefined
+          }
     }
     Enums: {
       [_ in never]: never
