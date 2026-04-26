@@ -301,35 +301,6 @@ export default function Trades() {
         }}
       />
 
-      <AlertDialog open={!!discardFor} onOpenChange={(o) => !o && setDiscardFor(null)}>
-        <AlertDialogContent className="bg-card border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard trade?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes the trade and its journal entry. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-status-blocked text-status-blocked-foreground hover:bg-status-blocked/90"
-              onClick={async () => {
-                if (!discardFor) return;
-                try {
-                  await remove(discardFor.id);
-                  toast.success("Trade discarded.");
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Couldn't discard trade");
-                } finally {
-                  setDiscardFor(null);
-                }
-              }}
-            >
-              Discard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
