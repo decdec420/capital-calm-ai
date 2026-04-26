@@ -146,6 +146,11 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
           {busy === "reject" ? "…" : "Reject"}
         </Button>
       </div>
+      {isExpiring && (
+        <p className="text-center text-[11px] font-bold uppercase tracking-wider text-status-blocked animate-pulse-soft">
+          ⚠ Signal expiring — decide now
+        </p>
+      )}
     </div>
   );
 }
