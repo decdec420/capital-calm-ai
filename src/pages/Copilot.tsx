@@ -352,8 +352,8 @@ export default function Copilot() {
           </div>
         </div>
 
-        {/* CHAT / HISTORY / CALIBRATION TABS */}
-        <div className="lg:col-span-3 panel flex flex-col" style={{ minHeight: "55vh" }}>
+        {/* CENTER COLUMN — chat / history / calibration tabs */}
+        <div className="panel flex flex-col" style={{ minHeight: "55vh" }}>
           <Tabs defaultValue="chat" className="flex-1 flex flex-col">
             <TabsList className="mx-3 mt-3 self-start">
               <TabsTrigger value="chat">Chat</TabsTrigger>
