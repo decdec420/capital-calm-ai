@@ -186,6 +186,7 @@ export default function Copilot() {
     },
   });
   const buildContext = () => ({
+    mode: system?.mode,
     bot: system?.bot,
     autonomy: system?.autonomyLevel,
     liveTradingEnabled: system?.liveTradingEnabled,
