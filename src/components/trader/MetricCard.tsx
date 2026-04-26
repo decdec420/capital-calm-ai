@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight } from "lucide-react";
 import { ExplainIcon } from "./Explain";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { ReactNode } from "react";
 
 interface MetricCardProps {
@@ -18,6 +19,8 @@ interface MetricCardProps {
   onClick?: () => void;
   /** Optional aria label for the interactive surface. */
   interactiveLabel?: string;
+  /** When true, render a skeleton placeholder instead of content. */
+  loading?: boolean;
 }
 
 const toneRing: Record<NonNullable<MetricCardProps["tone"]>, string> = {
@@ -40,7 +43,18 @@ export function MetricCard({
   explain,
   onClick,
   interactiveLabel,
+  loading,
 }: MetricCardProps) {
+  if (loading) {
+    return (
+      <div className={cn("panel p-4 flex flex-col gap-2", className)}>
+        <Skeleton className="h-2.5 w-16" />
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton className="h-2 w-12" />
+      </div>
+    );
+  }
+
   const interactive = !!onClick;
 
   const inner = (
