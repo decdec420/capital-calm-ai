@@ -18,6 +18,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAlerts } from "@/hooks/useAlerts";
+import { useSignals } from "@/hooks/useSignals";
+import { useExperiments } from "@/hooks/useExperiments";
+import { useGuardrails } from "@/hooks/useGuardrails";
 
 const sections = [
   {
