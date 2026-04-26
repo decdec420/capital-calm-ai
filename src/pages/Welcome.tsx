@@ -86,9 +86,22 @@ const STEPS: Step[] = [
 export default function Welcome() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
+  const [equity, setEquity] = useState("10000");
+  const [floor, setFloor] = useState("8500");
+  const [lossCap, setLossCap] = useState("1.5");
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
   const isFirst = step === 0;
+
+  const equityNum = parseFloat(equity);
+  const floorNum = parseFloat(floor);
+  const lossCapNum = parseFloat(lossCap);
+  const validSetup =
+    Number.isFinite(equityNum) && equityNum > 0 &&
+    Number.isFinite(floorNum) && floorNum >= 0 && floorNum < equityNum &&
+    Number.isFinite(lossCapNum) && lossCapNum > 0 && lossCapNum <= 100;
+  const floorPct = validSetup ? (floorNum / equityNum) * 100 : null;
+  const maxDailyLoss = validSetup ? (equityNum * lossCapNum) / 100 : null;
 
   const finish = () => {
     localStorage.setItem(WELCOME_KEY, "1");
