@@ -191,8 +191,8 @@ async function evaluateForUser(
   await admin.from("strategies").update({ status: "archived" }).eq("id", inTesting.id);
 
   const failReasons = [
-    !expOk && `expectancy (${cExp.toFixed(2)}R vs ${aExp.toFixed(2)}R)`,
-    !winOk && `win rate (${(cWin * 100).toFixed(0)}% vs ${(aWin * 100).toFixed(0)}%)`,
+    !expOk && `expectancy gap too small (${cExp.toFixed(2)}R vs ${aExp.toFixed(2)}R, need +${MIN_EXP_MARGIN.toFixed(2)}R)`,
+    !winOk && `win rate gap too small (${(cWin * 100).toFixed(0)}% vs ${(aWin * 100).toFixed(0)}%, need +${(MIN_WIN_RATE_MARGIN * 100).toFixed(0)}pp)`,
     !ddOk && `drawdown worsened by ${Math.abs(ddDelta * 100).toFixed(1)}pp`,
     !sharpeOk && `sharpe (${cSharpe.toFixed(2)} vs ${aSharpe.toFixed(2)})`,
   ].filter(Boolean).join(", ");
