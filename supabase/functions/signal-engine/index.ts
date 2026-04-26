@@ -787,15 +787,23 @@ async function runTickForUser(
   const sizeUsd = clamp.sizeUsd;
   const fullSize = clamp.qty;
 
+  // Stop fallback uses the strategy's stop_atr_mult so the param actually
+  // changes live trades, not just backtests. We approximate ATR as 1% of
+  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
+  // already exposes annualizedVolPct if a future revision wants tighter.
+  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
   const stop = Number(
     decision.proposed_stop ??
-      (side === "long" ? entry * 0.985 : entry * 1.015),
-  );
-  const target = Number(
-    decision.proposed_target ??
-      (side === "long" ? entry * 1.03 : entry * 0.97),
+      (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
   );
   const riskPerUnit = Math.abs(entry - stop);
+  // Target fallback honors the strategy's tp_r_mult.
+  const target = Number(
+    decision.proposed_target ??
+      (side === "long"
+        ? entry + riskPerUnit * stratTpRMult
+        : entry - riskPerUnit * stratTpRMult),
+  );
   const tp1 = Number(
     decision.proposed_tp1 ??
       (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
