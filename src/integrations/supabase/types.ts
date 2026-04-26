@@ -996,6 +996,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
       get_post_trade_learn_token: { Args: never; Returns: string }
