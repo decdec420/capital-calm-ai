@@ -241,7 +241,7 @@ export default function Overview() {
       {!activeSignal && lastGateReasons.length > 0 && (
         <div className="panel p-4 space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            <span className="text-sm font-medium text-foreground">
               Why the engine is sitting on hands
             </span>
             {snapshot && (
@@ -338,7 +338,7 @@ export default function Overview() {
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Open position</span>
+                  <span className="text-sm font-medium text-foreground">Open position</span>
                   <StatusBadge tone="candidate" size="sm" dot pulse>
                     monitoring
                   </StatusBadge>
@@ -359,7 +359,7 @@ export default function Overview() {
 
           <div className="panel p-4">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Recent alerts</span>
+              <span className="text-sm font-medium text-foreground">Recent alerts</span>
               <div className="flex items-center gap-2 text-[10px] tabular">
                 {severityCounts.critical > 0 && (
                   <span className="inline-flex items-center gap-1 text-status-blocked">
@@ -429,7 +429,7 @@ export default function Overview() {
         <div className="space-y-4">
           <div className="panel p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Kill-switches</span>
+              <span className="text-sm font-medium text-foreground">Kill-switches</span>
               <StatusBadge tone={system?.killSwitchEngaged ? "blocked" : "safe"} size="sm" dot>
                 {system?.killSwitchEngaged ? "engaged" : "armed"}
               </StatusBadge>
@@ -443,7 +443,7 @@ export default function Overview() {
           </div>
 
           <div className="panel p-4 space-y-2">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Quick actions</span>
+            <span className="text-sm font-medium text-foreground">Quick actions</span>
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="sm" asChild>
                 <Link to="/trades">Log trade</Link>

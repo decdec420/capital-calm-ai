@@ -134,7 +134,7 @@ export default function RiskCenter() {
       {/* Live engine gates from the last tick — not user-defined guardrails. */}
       <div className="panel p-4 space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-sm font-medium text-foreground">
             Engine gates · last tick
           </span>
           {snapshot && (
@@ -167,7 +167,7 @@ export default function RiskCenter() {
       ) : (
         <div>
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            <span className="text-sm font-medium text-foreground">
               {filter === "all" ? "All guardrails" : `${filter} guardrails`} · {filtered.length}
             </span>
             {filter !== "all" && (
