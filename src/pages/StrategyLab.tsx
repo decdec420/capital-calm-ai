@@ -307,9 +307,7 @@ function StrategyDialog({
   const [version, setVersion] = useState(strategy?.version ?? "v1.0-cand");
   const [status, setStatus] = useState<StrategyStatus>(strategy?.status ?? "candidate");
   const [description, setDescription] = useState(strategy?.description ?? "");
-  const [paramsText, setParamsText] = useState(
-    strategy ? JSON.stringify(strategy.params, null, 2) : `[\n  {"key":"ma_fast","value":9},\n  {"key":"stop_pct","value":0.7,"unit":"%"}\n]`,
-  );
+  const [params, setParams] = useState<StrategyParam[]>(strategy?.params ?? []);
   const [metricsText, setMetricsText] = useState(
     strategy ? JSON.stringify(strategy.metrics, null, 2) : `{\n  "expectancy": 0,\n  "winRate": 0,\n  "maxDrawdown": 0,\n  "sharpe": 0,\n  "trades": 0\n}`,
   );
@@ -320,19 +318,13 @@ function StrategyDialog({
       setVersion(strategy.version);
       setStatus(strategy.status);
       setDescription(strategy.description);
-      setParamsText(JSON.stringify(strategy.params, null, 2));
+      setParams(strategy.params);
       setMetricsText(JSON.stringify(strategy.metrics, null, 2));
     }
   }, [strategy]);
 
   const submit = () => {
-    let params: StrategyParam[];
     let metrics: any;
-    try {
-      params = JSON.parse(paramsText);
-    } catch {
-      return toast.error("Params is not valid JSON.");
-    }
     try {
       metrics = JSON.parse(metricsText);
     } catch {
