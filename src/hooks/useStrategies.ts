@@ -28,6 +28,8 @@ function mapRow(r: any): StrategyVersion {
 export interface NewStrategyInput {
   name: string;
   version: string;
+  displayName?: string | null;
+  friendlySummary?: string | null;
   status?: StrategyStatus;
   description?: string;
   params?: StrategyParam[];
