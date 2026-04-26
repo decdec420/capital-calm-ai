@@ -11,6 +11,7 @@ function mapRow(r: any): AccountState {
     startOfDayEquity: Number(r.start_of_day_equity),
     balanceFloor: Number(r.balance_floor),
     baseCurrency: r.base_currency,
+    dailyAutoExecuteCapUsd: Number(r.daily_auto_execute_cap_usd ?? 2),
   };
 }
 
@@ -60,15 +61,23 @@ export function useAccountState() {
    * from a JWT'd client are silently reverted by the trigger. Those
    * values only move when `mark-to-market` or `trade-close` fire.
    *
-   * Client-writable here: `balance_floor` and `base_currency`.
+   * Client-writable here: `balance_floor`, `base_currency`,
+   * `daily_auto_execute_cap_usd`. The cap can be tightened from
+   * the UI; the engine reads it server-side as a hard ceiling.
    */
   const update = async (
-    patch: Pick<Partial<AccountState>, "balanceFloor" | "baseCurrency">,
+    patch: Pick<
+      Partial<AccountState>,
+      "balanceFloor" | "baseCurrency" | "dailyAutoExecuteCapUsd"
+    >,
   ) => {
     if (!user || !data) return;
     const dbPatch: Record<string, unknown> = {};
     if (patch.balanceFloor !== undefined) dbPatch.balance_floor = patch.balanceFloor;
     if (patch.baseCurrency !== undefined) dbPatch.base_currency = patch.baseCurrency;
+    if (patch.dailyAutoExecuteCapUsd !== undefined) {
+      dbPatch.daily_auto_execute_cap_usd = patch.dailyAutoExecuteCapUsd;
+    }
     if (Object.keys(dbPatch).length === 0) return;
     const { error: err } = await supabase
       .from("account_state")

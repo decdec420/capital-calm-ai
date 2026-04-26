@@ -153,6 +153,9 @@ export interface AccountState {
   startOfDayEquity: number;
   balanceFloor: number;
   baseCurrency: string;
+  /** Max total notional ($USD) the engine may auto-execute in a single
+   * UTC day. Default $2.00 (= 2 trades × MAX_ORDER_USD). */
+  dailyAutoExecuteCapUsd: number;
 }
 
 export interface MarketRegime {

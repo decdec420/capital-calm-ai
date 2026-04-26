@@ -17,6 +17,11 @@ import {
   type SignalLifecyclePhase,
 } from "../_shared/lifecycle.ts";
 import { validateDoctrineInvariants } from "../_shared/doctrine.ts";
+import {
+  isSnapshotStale,
+  snapshotAgeSeconds,
+  STALE_SNAPSHOT_MAX_AGE_SECONDS,
+} from "../_shared/snapshot.ts";
 
 validateDoctrineInvariants();
 
@@ -158,6 +163,35 @@ Deno.serve(async (req) => {
     }
 
     // ── APPROVE: proposed → approved → executed ───────────────────
+    //
+    // P6-G: stale engine snapshot guard. If the engine cron has stalled,
+    // gates can't be trusted and we must refuse the approval. The
+    // operator can re-approve once the engine's caught up. Reject is
+    // always allowed (declining a signal doesn't read the gate state).
+    const { data: sysRow } = await admin
+      .from("system_state")
+      .select("last_engine_snapshot")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const snap = sysRow?.last_engine_snapshot ?? null;
+    if (isSnapshotStale(snap)) {
+      const ageSec = Math.round(snapshotAgeSeconds(snap));
+      return new Response(
+        JSON.stringify({
+          error: "Engine snapshot is stale — refusing to execute.",
+          code: "STALE_ENGINE_SNAPSHOT",
+          meta: {
+            snapshotAgeSeconds: Number.isFinite(ageSec) ? ageSec : null,
+            maxAgeSeconds: STALE_SNAPSHOT_MAX_AGE_SECONDS,
+          },
+        }),
+        {
+          status: 409,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     const approveStep = transitionSignal(currentPhase, "approved", {
       actor: "user",
       reason: reason ?? "Operator approved",

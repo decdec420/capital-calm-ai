@@ -824,9 +824,39 @@ async function runTickForUser(
   // place a real order via the autonomous path.
   const liveBlockedByAck = liveEnabled && !liveAck;
 
+  // P1-A: daily dollar cap on auto-executed trades. Defaults to $2.00
+  // (max trades/day × MAX_ORDER_USD) and is configurable per account
+  // via account_state.daily_auto_execute_cap_usd. The notional of the
+  // proposed trade plus everything already auto-executed today must
+  // fit under the cap.
+  const dailyAutoCapUsd = Number(acct?.daily_auto_execute_cap_usd ?? 2.0);
+  const proposedNotionalUsd = Number(fullSize) * Number(entry);
+  let executedTodayUsd = 0;
+  try {
+    const { data: notionalData } = await admin.rpc(
+      "auto_executed_notional_today",
+      { p_user_id: userId },
+    );
+    executedTodayUsd = Number(notionalData ?? 0);
+  } catch (e) {
+    // If we can't read the notional, fail-closed: block auto-execute.
+    console.error("auto_executed_notional_today rpc failed:", e);
+    executedTodayUsd = Number.POSITIVE_INFINITY;
+  }
+  const totalAfter = executedTodayUsd + proposedNotionalUsd;
+  const dailyCapBlocked = totalAfter > dailyAutoCapUsd + 1e-9;
+
   const autoApprove =
     !liveBlockedByAck &&
+    !dailyCapBlocked &&
     (autonomy === "autonomous" || (autonomy === "assisted" && conf >= 0.85));
+
+  if (dailyCapBlocked) {
+    console.warn(
+      `auto-execute blocked: daily $ cap. ` +
+        `today=$${executedTodayUsd.toFixed(4)} + proposed=$${proposedNotionalUsd.toFixed(4)} > cap=$${dailyAutoCapUsd.toFixed(2)}`,
+    );
+  }
 
   if (autoApprove) {
     const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
@@ -940,9 +970,30 @@ async function runTickForUser(
     }
   }
 
-  // Clean snapshot — winner chosen, no blocking gates.
+  // Clean snapshot — winner chosen. The only "soft" gate that may
+  // surface here is the daily-dollar cap: it blocked auto-execute,
+  // but the signal still landed for the operator to approve manually.
+  // Surfacing the reason lets the UI show "auto-execute capped" so
+  // the operator isn't confused by a bot that proposed but didn't fire.
+  const softGates: GateReason[] = dailyCapBlocked
+    ? [
+      {
+        code: GATE_CODES.DAILY_DOLLAR_CAP,
+        severity: "block",
+        message:
+          `Auto-execute capped — $${executedTodayUsd.toFixed(2)} already auto-executed today, ` +
+          `cap $${dailyAutoCapUsd.toFixed(2)}. Signal proposed for manual approval.`,
+        meta: {
+          executedTodayUsd,
+          proposedNotionalUsd,
+          dailyAutoCapUsd,
+        },
+      },
+    ]
+    : [];
+
   await persistSnapshot(admin, userId, {
-    gateReasons: [],
+    gateReasons: softGates,
     perSymbol,
     chosenSymbol: winner.symbol,
   });
@@ -956,7 +1007,7 @@ async function runTickForUser(
     confidence: conf,
     sizeUsd,
     clampedBy: clamp.clampedBy,
-    gateReasons: [],
+    gateReasons: softGates,
     expiredCount,
     perSymbol,
   };
