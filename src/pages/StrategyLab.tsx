@@ -14,6 +14,7 @@ import type { StrategyParam, StrategyStatus, StrategyVersion } from "@/lib/domai
 import { ArrowRight, Beaker, Check, FlaskConical, Loader2, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
+import { ParamEditor } from "@/components/trader/ParamEditor";
 
 export default function StrategyLab() {
   const { strategies, loading, create, update, remove } = useStrategies();
