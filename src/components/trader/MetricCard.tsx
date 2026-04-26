@@ -72,7 +72,7 @@ export function MetricCard({
         </div>
       </div>
       <div className="flex items-baseline gap-2">
-        <span className="metric-value text-2xl font-semibold text-foreground">{value}</span>
+        <span className="metric-value text-[20px] font-semibold text-foreground">{value}</span>
         {delta && (
           <span
             className={cn(
