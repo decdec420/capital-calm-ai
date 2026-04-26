@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight } from "lucide-react";
 import { ExplainIcon } from "./Explain";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { ReactNode } from "react";
 
 interface MetricCardProps {
