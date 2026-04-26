@@ -94,7 +94,12 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
           <StatusBadge tone={sideTone} size="sm" dot>
             {signal.side}
           </StatusBadge>
-          <StatusBadge tone="neutral" size="sm">
+          <StatusBadge
+            tone={isExpiring ? "blocked" : isUrgent ? "caution" : "neutral"}
+            size="sm"
+            dot
+            pulse={isUrgent}
+          >
             <Clock className="h-3 w-3" />
             {mins}:{secs.toString().padStart(2, "0")}
           </StatusBadge>
