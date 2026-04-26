@@ -63,13 +63,41 @@ export function GuardrailRow({ guardrail, className }: GuardrailRowProps) {
           </div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-sm tabular text-foreground">{guardrail.current}</div>
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-sm tabular text-foreground">{guardrail.current}</div>
+            <div className="text-sm tabular font-semibold text-foreground">
+              {Math.round(guardrail.utilization * 100)}%
+            </div>
+          </div>
           <div className="text-[11px] text-muted-foreground tabular">limit {guardrail.limit}</div>
         </div>
       </div>
-      <div className="h-1 w-full rounded-full bg-secondary overflow-hidden">
-        <div className={cn("h-full transition-all", barColor[guardrail.level])} style={{ width: `${pct}%` }} />
+      <div
+        style={{
+          height: "4px",
+          background: "hsl(var(--border))",
+          borderRadius: "2px",
+          width: "100%",
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "4px",
+            borderRadius: "2px",
+            background:
+              guardrail.level === "safe"
+                ? "hsl(var(--status-safe))"
+                : guardrail.level === "caution"
+                  ? "hsl(var(--status-caution))"
+                  : "hsl(var(--status-blocked))",
+            transition: "width 200ms ease-out",
+          }}
+        />
       </div>
+      {guardrail.utilization > 0.85 && (
+        <p className="text-[10px] font-semibold text-status-caution animate-pulse-soft">⚠ Approaching limit</p>
+      )}
     </div>
   );
 }
