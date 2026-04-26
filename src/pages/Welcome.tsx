@@ -51,7 +51,7 @@ const STEPS: Step[] = [
     ],
   },
   {
-    eyebrow: "Step 3 of 4 · Strategy",
+    eyebrow: "Step 3 of 5 · Strategy",
     title: "Get better, don't blow up",
     pitch:
       "The lab and the seatbelt. Tweak rules, backtest, set guardrails, learn from your own patterns over time.",
