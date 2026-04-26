@@ -197,6 +197,19 @@ export function runBacktest(
 
     // entry logic
     if (!position) {
+      // Regime gate — mirrors live engine's TRADEABLE_REGIMES + setupScore floor.
+      // Skip chop / range so the backtest only fires where the live engine would.
+      const winStart = Math.max(0, i - 25);
+      const winC = candles.slice(winStart, i + 1);
+      const winCloses = winC.map((x) => x.c);
+      const winHigh = Math.max(...winC.map((x) => x.h));
+      const winLow = Math.min(...winC.map((x) => x.l));
+      const winPctChange = ((winCloses[winCloses.length - 1] - winCloses[0]) / winCloses[0]) * 100;
+      const rangePct = ((winHigh - winLow) / Math.max(winLow, 1e-9)) * 100;
+      const driftRatio = Math.abs(winPctChange) / Math.max(rangePct, 0.01);
+      if (driftRatio < 0.40) continue;
+      if (rangePct < 0.8 && Math.abs(winPctChange) < 0.3) continue;
+
       const crossUp = prevFast <= prevSlow && curFast > curSlow && r > 50 && r < 75;
       const crossDown = prevFast >= prevSlow && curFast < curSlow && r < 50 && r > 25;
       if (crossUp) {
