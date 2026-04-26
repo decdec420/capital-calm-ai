@@ -219,6 +219,9 @@ export default function StrategyLab() {
             backtestingId={backtestingId}
           />
 
+          {/* ─── Scaling readiness checklist (collapsed by default) ──── */}
+          <ScalingReadinessPanel />
+
           {/* ─── 2. IN TESTING ──────────────────────────────────────── */}
           <InTestingPanel
             inTesting={inTesting}
