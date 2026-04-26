@@ -72,6 +72,13 @@ const STEPS: Step[] = [
       { icon: Sparkles, name: "AI Copilot", blurb: "Chat with context-aware AI. No vague answers." },
     ],
   },
+  {
+    eyebrow: "Step 5 of 5 · Setup",
+    title: "Set your paper account",
+    pitch: "Takes 30 seconds. You can change these any time in Settings → Paper account.",
+    accent: "from-primary/20 to-primary/0",
+    tabs: [],
+  },
 ];
 
 export default function Welcome() {
