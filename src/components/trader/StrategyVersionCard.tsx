@@ -66,11 +66,11 @@ export function StrategyVersionCard({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, untested = false }: { label: string; value: string; untested?: boolean }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-sm tabular text-foreground">{value}</div>
+      <div className={cn("text-sm tabular", untested ? "text-muted-foreground" : "text-foreground")}>{value}</div>
     </div>
   );
 }
