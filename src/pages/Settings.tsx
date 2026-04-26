@@ -109,33 +109,60 @@ export default function Settings() {
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium text-foreground flex items-center gap-2">
-                  Live trading enabled
-                  <StatusBadge tone={system.liveTradingEnabled ? "safe" : "blocked"} size="sm">
-                    {system.liveTradingEnabled ? "armed" : "gated"}
-                  </StatusBadge>
+            <div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                    Live trading enabled
+                    <StatusBadge tone={system.liveTradingEnabled ? "safe" : "blocked"} size="sm">
+                      {system.liveTradingEnabled ? "armed" : "gated"}
+                    </StatusBadge>
+                  </div>
+                  <div className="text-xs text-muted-foreground">Requires every guardrail to pass. Real money. Be sure.</div>
                 </div>
-                <div className="text-xs text-muted-foreground">Requires every guardrail to pass. Real money. Be sure.</div>
+                <Switch
+                  checked={system.liveTradingEnabled}
+                  // P5-F: cannot arm without a real broker connection.
+                  // Disarming (on→off) is always allowed regardless.
+                  disabled={!system.liveTradingEnabled && system.brokerConnection !== "connected"}
+                  onCheckedChange={async (v) => {
+                    // Disarm path: free, instant, no friction.
+                    if (!v) {
+                      try {
+                        await updateSystem({ liveTradingEnabled: false });
+                        toast.success("Live trading disarmed.");
+                      } catch {
+                        toast.error("Couldn't toggle.");
+                      }
+                      return;
+                    }
+                    // Arm path: first-ever flip → type-to-confirm acknowledgment.
+                    if (!system.liveMoneyAcknowledgedAt) {
+                      setAckOpen(true);
+                      return;
+                    }
+                    // Arm path: every subsequent flip → simple click-to-confirm.
+                    setArmConfirmOpen(true);
+                  }}
+                />
               </div>
-              <Switch
-                checked={system.liveTradingEnabled}
-                onCheckedChange={async (v) => {
-                  // Turning ON for the first time? Require the one-time
-                  // acknowledgment. Every subsequent toggle flips freely.
-                  if (v && !system.liveMoneyAcknowledgedAt) {
-                    setAckOpen(true);
-                    return;
-                  }
-                  try {
-                    await updateSystem({ liveTradingEnabled: v });
-                    toast.success(v ? "Live trading ARMED." : "Live trading disarmed.");
-                  } catch {
-                    toast.error("Couldn't toggle.");
-                  }
-                }}
-              />
+
+              {system.brokerConnection !== "connected" && (
+                <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Plug className="h-3 w-3 text-status-caution shrink-0" />
+                  Connect a broker before arming live trading.{" "}
+                  <a
+                    href="#brokers"
+                    className="text-primary hover:underline"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById("brokers")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    Configure brokers →
+                  </a>
+                </p>
+              )}
             </div>
           </div>
 
