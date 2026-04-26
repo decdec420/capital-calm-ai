@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { SignalCard } from "@/components/trader/SignalCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
@@ -342,83 +343,141 @@ export default function Copilot() {
           />
         </div>
 
-        {/* CHAT */}
+        {/* CHAT / HISTORY / CALIBRATION TABS */}
         <div className="lg:col-span-3 panel flex flex-col" style={{ minHeight: "55vh" }}>
-          {loadingMessages && messages.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-xs text-muted-foreground italic">Loading thread…</p>
-            </div>
-          ) : (
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-              {messages.length === 0 && (
-                <div className="h-full flex flex-col items-center justify-center text-center py-12">
-                  <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
-                    <Sparkles className="h-5 w-5" />
-                  </div>
-                  <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
-                  <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                    Live context (mode, regime, position, signals, autonomy) is auto-attached. Threads persist across refreshes.
-                  </p>
-                  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
-                    {SUGGESTED.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => send(s)}
-                        className="text-left text-xs px-3 py-2.5 rounded-md border border-border bg-card hover:bg-accent hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
+          <Tabs defaultValue="chat" className="flex-1 flex flex-col">
+            <TabsList className="mx-3 mt-3 self-start">
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+              <TabsTrigger value="calibration">Calibration</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="chat" className="flex-1 flex flex-col mt-2 data-[state=inactive]:hidden">
+              {loadingMessages && messages.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="text-xs text-muted-foreground italic">Loading thread…</p>
+                </div>
+              ) : (
+                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {messages.length === 0 && (
+                    <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                      <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
+                        <Sparkles className="h-5 w-5" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
+                      <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                        Live context (mode, regime, position, signals, autonomy) is auto-attached. Threads persist across refreshes.
+                      </p>
+                      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-2xl">
+                        {SUGGESTED.map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => send(s)}
+                            className="text-left text-xs px-3 py-2.5 rounded-md border border-border bg-card hover:bg-accent hover:border-primary/30 transition-colors text-muted-foreground hover:text-foreground"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {messages.map((m) => (
+                    <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                      <div
+                        className={cn(
+                          "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
+                          m.role === "user"
+                            ? "bg-primary/15 border border-primary/25 text-foreground"
+                            : "bg-secondary border border-border text-foreground",
+                        )}
                       >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
+                        {m.role === "assistant" ? (
+                          <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
+                            <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-              {messages.map((m) => (
-                <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
-                  <div
-                    className={cn(
-                      "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
-                      m.role === "user"
-                        ? "bg-primary/15 border border-primary/25 text-foreground"
-                        : "bg-secondary border border-border text-foreground",
-                    )}
-                  >
-                    {m.role === "assistant" ? (
-                      <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
-                        <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(input);
-            }}
-            className="border-t border-border p-3 flex gap-2 items-end"
-          >
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+              <form
+                onSubmit={(e) => {
                   e.preventDefault();
                   send(input);
-                }
-              }}
-              placeholder="Ask about the system, market, or a signal…"
-              className="min-h-[44px] max-h-32 resize-none bg-background border-border"
-              disabled={streaming}
-            />
-            <Button type="submit" size="icon" disabled={streaming || !input.trim()} className="shrink-0 h-11 w-11">
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
+                }}
+                className="border-t border-border p-3 flex gap-2 items-end"
+              >
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send(input);
+                    }
+                  }}
+                  placeholder="Ask about the system, market, or a signal…"
+                  className="min-h-[44px] max-h-32 resize-none bg-background border-border"
+                  disabled={streaming}
+                />
+                <Button type="submit" size="icon" disabled={streaming || !input.trim()} className="shrink-0 h-11 w-11">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="history" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Signal history</div>
+                <span className="text-xs text-muted-foreground">{history.length} decisions</span>
+              </div>
+              {history.length === 0 ? (
+                <div className="panel p-6 text-center text-xs text-muted-foreground italic">
+                  No history yet. Every tick — propose, skip, or halt — lands here.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {history.slice(0, 10).map((s) => (
+                    <div key={s.id} className="panel p-3 flex items-center gap-3 text-sm">
+                      <StatusIcon status={s.status} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-foreground capitalize">{s.side} {s.symbol}</span>
+                          <span className="text-xs text-muted-foreground">@ ${s.proposedEntry.toFixed(0)}</span>
+                          <StatusBadge tone={statusTone(s.status)} size="sm">{s.status}</StatusBadge>
+                          {s.decidedBy && <span className="text-[10px] text-muted-foreground">by {s.decidedBy}</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{s.aiReasoning || s.decisionReason}</p>
+                      </div>
+                      <div className="text-right shrink-0 flex items-center gap-2">
+                        <div>
+                          <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
+                          <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setExplainSignal(s)}
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                          title="Explain this decision"
+                        >
+                          <Telescope className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="calibration" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
+              <CalibrationChart signals={history} />
+            </TabsContent>
+          </Tabs>
         </div>
 
         {/* SIDE RAIL */}
@@ -462,53 +521,6 @@ export default function Copilot() {
         </div>
       </div>
 
-      {/* CALIBRATION — is the AI honest about its edge? */}
-      <CalibrationChart signals={history} />
-
-      {/* SIGNAL HISTORY — the AI's report card */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Signal history</div>
-          <span className="text-xs text-muted-foreground">{history.length} decisions</span>
-        </div>
-        {history.length === 0 ? (
-          <div className="panel p-6 text-center text-xs text-muted-foreground italic">
-            No history yet. Every tick — propose, skip, or halt — lands here.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {history.slice(0, 10).map((s) => (
-              <div key={s.id} className="panel p-3 flex items-center gap-3 text-sm">
-                <StatusIcon status={s.status} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-foreground capitalize">{s.side} {s.symbol}</span>
-                    <span className="text-xs text-muted-foreground">@ ${s.proposedEntry.toFixed(0)}</span>
-                    <StatusBadge tone={statusTone(s.status)} size="sm">{s.status}</StatusBadge>
-                    {s.decidedBy && <span className="text-[10px] text-muted-foreground">by {s.decidedBy}</span>}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{s.aiReasoning || s.decisionReason}</p>
-                </div>
-                <div className="text-right shrink-0 flex items-center gap-2">
-                  <div>
-                    <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
-                    <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setExplainSignal(s)}
-                    className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-                    title="Explain this decision"
-                  >
-                    <Telescope className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       <SignalExplainDialog
         signal={explainSignal}
