@@ -813,8 +813,20 @@ async function runTickForUser(
 
   // ── Stage 6: auto-execute if autonomy allows ─────────────────
   const autonomy = sys.autonomy_level ?? "manual";
+  const liveEnabled = !!sys.live_trading_enabled;
+  const liveAck = sys.live_money_acknowledged_at;
+
+  // Defense-in-depth: never auto-execute when live mode is on but the
+  // operator has not signed the live-money acknowledgment. The DB
+  // BEFORE UPDATE trigger blocks the toggle from flipping in the UI,
+  // but a stale row from before the migration could still slip
+  // through. We check here too so a misconfigured account can't
+  // place a real order via the autonomous path.
+  const liveBlockedByAck = liveEnabled && !liveAck;
+
   const autoApprove =
-    autonomy === "autonomous" || (autonomy === "assisted" && conf >= 0.85);
+    !liveBlockedByAck &&
+    (autonomy === "autonomous" || (autonomy === "assisted" && conf >= 0.85));
 
   if (autoApprove) {
     const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
@@ -901,6 +913,31 @@ async function runTickForUser(
         winner.symbol,
       ],
     });
+
+    // ─── P1-B: immediate Telegram ping on every auto-execute ────
+    //
+    // The operator must not learn about an autonomous order from a
+    // weekly digest. notify_telegram is a SECURITY DEFINER RPC that
+    // routes via the user's configured bot; if it isn't configured
+    // the RPC is a no-op. We swallow errors so a Telegram outage
+    // can't fail the trade insert that already succeeded.
+    try {
+      const liveSuffix = liveEnabled ? " · LIVE" : " · paper";
+      await admin.rpc("notify_telegram", {
+        p_user_id: userId,
+        p_event_type: "auto_execute",
+        p_severity: liveEnabled ? "high" : "info",
+        p_title: `Auto-executed ${side.toUpperCase()} ${winner.symbol}${liveSuffix}`,
+        p_message:
+          `${(conf * 100).toFixed(0)}% confidence · ${autonomy}\n` +
+          `entry $${entry.toFixed(2)} · stop $${stop.toFixed(2)}\n` +
+          `TP1 $${tp1.toFixed(2)} · TP2 $${target.toFixed(2)}\n` +
+          `size ${fullSize.toFixed(8)} ${winner.symbol.split("-")[0]}`,
+      });
+    } catch (e) {
+      // Don't crash the engine on a notify failure.
+      console.error("notify_telegram failed (non-fatal):", e);
+    }
   }
 
   // Clean snapshot — winner chosen, no blocking gates.

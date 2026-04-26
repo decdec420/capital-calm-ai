@@ -34,6 +34,7 @@ function mapRow(r: any): SystemState {
     latencyMs: r.latency_ms,
     autonomyLevel: (r.autonomy_level ?? "manual") as AutonomyLevel,
     lastEngineSnapshot: parseSnapshot(r.last_engine_snapshot),
+    liveMoneyAcknowledgedAt: r.live_money_acknowledged_at ?? null,
   };
 }
 
@@ -82,5 +83,18 @@ export function useSystemState() {
     await refetch();
   };
 
-  return { data, loading, update, refetch };
+  /** Sign the one-time live-money acknowledgment. Server stamps the row;
+   * we just refresh so the UI sees the new timestamp. The RPC name is
+   * cast because the generated `Database` type only refreshes after the
+   * migration is deployed; once Lovable regenerates types we can drop
+   * the cast. */
+  const acknowledgeLiveMoney = async () => {
+    if (!user) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)("acknowledge_live_money");
+    if (error) throw error;
+    await refetch();
+  };
+
+  return { data, loading, update, refetch, acknowledgeLiveMoney };
 }

@@ -2,6 +2,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/trader/AppSidebar";
 import { TopBar } from "@/components/trader/TopBar";
 import { StatusFooter } from "@/components/trader/StatusFooter";
+import { FloatingKillSwitch } from "@/components/trader/FloatingKillSwitch";
 import { Outlet } from "react-router-dom";
 import { useMarkToMarket } from "@/hooks/useMarkToMarket";
 
@@ -23,6 +24,8 @@ export function AppLayout() {
           </main>
           <StatusFooter />
         </div>
+        {/* Always-visible kill switch — reachable in <2s from any page. */}
+        <FloatingKillSwitch />
       </div>
     </SidebarProvider>
   );
