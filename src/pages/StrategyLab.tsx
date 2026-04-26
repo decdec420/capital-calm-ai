@@ -367,10 +367,10 @@ function StrategyDialog({
             <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Description</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Params (JSON)</Label>
-              <Textarea value={paramsText} onChange={(e) => setParamsText(e.target.value)} rows={8} className="font-mono text-xs" />
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Params</Label>
+              <ParamEditor value={params} onChange={setParams} />
             </div>
             <div className="space-y-1.5">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Metrics (JSON)</Label>
