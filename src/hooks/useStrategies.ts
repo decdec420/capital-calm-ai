@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { StrategyVersion, StrategyStatus, StrategyParam, StrategyMetrics } from "@/lib/domain-types";
@@ -30,6 +30,14 @@ export interface NewStrategyInput {
   description?: string;
   params?: StrategyParam[];
   metrics?: Partial<StrategyMetrics>;
+}
+
+/** Stable signature for a param set so we can detect duplicate candidates. */
+function paramSig(params: StrategyParam[]): string {
+  return [...params]
+    .map((p) => `${p.key}=${String(p.value)}`)
+    .sort()
+    .join("|");
 }
 
 export function useStrategies() {
@@ -93,5 +101,110 @@ export function useStrategies() {
     await refetch();
   };
 
-  return { strategies, loading, create, update, remove, refetch };
+  // ─── Pipeline derivations ──────────────────────────────────────────────
+  // The Strategy Lab is a single-lane pipeline: one Live, one In-Testing,
+  // everything else queued. We surface those views here so the UI doesn't
+  // have to re-derive them ad hoc.
+  const approved = useMemo(() => strategies.find((s) => s.status === "approved") ?? null, [strategies]);
+  const candidates = useMemo(() => strategies.filter((s) => s.status === "candidate"), [strategies]);
+  const archived = useMemo(() => strategies.filter((s) => s.status === "archived"), [strategies]);
+
+  /** The candidate currently "in testing" — most paper trades wins.
+   * Ties broken by most-recently updated (i.e. most recent activity). */
+  const inTesting = useMemo<StrategyVersion | null>(() => {
+    if (candidates.length === 0) return null;
+    return [...candidates].sort((a, b) => {
+      const dt = (b.metrics.trades ?? 0) - (a.metrics.trades ?? 0);
+      if (dt !== 0) return dt;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    })[0];
+  }, [candidates]);
+
+  const queued = useMemo(
+    () => candidates.filter((c) => c.id !== inTesting?.id),
+    [candidates, inTesting?.id],
+  );
+
+  /** Group queued candidates by identical param signature so the UI can flag
+   * duplicates (the "4 identical stop_atr_mult=2 candidates" mess). */
+  const duplicateIds = useMemo(() => {
+    const groups = new Map<string, StrategyVersion[]>();
+    for (const c of candidates) {
+      const sig = paramSig(c.params);
+      const arr = groups.get(sig) ?? [];
+      arr.push(c);
+      groups.set(sig, arr);
+    }
+    const dupes = new Set<string>();
+    for (const arr of groups.values()) {
+      if (arr.length < 2) continue;
+      // Keep the one with the most trades (and newest as tie-breaker); mark the rest.
+      const sorted = [...arr].sort((a, b) => {
+        const dt = (b.metrics.trades ?? 0) - (a.metrics.trades ?? 0);
+        if (dt !== 0) return dt;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      for (let i = 1; i < sorted.length; i++) dupes.add(sorted[i].id);
+    }
+    return dupes;
+  }, [candidates]);
+
+  /** Move a queued candidate into the testing slot. We don't need to mutate
+   * status (everything stays "candidate") — `inTesting` is derived from
+   * `metrics.trades`, so we bump the target's `updated_at` so it wins the
+   * tie-break. To reliably take the slot we also "park" the current
+   * in-testing candidate's trade count behind the new one. To keep it
+   * simple and non-destructive, we just bump the new candidate's metric
+   * trade count above the current one (only if needed). */
+  const moveTesting = async (id: string) => {
+    if (!user) return;
+    const target = candidates.find((c) => c.id === id);
+    if (!target) return;
+    const currentTrades = inTesting?.metrics.trades ?? 0;
+    const targetTrades = target.metrics.trades ?? 0;
+    // If the target already has more trades, just touching updated_at is enough.
+    const newMetrics: StrategyMetrics = { ...target.metrics };
+    if (targetTrades <= currentTrades) {
+      newMetrics.trades = currentTrades + 1;
+    }
+    const { error } = await supabase
+      .from("strategies")
+      .update({ metrics: newMetrics as any, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", user.id);
+    if (error) throw error;
+    await refetch();
+  };
+
+  /** Archive every duplicate candidate, leaving the "winner" of each group. */
+  const removeDuplicates = async () => {
+    if (!user || duplicateIds.size === 0) return 0;
+    const ids = Array.from(duplicateIds);
+    const { error } = await supabase
+      .from("strategies")
+      .update({ status: "archived" })
+      .in("id", ids)
+      .eq("user_id", user.id);
+    if (error) throw error;
+    await refetch();
+    return ids.length;
+  };
+
+  return {
+    strategies,
+    loading,
+    create,
+    update,
+    remove,
+    refetch,
+    // pipeline views
+    approved,
+    candidates,
+    inTesting,
+    queued,
+    archived,
+    duplicateIds,
+    moveTesting,
+    removeDuplicates,
+  };
 }

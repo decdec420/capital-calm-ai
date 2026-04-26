@@ -1,10 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
-import { StrategyVersionCard } from "@/components/trader/StrategyVersionCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,33 +24,89 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useStrategies, type NewStrategyInput } from "@/hooks/useStrategies";
-import type { StrategyParam, StrategyStatus, StrategyVersion } from "@/lib/domain-types";
-import { ArrowRight, Beaker, Check, FlaskConical, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import type { StrategyParam, StrategyStatus, StrategyVersion, StrategyMetrics } from "@/lib/domain-types";
+import {
+  ArrowRight,
+  Beaker,
+  ChevronDown,
+  Copy,
+  FlaskConical,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
+import { Link } from "react-router-dom";
+
+const TRADES_TO_PROMOTE = 50;
 
 export default function StrategyLab() {
-  const { strategies, loading, create, update, remove } = useStrategies();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const {
+    strategies,
+    loading,
+    create,
+    update,
+    remove,
+    refetch,
+    approved,
+    candidates,
+    inTesting,
+    queued,
+    archived,
+    duplicateIds,
+    moveTesting,
+    removeDuplicates,
+  } = useStrategies();
+  const { session } = useAuth();
+
   const [newOpen, setNewOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [backtestingId, setBacktestingId] = useState<string | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
 
-  const candidate = strategies.find((s) => s.status === "candidate");
-  const approved = strategies.find((s) => s.status === "approved");
-  const editingStrategy = editingId ? strategies.find((s) => s.id === editingId) ?? null : null;
-
+  /** Map of strategyId → experiment title that promoted it (for the
+   * "Promoted from experiment" line in the In Testing panel). */
+  const [promotionMap, setPromotionMap] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (!selectedId && strategies.length > 0) {
-      setSelectedId(candidate?.id ?? strategies[0].id);
-    }
-  }, [strategies, candidate, selectedId]);
+    let cancelled = false;
+    (async () => {
+      const ids = strategies.map((s) => s.id);
+      if (ids.length === 0) {
+        setPromotionMap({});
+        return;
+      }
+      const { data } = await supabase
+        .from("experiments")
+        .select("id,title,strategy_id")
+        .in("strategy_id", ids);
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const row of (data ?? []) as Array<{ title: string; strategy_id: string | null }>) {
+        if (row.strategy_id) map[row.strategy_id] = row.title;
+      }
+      setPromotionMap(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [strategies]);
+
+  const editingStrategy = editingId ? strategies.find((s) => s.id === editingId) ?? null : null;
 
   const setStatus = async (id: string, status: StrategyStatus) => {
     try {
-      // If promoting a candidate to approved, archive any existing approved
       if (status === "approved" && approved && approved.id !== id) {
         await update(approved.id, { status: "archived" });
       }
@@ -54,7 +118,10 @@ export default function StrategyLab() {
   };
 
   const cloneFrom = (source: StrategyVersion): NewStrategyInput => {
-    const v = source.version.replace(/v?(\d+)\.(\d+)(.*)/, (_m, a, b, suffix) => `v${a}.${Number(b) + 1}${suffix.includes("cand") ? suffix : "-cand"}`);
+    const v = source.version.replace(
+      /v?(\d+)\.(\d+)(.*)/,
+      (_m, a, b, suffix) => `v${a}.${Number(b) + 1}${suffix.includes("cand") ? suffix : "-cand"}`,
+    );
     return {
       name: source.name,
       version: v,
@@ -86,12 +153,43 @@ export default function StrategyLab() {
     }
   };
 
+  /** Manual trigger for the auto-promotion check. Calls the same edge
+   * function the cron hits, but with the user's JWT so it only evaluates
+   * this user. Refetches afterwards so the UI reflects any promotion. */
+  const triggerEvaluate = async () => {
+    setEvaluating(true);
+    const t = toast.loading("Evaluating in-testing candidate…");
+    try {
+      const { data, error } = await supabase.functions.invoke("evaluate-candidate", {
+        body: { source: "manual" },
+        headers: session?.access_token
+          ? { Authorization: `Bearer ${session.access_token}` }
+          : undefined,
+      });
+      if (error) throw error;
+      const result = (data?.results?.[0] ?? {}) as Record<string, unknown>;
+      if (result.promoted) toast.success(`Promoted ${result.promoted} to live.`, { id: t });
+      else if (result.retired) toast.message(`Retired ${result.retired}. ${result.failReasons ?? ""}`, { id: t });
+      else if (result.paused) toast.warning("Paused — drawdown concern. Check alerts.", { id: t });
+      else if (result.skipped === "not_enough_trades")
+        toast.message(`Need ${TRADES_TO_PROMOTE - Number(result.trades ?? 0)} more paper trades.`, { id: t });
+      else if (result.skipped === "no_candidates") toast.message("No candidate to evaluate.", { id: t });
+      else if (result.skipped === "no_approved_baseline") toast.message("No approved baseline to compare against.", { id: t });
+      else toast.success("Check complete.", { id: t });
+      await refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Evaluation failed", { id: t });
+    } finally {
+      setEvaluating(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <SectionHeader
         eyebrow="Strategy Lab"
-        title="Versions & promotion"
-        description="Strategies move forward only when evidence justifies it."
+        title="Pipeline"
+        description="One live strategy. One in testing. Everything else queued. The system promotes automatically when a candidate beats the baseline."
         actions={
           <Button size="sm" className="gap-1.5" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New strategy
@@ -109,111 +207,89 @@ export default function StrategyLab() {
           action={<Button size="sm" onClick={() => setNewOpen(true)}>Create strategy</Button>}
         />
       ) : (
-        <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-            {strategies.map((s) => (
-              <div key={s.id} className="relative">
-                <StrategyVersionCard strategy={s} selected={selectedId === s.id} onSelect={() => setSelectedId(s.id)} />
-                <div className="absolute top-3 right-3">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="Strategy actions"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenuItem
-                        disabled={backtestingId === s.id}
-                        onClick={() => runBacktest(s)}
-                      >
-                        {backtestingId === s.id ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <FlaskConical className="h-4 w-4 mr-2" />
-                        )}
-                        Run backtest
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setEditingId(s.id)}>
-                        <Pencil className="h-4 w-4 mr-2" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => create(cloneFrom(s)).then(() => toast.success("Cloned as candidate."))}
-                      >
-                        <RotateCcw className="h-4 w-4 mr-2" />
-                        Clone as candidate
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onClick={() => remove(s.id).then(() => toast.success("Strategy removed."))}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="space-y-6">
+          {/* ─── 1. LIVE ────────────────────────────────────────────── */}
+          <LivePanel
+            approved={approved}
+            promotionTitle={approved ? promotionMap[approved.id] : undefined}
+            onClone={(s) => create(cloneFrom(s)).then(() => toast.success("Cloned as candidate."))}
+            onEdit={(s) => setEditingId(s.id)}
+            onBacktest={runBacktest}
+            backtestingId={backtestingId}
+          />
 
-          {approved && candidate && (
-            <div className="panel p-5 space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Promotion review</div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-sm font-medium text-foreground">{approved.version}</span>
-                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-sm font-medium text-foreground">{candidate.version}</span>
-                    <StatusBadge tone="candidate" size="sm" dot>candidate</StatusBadge>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" className="gap-1.5 text-status-blocked border-status-blocked/40 hover:bg-status-blocked/10 hover:text-status-blocked" onClick={() => setStatus(candidate.id, "archived")}>
-                    <X className="h-3.5 w-3.5" /> Reject
-                  </Button>
-                  <Button size="sm" className="gap-1.5" onClick={() => setStatus(candidate.id, "approved")}>
-                    <Check className="h-3.5 w-3.5" /> Promote
-                  </Button>
-                </div>
-              </div>
+          {/* ─── 2. IN TESTING ──────────────────────────────────────── */}
+          <InTestingPanel
+            inTesting={inTesting}
+            approved={approved}
+            promotionTitle={inTesting ? promotionMap[inTesting.id] : undefined}
+            onForcePromote={(id) => setStatus(id, "approved")}
+            onRetire={(id) => setStatus(id, "archived")}
+            onEdit={(s) => setEditingId(s.id)}
+            onBacktest={runBacktest}
+            backtestingId={backtestingId}
+            onTriggerEvaluate={triggerEvaluate}
+            evaluating={evaluating}
+          />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <ParamDiff title={approved.version} params={approved.params} other={candidate.params} side="left" />
-                <ParamDiff title={candidate.version} params={candidate.params} other={approved.params} side="right" />
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-4 border-t border-border">
-                <DiffMetric label="Expectancy" a={approved.metrics.expectancy} b={candidate.metrics.expectancy} suffix="R" untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
-                <DiffMetric label="Win rate" a={approved.metrics.winRate * 100} b={candidate.metrics.winRate * 100} suffix="%" untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
-                <DiffMetric label="Max DD" a={approved.metrics.maxDrawdown * 100} b={candidate.metrics.maxDrawdown * 100} suffix="%" inverse untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
-                <DiffMetric label="Sharpe" a={approved.metrics.sharpe} b={candidate.metrics.sharpe} untested={candidate.metrics.trades === 0} baselineUntested={approved.metrics.trades === 0} />
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trades</div>
-                  <div className="text-sm tabular text-foreground">
-                    {candidate.metrics.trades === 0 ? "—" : candidate.metrics.trades}{" "}
-                    <span className="text-muted-foreground">/ 50 needed</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-md bg-status-blocked/5 border border-status-blocked/20 p-3 flex items-start gap-3">
-                <StatusBadge tone="blocked" size="sm" dot>gating</StatusBadge>
-                <p className="text-xs text-muted-foreground">
-                  Promotion requires ≥50 paper trades on the candidate (currently {candidate.metrics.trades}) and explicit operator approval.
-                </p>
-              </div>
-            </div>
+          {/* ─── 3. QUEUE ────────────────────────────────────────────── */}
+          {candidates.length >= 2 && (
+            <QueuePanel
+              queued={queued}
+              duplicateIds={duplicateIds}
+              promotionMap={promotionMap}
+              onMoveToTesting={async (id) => {
+                try {
+                  await moveTesting(id);
+                  toast.success("Moved to testing. Previous candidate is back in the queue.");
+                } catch {
+                  toast.error("Couldn't move candidate.");
+                }
+              }}
+              onArchive={(id) => setStatus(id, "archived")}
+              onRemoveDuplicates={async () => {
+                try {
+                  const n = await removeDuplicates();
+                  if (n > 0) toast.success(`Archived ${n} duplicate candidate${n === 1 ? "" : "s"}.`);
+                } catch {
+                  toast.error("Couldn't archive duplicates.");
+                }
+              }}
+            />
           )}
-        </>
+
+          {/* ─── 4. ARCHIVE ──────────────────────────────────────────── */}
+          {archived.length > 0 && (
+            <Collapsible open={showArchive} onOpenChange={setShowArchive}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-md hover:bg-secondary/40 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      Archive
+                    </span>
+                    <span className="text-xs text-muted-foreground">— {archived.length}</span>
+                  </div>
+                  <ChevronDown
+                    className={`h-4 w-4 text-muted-foreground transition-transform ${showArchive ? "rotate-180" : ""}`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2 space-y-1">
+                {archived.map((s) => (
+                  <ArchiveRow
+                    key={s.id}
+                    s={s}
+                    promotionTitle={promotionMap[s.id]}
+                    onDelete={() => remove(s.id).then(() => toast.success("Strategy removed."))}
+                  />
+                ))}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </div>
       )}
 
       <StrategyDialog
@@ -249,74 +325,534 @@ export default function StrategyLab() {
   );
 }
 
-function ParamDiff({ title, params, other, side }: { title: string; params: StrategyParam[]; other: StrategyParam[]; side: "left" | "right" }) {
-  const otherMap = new Map(other.map((p) => [p.key, p.value]));
+// ────────────────────────────────────────────────────────────────────────
+// LIVE
+// ────────────────────────────────────────────────────────────────────────
+
+function LivePanel({
+  approved,
+  promotionTitle,
+  onClone,
+  onEdit,
+  onBacktest,
+  backtestingId,
+}: {
+  approved: StrategyVersion | null;
+  promotionTitle?: string;
+  onClone: (s: StrategyVersion) => void;
+  onEdit: (s: StrategyVersion) => void;
+  onBacktest: (s: StrategyVersion) => void;
+  backtestingId: string | null;
+}) {
+  if (!approved) {
+    return (
+      <div className="panel p-5">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Live</div>
+        <EmptyState
+          icon={<ShieldCheck className="h-5 w-5" />}
+          title="No live strategy"
+          description="Promote a candidate to set the strategy that's actually trading."
+        />
+      </div>
+    );
+  }
+  const m = approved.metrics;
   return (
-    <div className="rounded-md border border-border bg-secondary/30 p-3">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">{title}</div>
-      <div className="space-y-1.5">
-        {params.map((p) => {
-          const otherVal = otherMap.get(p.key);
-          const changed = otherVal !== p.value;
-          return (
-            <div key={p.key} className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground font-mono text-xs">{p.key}</span>
-              <span className={`tabular ${changed && side === "right" ? "text-primary font-medium" : "text-foreground"}`}>
-                {String(p.value)}{p.unit ?? ""}
-              </span>
-            </div>
-          );
-        })}
+    <div className="panel p-5 space-y-4 border-status-safe/30">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <StatusBadge tone="safe" size="sm" dot>Live</StatusBadge>
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">currently trading</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground">{approved.name}</h2>
+            <span className="text-sm text-muted-foreground">{approved.version}</span>
+          </div>
+          {approved.description && (
+            <p className="text-xs text-muted-foreground max-w-xl">{approved.description}</p>
+          )}
+          {promotionTitle && (
+            <p className="text-[11px] text-muted-foreground italic">
+              Promoted from experiment:{" "}
+              <Link to="/learning" className="text-primary hover:underline">
+                {promotionTitle}
+              </Link>
+            </p>
+          )}
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Live strategy actions">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onClone(approved)}>
+              <Copy className="h-4 w-4 mr-2" /> Clone as candidate
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEdit(approved)}>
+              <Pencil className="h-4 w-4 mr-2" /> Edit
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={backtestingId === approved.id}
+              onClick={() => onBacktest(approved)}
+            >
+              {backtestingId === approved.id ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FlaskConical className="h-4 w-4 mr-2" />
+              )}
+              Re-run backtest
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-border">
+        <Metric label="Expectancy" value={m.trades === 0 ? "—" : `${m.expectancy.toFixed(2)}R`} />
+        <Metric label="Win rate" value={m.trades === 0 ? "—" : `${(m.winRate * 100).toFixed(0)}%`} />
+        <Metric label="Max DD" value={m.trades === 0 ? "—" : `${(m.maxDrawdown * 100).toFixed(1)}%`} />
+        <Metric label="Sharpe" value={m.trades === 0 ? "—" : m.sharpe.toFixed(2)} />
+        <Metric label="Trades" value={m.trades === 0 ? "—" : String(m.trades)} />
       </div>
     </div>
   );
 }
 
-function DiffMetric({
+// ────────────────────────────────────────────────────────────────────────
+// IN TESTING
+// ────────────────────────────────────────────────────────────────────────
+
+function InTestingPanel({
+  inTesting,
+  approved,
+  promotionTitle,
+  onForcePromote,
+  onRetire,
+  onEdit,
+  onBacktest,
+  backtestingId,
+  onTriggerEvaluate,
+  evaluating,
+}: {
+  inTesting: StrategyVersion | null;
+  approved: StrategyVersion | null;
+  promotionTitle?: string;
+  onForcePromote: (id: string) => void;
+  onRetire: (id: string) => void;
+  onEdit: (s: StrategyVersion) => void;
+  onBacktest: (s: StrategyVersion) => void;
+  backtestingId: string | null;
+  onTriggerEvaluate: () => void;
+  evaluating: boolean;
+}) {
+  if (!inTesting) {
+    return (
+      <div className="panel p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <StatusBadge tone="candidate" size="sm" dot pulse>In testing</StatusBadge>
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">empty slot</span>
+        </div>
+        <EmptyState
+          icon={<Beaker className="h-5 w-5" />}
+          title="Nothing in testing"
+          description="Head to Learning to promote an experiment, or clone the live strategy from the menu above."
+          action={
+            <Button asChild size="sm" variant="outline">
+              <Link to="/learning">Open Learning</Link>
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  const m = inTesting.metrics;
+  const trades = m.trades ?? 0;
+  const progress = Math.min(100, (trades / TRADES_TO_PROMOTE) * 100);
+  const remaining = Math.max(0, TRADES_TO_PROMOTE - trades);
+  const canForcePromote = trades >= TRADES_TO_PROMOTE;
+
+  // Param diff vs live — only the keys that changed
+  const paramDiffs = useMemo(() => {
+    if (!approved) return [];
+    const baseMap = new Map(approved.params.map((p) => [p.key, p.value]));
+    const diffs: Array<{ key: string; before: unknown; after: unknown }> = [];
+    for (const p of inTesting.params) {
+      const before = baseMap.get(p.key);
+      if (before !== p.value) diffs.push({ key: p.key, before: before ?? "—", after: p.value });
+    }
+    // Also include keys removed from candidate
+    for (const p of approved.params) {
+      if (!inTesting.params.some((x) => x.key === p.key)) {
+        diffs.push({ key: p.key, before: p.value, after: "—" });
+      }
+    }
+    return diffs;
+  }, [approved, inTesting]);
+
+  return (
+    <div className="panel p-5 space-y-4 border-status-candidate/30">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <StatusBadge tone="candidate" size="sm" dot pulse>In testing</StatusBadge>
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">accumulating paper trades</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-foreground">{inTesting.name}</h2>
+            <span className="text-sm text-muted-foreground">{inTesting.version}</span>
+          </div>
+          {promotionTitle && (
+            <p className="text-[11px] text-muted-foreground italic">
+              Promoted from experiment:{" "}
+              <Link to="/learning" className="text-primary hover:underline">
+                {promotionTitle}
+              </Link>
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => onRetire(inTesting.id)}
+          >
+            Retire early
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Candidate actions">
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onTriggerEvaluate} disabled={evaluating}>
+                {evaluating ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Run check now
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onEdit(inTesting)}>
+                <Pencil className="h-4 w-4 mr-2" /> Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={backtestingId === inTesting.id}
+                onClick={() => onBacktest(inTesting)}
+              >
+                {backtestingId === inTesting.id ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <FlaskConical className="h-4 w-4 mr-2" />
+                )}
+                Re-run backtest
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="block">
+                      <DropdownMenuItem
+                        disabled={!canForcePromote}
+                        onClick={() => onForcePromote(inTesting.id)}
+                      >
+                        <ShieldCheck className="h-4 w-4 mr-2" /> Force promote to live
+                      </DropdownMenuItem>
+                    </span>
+                  </TooltipTrigger>
+                  {!canForcePromote && (
+                    <TooltipContent side="left">
+                      Need {remaining} more paper trade{remaining === 1 ? "" : "s"} (currently {trades}/{TRADES_TO_PROMOTE}).
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Metric row with deltas vs approved */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-border">
+        <DeltaMetric label="Expectancy" cur={m.expectancy} base={approved?.metrics.expectancy ?? null} suffix="R" untested={trades === 0} />
+        <DeltaMetric label="Win rate" cur={m.winRate * 100} base={approved ? approved.metrics.winRate * 100 : null} suffix="%" untested={trades === 0} />
+        <DeltaMetric label="Max DD" cur={m.maxDrawdown * 100} base={approved ? approved.metrics.maxDrawdown * 100 : null} suffix="%" inverse untested={trades === 0} />
+        <DeltaMetric label="Sharpe" cur={m.sharpe} base={approved?.metrics.sharpe ?? null} untested={trades === 0} />
+        <Metric label="Trades" value={trades === 0 ? "—" : String(trades)} />
+      </div>
+
+      {/* Promotion progress */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">
+            Promotion progress · {trades} / {TRADES_TO_PROMOTE} paper trades
+          </span>
+          <span className="text-muted-foreground tabular">
+            {canForcePromote ? "Ready to evaluate" : `${remaining} to go`}
+          </span>
+        </div>
+        <Progress value={progress} className="h-2" />
+      </div>
+
+      {/* Param diff (changed only) */}
+      {paramDiffs.length > 0 && (
+        <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            Changes vs live
+          </div>
+          {paramDiffs.map((d) => (
+            <div key={d.key} className="flex items-center justify-between text-sm">
+              <span className="font-mono text-xs text-muted-foreground">{d.key}</span>
+              <span className="tabular text-foreground">
+                <span className="text-muted-foreground">{String(d.before)}</span>{" "}
+                <ArrowRight className="inline h-3 w-3 text-muted-foreground mx-1" />{" "}
+                <span className="text-primary font-medium">{String(d.after)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Auto-pilot indicator */}
+      <div className="rounded-md bg-primary/5 border border-primary/20 p-3 flex items-center gap-2 flex-wrap">
+        <span className="text-base">🤖</span>
+        <span className="text-xs text-foreground">Auto-pilot active</span>
+        <span className="text-xs text-muted-foreground">·</span>
+        <span className="text-xs text-muted-foreground">evaluates every 30 min</span>
+        <span className="text-xs text-muted-foreground">·</span>
+        <span className="text-xs text-muted-foreground">promotes automatically if it beats the baseline</span>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// QUEUE
+// ────────────────────────────────────────────────────────────────────────
+
+function QueuePanel({
+  queued,
+  duplicateIds,
+  promotionMap,
+  onMoveToTesting,
+  onArchive,
+  onRemoveDuplicates,
+}: {
+  queued: StrategyVersion[];
+  duplicateIds: Set<string>;
+  promotionMap: Record<string, string>;
+  onMoveToTesting: (id: string) => void;
+  onArchive: (id: string) => void;
+  onRemoveDuplicates: () => void;
+}) {
+  if (queued.length === 0) return null;
+  const dupCount = queued.filter((q) => duplicateIds.has(q.id)).length;
+
+  return (
+    <div className="panel p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Queue</span>
+          <span className="text-xs text-muted-foreground">— {queued.length} waiting</span>
+        </div>
+        {dupCount > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 h-7 text-xs"
+            onClick={onRemoveDuplicates}
+          >
+            <Trash2 className="h-3 w-3" /> Remove {dupCount} duplicate{dupCount === 1 ? "" : "s"}
+          </Button>
+        )}
+      </div>
+      <div className="divide-y divide-border">
+        {queued.map((s) => (
+          <QueueRow
+            key={s.id}
+            s={s}
+            isDuplicate={duplicateIds.has(s.id)}
+            promotionTitle={promotionMap[s.id]}
+            onMoveToTesting={() => onMoveToTesting(s.id)}
+            onArchive={() => onArchive(s.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QueueRow({
+  s,
+  isDuplicate,
+  promotionTitle,
+  onMoveToTesting,
+  onArchive,
+}: {
+  s: StrategyVersion;
+  isDuplicate: boolean;
+  promotionTitle?: string;
+  onMoveToTesting: () => void;
+  onArchive: () => void;
+}) {
+  // Cheap "what's different" summary — hide if we don't have anything useful
+  const changedSummary = useMemo(() => {
+    // We don't have access to approved here; just surface the version tail
+    // which usually encodes the param=value (set by promoteToStrategy).
+    const m = s.version.match(/\+([^=]+)=(.+)$/);
+    if (m) return `${m[1]} = ${m[2]}`;
+    return null;
+  }, [s.version]);
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 text-sm flex-wrap">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <span className="text-foreground font-medium truncate">{s.name}</span>
+        <span className="text-muted-foreground text-xs">{s.version}</span>
+        {changedSummary && (
+          <span className="text-muted-foreground font-mono text-xs">· {changedSummary}</span>
+        )}
+        {isDuplicate && (
+          <StatusBadge tone="caution" size="sm">duplicate</StatusBadge>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        {promotionTitle && (
+          <span className="text-[11px] text-muted-foreground italic truncate max-w-[180px]" title={promotionTitle}>
+            {promotionTitle}
+          </span>
+        )}
+        <span className="text-[11px] text-muted-foreground tabular">
+          {new Date(s.createdAt).toLocaleDateString()}
+        </span>
+        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onMoveToTesting}>
+          Move to testing
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+          onClick={onArchive}
+          aria-label="Archive"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// ARCHIVE
+// ────────────────────────────────────────────────────────────────────────
+
+function ArchiveRow({
+  s,
+  promotionTitle,
+  onDelete,
+}: {
+  s: StrategyVersion;
+  promotionTitle?: string;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 px-3 text-sm rounded-md hover:bg-secondary/40">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <span className="text-muted-foreground truncate">{s.name}</span>
+        <span className="text-muted-foreground text-xs">{s.version}</span>
+        {promotionTitle && (
+          <span className="text-[11px] text-muted-foreground italic truncate">
+            · {promotionTitle}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-[11px] text-muted-foreground tabular">
+          {new Date(s.createdAt).toLocaleDateString()}
+        </span>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+          aria-label="Delete permanently"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Small primitives
+// ────────────────────────────────────────────────────────────────────────
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-sm tabular text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function DeltaMetric({
   label,
-  a,
-  b,
+  cur,
+  base,
   suffix = "",
   inverse = false,
   untested = false,
-  baselineUntested = false,
 }: {
   label: string;
-  a: number;
-  b: number;
+  cur: number;
+  base: number | null;
   suffix?: string;
+  /** True when "lower is better" (e.g. drawdown). */
   inverse?: boolean;
-  /** Candidate side has no backtest data yet — render the value cell as "—". */
   untested?: boolean;
-  /** Approved side has no backtest data either — suppress the delta entirely. */
-  baselineUntested?: boolean;
 }) {
   if (untested) {
     return (
       <div>
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-sm tabular text-muted-foreground" title="Not yet measured — run a backtest">—</div>
+        <div className="text-sm tabular text-muted-foreground">—</div>
       </div>
     );
   }
-  const delta = b - a;
+  if (base == null || !Number.isFinite(base)) {
+    return (
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-sm tabular text-foreground">{cur.toFixed(2)}{suffix}</div>
+      </div>
+    );
+  }
+  const delta = cur - base;
   const better = inverse ? delta < 0 : delta > 0;
+  const same = delta === 0;
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="text-sm tabular text-foreground">
-        {b.toFixed(2)}{suffix}{" "}
-        {baselineUntested ? (
-          <span className="text-xs text-muted-foreground">(no baseline)</span>
-        ) : (
-          <span className={`text-xs ${better ? "text-status-safe" : delta === 0 ? "text-muted-foreground" : "text-status-blocked"}`}>
-            ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
-          </span>
-        )}
+        {cur.toFixed(2)}{suffix}{" "}
+        <span className={`text-xs ${same ? "text-muted-foreground" : better ? "text-status-safe" : "text-status-blocked"}`}>
+          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
+        </span>
       </div>
     </div>
   );
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Strategy create/edit dialog (unchanged from prior version)
+// ────────────────────────────────────────────────────────────────────────
 
 function StrategyDialog({
   open,
@@ -335,7 +871,9 @@ function StrategyDialog({
   const [description, setDescription] = useState(strategy?.description ?? "");
   const [params, setParams] = useState<StrategyParam[]>(strategy?.params ?? []);
   const [metricsText, setMetricsText] = useState(
-    strategy ? JSON.stringify(strategy.metrics, null, 2) : `{\n  "expectancy": 0,\n  "winRate": 0,\n  "maxDrawdown": 0,\n  "sharpe": 0,\n  "trades": 0\n}`,
+    strategy
+      ? JSON.stringify(strategy.metrics, null, 2)
+      : `{\n  "expectancy": 0,\n  "winRate": 0,\n  "maxDrawdown": 0,\n  "sharpe": 0,\n  "trades": 0\n}`,
   );
 
   useEffect(() => {
@@ -350,7 +888,7 @@ function StrategyDialog({
   }, [strategy]);
 
   const submit = () => {
-    let metrics: any;
+    let metrics: StrategyMetrics;
     try {
       metrics = JSON.parse(metricsText);
     } catch {
@@ -412,3 +950,6 @@ function StrategyDialog({
     </Dialog>
   );
 }
+
+// Suppress unused-import lint when RotateCcw is not used (kept for potential future actions).
+void RotateCcw;
