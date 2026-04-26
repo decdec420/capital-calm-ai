@@ -25,52 +25,39 @@ const TWEAKABLE = ["ema_fast", "ema_slow", "rsi_period", "stop_atr_mult", "tp_r_
 // "noise" outcome on BTC doesn't block exploration on more volatile assets.
 const SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
 
-async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: string) {
-  // 1. Idempotency — don't pile up
-  const { count: queuedCount } = await admin
-    .from("experiments")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("proposed_by", "copilot")
-    .in("status", ["queued", "running"]);
-  if ((queuedCount ?? 0) >= 2) return { userId, skipped: "already_busy" };
-
-  // 2. Context — strategy + trades + gate reasons + PERSISTENT MEMORY.
-  // Memory is the source of truth for "what have we already tried" so the
-  // copilot stops grinding the same parameter to dust.
-  const [{ data: strategy }, { data: trades }, { data: sys }, { data: memory }] = await Promise.all([
-    admin.from("strategies").select("id,version,name,params,metrics")
-      .eq("user_id", userId).eq("status", "approved")
-      .order("updated_at", { ascending: false }).maybeSingle(),
-    admin.from("trades").select("symbol,side,outcome,pnl_pct,reason_tags,closed_at")
-      .eq("user_id", userId).eq("status", "closed")
-      .order("closed_at", { ascending: false }).limit(50),
-    admin.from("system_state").select("last_engine_snapshot").eq("user_id", userId).maybeSingle(),
-    admin.from("copilot_memory").select("*").eq("user_id", userId),
-  ]);
-  if (!strategy) return { userId, skipped: "no_approved_strategy" };
-
+async function proposeForSymbol(
+  admin: any,
+  userId: string,
+  symbol: string,
+  strategy: any,
+  trades: any[],
+  sys: any,
+  allMemory: any[],
+  LOVABLE_API_KEY: string,
+) {
   const params: Array<{ key: string; value: number | string | boolean }> = (strategy.params ?? []) as any;
   const tweakable = params.filter((p) => TWEAKABLE.includes(p.key as any) && typeof p.value === "number");
-  if (tweakable.length === 0) return { userId, skipped: "no_tweakable_params" };
+  if (tweakable.length === 0) return { userId, symbol, skipped: "no_tweakable_params" };
 
-  // Hard-block parameter+direction combos still on cooldown — these never
-  // even get shown to the AI as candidates.
+  // Symbol-isolated memory: only this symbol's lane influences cooldowns + AI context.
+  const memory = (allMemory ?? []).filter((m: any) => (m.symbol ?? "BTC-USD") === symbol);
+
   const now = new Date();
   const onCooldown = new Set(
-    (memory ?? [])
+    memory
       .filter((m: any) => m.retry_after && new Date(m.retry_after) > now)
       .map((m: any) => `${m.parameter}:${m.direction}`)
   );
 
+  const symbolTrades = (trades ?? []).filter((t: any) => t.symbol === symbol);
   const recentGates = ((sys?.last_engine_snapshot as any)?.gateReasons ?? [])
     .slice(0, 5)
     .map((g: any) => ({ code: g.code, message: g.message }));
 
-  const wins = (trades ?? []).filter((t: any) => t.outcome === "win").length;
-  const losses = (trades ?? []).filter((t: any) => t.outcome === "loss").length;
+  const wins = symbolTrades.filter((t: any) => t.outcome === "win").length;
+  const losses = symbolTrades.filter((t: any) => t.outcome === "loss").length;
 
-  const whatWeKnow = (memory ?? []).map((m: any) => ({
+  const whatWeKnow = memory.map((m: any) => ({
     parameter: m.parameter,
     direction: m.direction,
     triedTimes: m.attempt_count,
@@ -80,10 +67,11 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   }));
 
   const contextPacket = {
+    symbol,
     strategy: { name: strategy.name, version: strategy.version, currentParams: tweakable },
     recentTrades: {
-      total: trades?.length ?? 0, wins, losses,
-      lastFew: (trades ?? []).slice(0, 8).map((t: any) => ({
+      total: symbolTrades.length, wins, losses,
+      lastFew: symbolTrades.slice(0, 8).map((t: any) => ({
         symbol: t.symbol, side: t.side, outcome: t.outcome, pnlPct: t.pnl_pct, tags: t.reason_tags,
       })),
     },
@@ -92,24 +80,23 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
       summary: whatWeKnow,
       onCooldown: Array.from(onCooldown),
       instructions: [
-        "persistentMemory.onCooldown lists parameter:direction combos you MUST NOT propose — they are on cooldown because they showed no improvement or were rejected.",
-        "persistentMemory.summary shows what each direction has already produced. Do NOT re-propose a direction that already showed noise (expDelta near 0) or rejection.",
-        "Actively diversify: if stop_atr_mult has been tried many times, explore ema_fast, ema_slow, rsi_period, or tp_r_mult instead.",
-        "If a parameter has been tried in both directions and both failed, leave it alone entirely this round.",
+        `This proposal is scoped to ${symbol} ONLY. Reason about that asset's volatility and behavior.`,
+        "persistentMemory.onCooldown lists parameter:direction combos for THIS symbol that you MUST NOT propose.",
+        "persistentMemory.summary shows what each direction has already produced for this symbol.",
+        "Actively diversify: rotate parameters instead of grinding the same knob.",
       ].join(" "),
     },
-    proposalInstructions: "Pick exactly ONE parameter from currentParams that is NOT on cooldown and has NOT already been exhausted. Propose a meaningful adjustment (10-30% change). Hypothesis must be specific and grounded in recent trades or gate reasons.",
+    proposalInstructions: `Pick exactly ONE parameter from currentParams that is NOT on cooldown for ${symbol}. Propose a meaningful adjustment (10-30% change). Hypothesis must reference ${symbol}'s recent behavior or gate reasons.`,
   };
 
-  // 3. AI tool call
   const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "google/gemini-3-flash-preview",
       messages: [
-        { role: "system", content: "You are the Trader OS R&D Copilot. You propose small, testable parameter tweaks based on observed strategy behavior. One knob at a time. Hypothesis must be specific (e.g. 'recent losses cluster in chop — wider stops would reduce noise-stops')." },
-        { role: "user", content: `Propose ONE parameter to test based on this context:\n${JSON.stringify(contextPacket, null, 2)}` },
+        { role: "system", content: `You are the Trader OS R&D Copilot proposing a tweak for ${symbol}. One knob at a time. Hypothesis must be specific to this symbol's behavior.` },
+        { role: "user", content: `Propose ONE parameter to test for ${symbol}:\n${JSON.stringify(contextPacket, null, 2)}` },
       ],
       tools: [{
         type: "function",
@@ -122,9 +109,9 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
               parameter: { type: "string", description: `One of: ${TWEAKABLE.join(", ")}` },
               before: { type: "number" },
               after: { type: "number" },
-              hypothesis: { type: "string", description: "1-2 sentences. Why this change might help, grounded in the recent trades or gate reasons." },
-              expected_effect: { type: "string", description: "What metric you'd expect to move and which direction (e.g. 'win rate +2-5%, expectancy roughly flat')." },
-              title: { type: "string", description: "Short headline like 'Widen stop_atr_mult 1.5 → 1.8'." },
+              hypothesis: { type: "string" },
+              expected_effect: { type: "string" },
+              title: { type: "string" },
             },
             required: ["parameter", "before", "after", "hypothesis", "expected_effect", "title"],
             additionalProperties: false,
@@ -138,17 +125,16 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   if (!aiResp.ok) {
     const t = await aiResp.text().catch(() => "");
     console.error("AI gateway error", aiResp.status, t);
-    return { userId, error: "ai_error", status: aiResp.status };
+    return { userId, symbol, error: "ai_error", status: aiResp.status };
   }
   const aiJson = await aiResp.json();
   const toolCall = aiJson.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) return { userId, error: "no_tool_call" };
+  if (!toolCall) return { userId, symbol, error: "no_tool_call" };
   let args: any;
-  try { args = JSON.parse(toolCall.function.arguments); } catch { return { userId, error: "parse_error" }; }
+  try { args = JSON.parse(toolCall.function.arguments); } catch { return { userId, symbol, error: "parse_error" }; }
 
-  // Validate the picked parameter actually exists in the strategy
   const existing = tweakable.find((p) => p.key === args.parameter);
-  if (!existing) return { userId, error: "invalid_param", picked: args.parameter };
+  if (!existing) return { userId, symbol, error: "invalid_param", picked: args.parameter };
 
   const beforeVal = String(existing.value);
   const afterVal = String(args.after);
@@ -157,8 +143,9 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
 
   const { error: insErr } = await admin.from("experiments").insert({
     user_id: userId,
-    title: args.title,
+    title: `[${symbol}] ${args.title}`,
     parameter: args.parameter,
+    symbol,
     before_value: beforeVal,
     after_value: afterVal,
     delta: deltaStr,
@@ -169,9 +156,55 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   });
   if (insErr) {
     console.error("insert experiment failed", insErr);
-    return { userId, error: "insert_error" };
+    return { userId, symbol, error: "insert_error" };
   }
-  return { userId, proposed: args.parameter };
+  return { userId, symbol, proposed: args.parameter };
+}
+
+async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: string) {
+  // 1. Idempotency — don't pile up. Cap is per-user across all symbols.
+  const { count: queuedCount } = await admin
+    .from("experiments")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("proposed_by", "copilot")
+    .in("status", ["queued", "running"]);
+  if ((queuedCount ?? 0) >= 2) return { userId, skipped: "already_busy" };
+
+  // 2. Shared context fetch (one round-trip for all symbol lanes).
+  const [{ data: strategy }, { data: trades }, { data: sys }, { data: memory }] = await Promise.all([
+    admin.from("strategies").select("id,version,name,params,metrics")
+      .eq("user_id", userId).eq("status", "approved")
+      .order("updated_at", { ascending: false }).maybeSingle(),
+    admin.from("trades").select("symbol,side,outcome,pnl_pct,reason_tags,closed_at")
+      .eq("user_id", userId).eq("status", "closed")
+      .order("closed_at", { ascending: false }).limit(50),
+    admin.from("system_state").select("last_engine_snapshot").eq("user_id", userId).maybeSingle(),
+    admin.from("copilot_memory").select("*").eq("user_id", userId),
+  ]);
+  if (!strategy) return { userId, skipped: "no_approved_strategy" };
+
+  // 3. Pick the next symbol to propose for: round-robin by least-recent
+  // memory activity, so every symbol eventually gets attention.
+  const lastTriedBySymbol: Record<string, number> = {};
+  for (const sym of SYMBOLS) {
+    const symMem = (memory ?? []).filter((m: any) => (m.symbol ?? "BTC-USD") === sym);
+    const latest = symMem.reduce((acc: number, m: any) => Math.max(acc, new Date(m.last_tried_at ?? 0).getTime()), 0);
+    lastTriedBySymbol[sym] = latest;
+  }
+  const remainingSlots = Math.max(0, 2 - (queuedCount ?? 0));
+  const sortedSymbols = [...SYMBOLS].sort((a, b) => lastTriedBySymbol[a] - lastTriedBySymbol[b]);
+  const targetSymbols = sortedSymbols.slice(0, remainingSlots);
+
+  const results = [];
+  for (const symbol of targetSymbols) {
+    try {
+      results.push(await proposeForSymbol(admin, userId, symbol, strategy, trades ?? [], sys, memory ?? [], LOVABLE_API_KEY));
+    } catch (e) {
+      results.push({ userId, symbol, error: String(e) });
+    }
+  }
+  return { userId, symbolsProposed: results };
 }
 
 Deno.serve(async (req: Request) => {
