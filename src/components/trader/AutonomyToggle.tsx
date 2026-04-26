@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 const LEVELS: { value: AutonomyLevel; label: string; hint: string }[] = [
   { value: "manual", label: "Manual", hint: "Every signal needs your tap." },
   { value: "assisted", label: "Assisted", hint: "Auto-approve when confidence ≥ 85%." },
-  { value: "autonomous", label: "Autonomous", hint: "Auto-approve everything (paper)." },
+  { value: "autonomous", label: "Autonomous", hint: "Auto-approve everything." },
 ];
 
 export function AutonomyToggle() {
