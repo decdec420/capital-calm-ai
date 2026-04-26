@@ -18,6 +18,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAlerts } from "@/hooks/useAlerts";
+import { useSignals } from "@/hooks/useSignals";
+import { useExperiments } from "@/hooks/useExperiments";
+import { useGuardrails } from "@/hooks/useGuardrails";
 
 const sections = [
   {
@@ -57,6 +61,22 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { user, profile, signOut } = useAuth();
+  const { alerts } = useAlerts();
+  const { pending } = useSignals();
+  const { counts: expCounts } = useExperiments();
+  const { guardrails } = useGuardrails();
+
+  const alertCount = alerts.length;
+  const signalCount = pending.length;
+  const reviewCount = expCounts.needsReview;
+  const blockedCount = guardrails.filter((g) => g.level === "blocked").length;
+
+  const badgeFor: Record<string, { count: number; bg: string }> = {
+    "/": { count: alertCount, bg: "hsl(var(--status-blocked))" },
+    "/copilot": { count: signalCount, bg: "hsl(var(--primary))" },
+    "/risk": { count: blockedCount, bg: "hsl(var(--status-caution))" },
+    "/learning": { count: reviewCount, bg: "hsl(var(--status-caution))" },
+  };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
   const initials = initialsFor(profile?.display_name, user?.email);
@@ -94,6 +114,8 @@ export function AppSidebar() {
               <SidebarMenu>
                 {section.items.map((item) => {
                   const active = location.pathname === item.url;
+                  const badge = badgeFor[item.url];
+                  const showBadge = !!badge && badge.count > 0;
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton asChild isActive={active}>
@@ -108,6 +130,15 @@ export function AppSidebar() {
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
                           {!collapsed && <span>{item.title}</span>}
+                          {!collapsed && showBadge && (
+                            <span
+                              className="ml-auto flex items-center justify-center min-w-[16px] h-4 rounded-full text-[9px] font-bold text-white px-1"
+                              style={{ background: badge.bg }}
+                              aria-label={`${badge.count} ${item.title} items`}
+                            >
+                              {badge.count > 9 ? "9+" : badge.count}
+                            </span>
+                          )}
                         </NavLink>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
