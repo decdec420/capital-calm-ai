@@ -114,6 +114,8 @@ export function AppSidebar() {
               <SidebarMenu>
                 {section.items.map((item) => {
                   const active = location.pathname === item.url;
+                  const badge = badgeFor[item.url];
+                  const showBadge = !!badge && badge.count > 0;
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton asChild isActive={active}>
@@ -128,6 +130,15 @@ export function AppSidebar() {
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
                           {!collapsed && <span>{item.title}</span>}
+                          {!collapsed && showBadge && (
+                            <span
+                              className="ml-auto flex items-center justify-center min-w-[16px] h-4 rounded-full text-[9px] font-bold text-white px-1"
+                              style={{ background: badge.bg }}
+                              aria-label={`${badge.count} ${item.title} items`}
+                            >
+                              {badge.count > 9 ? "9+" : badge.count}
+                            </span>
+                          )}
                         </NavLink>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
