@@ -191,7 +191,7 @@ export default function StrategyLab() {
       <SectionHeader
         eyebrow="Strategy Lab"
         title="Pipeline"
-        description="One live strategy. One in testing. Everything else queued. The system promotes automatically when a candidate beats the baseline."
+        description="One strategy is trading. One is being tested. Everything else waits its turn. The bot only swaps after a clear win."
         actions={
           <Button size="sm" className="gap-1.5" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New strategy
