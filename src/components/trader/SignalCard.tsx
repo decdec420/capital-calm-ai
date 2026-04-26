@@ -27,6 +27,8 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
 
   const mins = Math.floor(remaining / 60000);
   const secs = Math.floor((remaining % 60000) / 1000);
+  const isUrgent = remaining < 60_000;
+  const isExpiring = remaining < 30_000;
 
   const decide = async (action: "approve" | "reject") => {
     setBusy(action);
