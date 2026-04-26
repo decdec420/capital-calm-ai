@@ -141,6 +141,9 @@ export interface SystemState {
   latencyMs: number;
   autonomyLevel: "manual" | "assisted" | "autonomous";
   lastEngineSnapshot: EngineSnapshot | null;
+  /** Set the first time the operator signs the live-money acknowledgment.
+   * Required to be non-null before live_trading_enabled can flip true. */
+  liveMoneyAcknowledgedAt: string | null;
 }
 
 export interface AccountState {

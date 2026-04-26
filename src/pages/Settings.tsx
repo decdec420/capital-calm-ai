@@ -4,6 +4,7 @@ import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { ProfileEditor } from "@/components/trader/ProfileEditor";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
+import { LiveMoneyAcknowledgmentDialog } from "@/components/trader/LiveMoneyAcknowledgmentDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -18,9 +19,10 @@ import type { SystemMode } from "@/lib/domain-types";
 import { toast } from "sonner";
 
 export default function Settings() {
-  const { data: system, update: updateSystem } = useSystemState();
+  const { data: system, update: updateSystem, acknowledgeLiveMoney } = useSystemState();
   const { data: account, update: updateAccount } = useAccountState();
   const [killOpen, setKillOpen] = useState(false);
+  const [ackOpen, setAckOpen] = useState(false);
   const navigate = useNavigate();
 
   const replayTour = () => {
@@ -118,6 +120,12 @@ export default function Settings() {
               <Switch
                 checked={system.liveTradingEnabled}
                 onCheckedChange={async (v) => {
+                  // Turning ON for the first time? Require the one-time
+                  // acknowledgment. Every subsequent toggle flips freely.
+                  if (v && !system.liveMoneyAcknowledgedAt) {
+                    setAckOpen(true);
+                    return;
+                  }
                   try {
                     await updateSystem({ liveTradingEnabled: v });
                     toast.success(v ? "Live trading ARMED." : "Live trading disarmed.");
@@ -181,6 +189,20 @@ export default function Settings() {
           onConfirm={confirmKill}
         />
       )}
+
+      <LiveMoneyAcknowledgmentDialog
+        open={ackOpen}
+        onOpenChange={setAckOpen}
+        onConfirm={async () => {
+          try {
+            await acknowledgeLiveMoney();
+            await updateSystem({ liveTradingEnabled: true });
+            toast.success("Live trading ARMED.");
+          } catch {
+            toast.error("Couldn't sign acknowledgment.");
+          }
+        }}
+      />
     </div>
   );
 }
