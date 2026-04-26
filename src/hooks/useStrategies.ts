@@ -8,6 +8,8 @@ function mapRow(r: any): StrategyVersion {
     id: r.id,
     name: r.name,
     version: r.version,
+    displayName: r.display_name ?? null,
+    friendlySummary: r.friendly_summary ?? null,
     status: r.status as StrategyStatus,
     createdAt: r.created_at,
     description: r.description ?? "",
