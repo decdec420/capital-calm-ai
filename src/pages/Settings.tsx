@@ -5,13 +5,14 @@ import { StatusBadge } from "@/components/trader/StatusBadge";
 import { ProfileEditor } from "@/components/trader/ProfileEditor";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { LiveMoneyAcknowledgmentDialog } from "@/components/trader/LiveMoneyAcknowledgmentDialog";
+import { ArmLiveConfirmDialog } from "@/components/trader/ArmLiveConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, Compass } from "lucide-react";
+import { AlertTriangle, Compass, Plug } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
@@ -23,6 +24,7 @@ export default function Settings() {
   const { data: account, update: updateAccount } = useAccountState();
   const [killOpen, setKillOpen] = useState(false);
   const [ackOpen, setAckOpen] = useState(false);
+  const [armConfirmOpen, setArmConfirmOpen] = useState(false);
   const navigate = useNavigate();
 
   const replayTour = () => {
