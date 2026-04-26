@@ -333,7 +333,7 @@ export default function Copilot() {
 
           <div className="panel p-4">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Last engine tick</div>
+              <div className="text-sm font-medium text-foreground">Last engine tick</div>
               {snapshot && (
                 <span className="text-[10px] text-muted-foreground tabular">
                   {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -441,7 +441,7 @@ export default function Copilot() {
 
             <TabsContent value="history" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
               <div className="flex items-center justify-between mb-3">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Signal history</div>
+                <div className="text-sm font-medium text-foreground">Signal history</div>
                 <span className="text-xs text-muted-foreground">{history.length} decisions</span>
               </div>
               {history.length === 0 ? (
@@ -494,7 +494,7 @@ export default function Copilot() {
           <AutonomyToggle />
 
           <div className="panel p-4">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Context attached</div>
+            <div className="text-sm font-medium text-foreground mb-2">Context attached</div>
             <ul className="text-xs text-muted-foreground space-y-1.5">
               <li>• Mode: <span className="text-foreground capitalize">{system?.mode ?? "—"}</span></li>
               <li>
