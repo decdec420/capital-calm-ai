@@ -21,6 +21,7 @@ import { useStrategies } from "@/hooks/useStrategies";
 import { useExperiments } from "@/hooks/useExperiments";
 import { useSignals } from "@/hooks/useSignals";
 import { useConversations } from "@/hooks/useConversations";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
@@ -36,6 +37,7 @@ export default function Copilot() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [running, setRunning] = useState(false);
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { data: system } = useSystemState();
@@ -140,7 +142,49 @@ export default function Copilot() {
     }
   };
 
+  const decide = async (action: "approve" | "reject") => {
+    if (!activeSignal || busy) return;
+    setBusy(action);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        toast.error("Sign in first.");
+        return;
+      }
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-decide`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ signalId: activeSignal.id, action }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error ?? `Failed to ${action}`);
+        return;
+      }
+      toast.success(action === "approve" ? "Trade opened." : "Signal declined. AI noted.");
+    } catch {
+      toast.error("Connection error.");
+    } finally {
+      setBusy(null);
+    }
+  };
 
+  useKeyboardShortcuts({
+    a: () => {
+      if (activeSignal && !busy) decide("approve");
+    },
+    r: () => {
+      if (activeSignal && !busy) decide("reject");
+    },
+    e: () => {
+      if (!running) runEngine();
+    },
+  });
   const buildContext = () => ({
     mode: system?.mode,
     bot: system?.bot,
@@ -302,7 +346,7 @@ export default function Copilot() {
       {/* SIGNAL BRIDGE — top of page, above everything else */}
       {activeSignal ? (
         <div className="space-y-2">
-          <SignalCard signal={activeSignal} />
+          <SignalCard signal={activeSignal} busy={busy} onDecide={decide} />
           <div className="flex justify-end">
             <Button
               size="sm"

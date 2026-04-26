@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
@@ -21,6 +21,13 @@ import { cn } from "@/lib/utils";
 export function FloatingKillSwitch() {
   const { data: system, update } = useSystemState();
   const [open, setOpen] = useState(false);
+
+  // Global "k" shortcut dispatched from KeyboardShortcutsOverlay opens this dialog.
+  useEffect(() => {
+    const handler = () => setOpen(true);
+    window.addEventListener("lovable:open-kill-switch", handler);
+    return () => window.removeEventListener("lovable:open-kill-switch", handler);
+  }, []);
 
   // Don't render until system_state has loaded — no flash of armed state.
   if (!system) return null;

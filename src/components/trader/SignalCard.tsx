@@ -10,10 +10,15 @@ import { cn } from "@/lib/utils";
 interface SignalCardProps {
   signal: TradeSignal;
   onDecided?: () => void;
+  /** Optional controlled busy state. If provided, internal state is bypassed. */
+  busy?: "approve" | "reject" | null;
+  /** Optional controlled decide handler. If provided, replaces the built-in fetch. */
+  onDecide?: (action: "approve" | "reject") => void | Promise<void>;
 }
 
-export function SignalCard({ signal, onDecided }: SignalCardProps) {
-  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+export function SignalCard({ signal, onDecided, busy: controlledBusy, onDecide }: SignalCardProps) {
+  const [internalBusy, setInternalBusy] = useState<"approve" | "reject" | null>(null);
+  const busy = controlledBusy !== undefined ? controlledBusy : internalBusy;
   const [remaining, setRemaining] = useState(() =>
     Math.max(0, new Date(signal.expiresAt).getTime() - Date.now()),
   );
@@ -31,7 +36,11 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
   const isExpiring = remaining < 30_000;
 
   const decide = async (action: "approve" | "reject") => {
-    setBusy(action);
+    if (onDecide) {
+      await onDecide(action);
+      return;
+    }
+    setInternalBusy(action);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
@@ -58,7 +67,7 @@ export function SignalCard({ signal, onDecided }: SignalCardProps) {
     } catch {
       toast.error("Connection error.");
     } finally {
-      setBusy(null);
+      setInternalBusy(null);
     }
   };
 
