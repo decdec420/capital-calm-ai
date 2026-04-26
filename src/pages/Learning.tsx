@@ -224,6 +224,26 @@ export default function Learning() {
         </div>
       )}
 
+      {/* PROMOTED — already shipped as a candidate strategy version */}
+      {promoted.length > 0 && (
+        <div className="panel">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-primary font-semibold">Promoted to candidate</span>
+              <StatusBadge tone="accent" size="sm">{promoted.length}</StatusBadge>
+            </div>
+            <span className="text-xs text-muted-foreground">Live as a candidate strategy version. Track it on Strategy Lab.</span>
+          </div>
+          <div className="divide-y divide-border">
+            {promoted.map((e) => (
+              <ExperimentRow key={e.id} exp={e} isPromoted
+                onRemove={() => remove(e.id).then(() => toast.success("Removed."))}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* AUTO-RESOLVED */}
       <Collapsible open={showResolved} onOpenChange={setShowResolved}>
         <div className="panel">
