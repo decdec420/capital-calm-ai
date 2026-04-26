@@ -322,6 +322,7 @@ export default function Overview() {
             title="Today's market brief"
             body={brief || (briefLoading ? "Cooking up a brief…" : "No brief yet. Tap Request brief.")}
             timestamp={brief ? "now" : undefined}
+            loading={briefLoading && !brief}
             footer={
               <Link to="/copilot" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
                 Open Copilot <Zap className="h-3 w-3" />
