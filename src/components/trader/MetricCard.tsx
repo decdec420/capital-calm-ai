@@ -43,7 +43,18 @@ export function MetricCard({
   explain,
   onClick,
   interactiveLabel,
+  loading,
 }: MetricCardProps) {
+  if (loading) {
+    return (
+      <div className={cn("panel p-4 flex flex-col gap-2", className)}>
+        <Skeleton className="h-2.5 w-16" />
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton className="h-2 w-12" />
+      </div>
+    );
+  }
+
   const interactive = !!onClick;
 
   const inner = (
