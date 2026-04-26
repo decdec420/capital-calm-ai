@@ -90,6 +90,7 @@ export default function Welcome() {
   const [equity, setEquity] = useState("10000");
   const [floor, setFloor] = useState("8500");
   const [lossCap, setLossCap] = useState("1.5");
+  const [saving, setSaving] = useState(false);
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
   const isFirst = step === 0;
@@ -104,7 +105,40 @@ export default function Welcome() {
   const floorPct = validSetup ? (floorNum / equityNum) * 100 : null;
   const maxDailyLoss = validSetup ? (equityNum * lossCapNum) / 100 : null;
 
-  const finish = () => {
+  // Setup-step button is disabled when any of the three fields is empty,
+  // non-numeric, or floor is >= equity (which would make the floor pointless).
+  const setupBlocked =
+    !Number.isFinite(equityNum) || equityNum <= 0 ||
+    !Number.isFinite(floorNum) || floorNum < 0 ||
+    !Number.isFinite(lossCapNum) || lossCapNum <= 0 ||
+    floorNum >= equityNum;
+  const finishDisabled = saving || (step === 4 && setupBlocked);
+
+  const finish = async () => {
+    if (step === 4) {
+      setSaving(true);
+      try {
+        const { data: sess } = await supabase.auth.getUser();
+        const uid = sess.user?.id;
+        if (uid) {
+          const { error } = await supabase
+            .from("account_state")
+            .update({
+              equity: equityNum,
+              cash: equityNum,
+              start_of_day_equity: equityNum,
+              balance_floor: floorNum,
+            })
+            .eq("user_id", uid);
+          if (error) console.error("[Welcome] account_state update failed:", error);
+        }
+      } catch (e) {
+        // Non-blocking — onboarding completes even if the write fails.
+        console.error("[Welcome] setup save error:", e);
+      } finally {
+        setSaving(false);
+      }
+    }
     localStorage.setItem(WELCOME_KEY, "1");
     navigate("/", { replace: true });
   };
