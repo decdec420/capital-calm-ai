@@ -145,6 +145,7 @@ export default function Learning() {
                   <thead>
                     <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
                       <th className="text-left px-4 py-2 font-medium">Parameter</th>
+                      <th className="text-left px-2 py-2 font-medium">Symbol</th>
                       <th className="text-left px-2 py-2 font-medium">Direction</th>
                       <th className="text-right px-2 py-2 font-medium">Tries</th>
                       <th className="text-left px-2 py-2 font-medium">Last outcome</th>
