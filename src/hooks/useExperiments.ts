@@ -33,6 +33,7 @@ function mapMemory(r: any): CopilotMemoryRow {
     id: r.id,
     parameter: r.parameter,
     direction: r.direction,
+    symbol: r.symbol ?? "BTC-USD",
     fromValue: Number(r.from_value),
     toValue: Number(r.to_value),
     outcome: r.outcome,
