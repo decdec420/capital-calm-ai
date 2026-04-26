@@ -328,7 +328,17 @@ async function runTickForUser(
 
   // Equity & daily counters for the risk gate.
   const equity = acct ? Number(acct.equity) : 0;
-  const dailyRealizedPnlUsd = acct ? Number(acct.realized_pnl_today ?? 0) : 0;
+  // Daily realized PnL is computed on read via a SQL function — there is no
+  // realized_pnl_today column on account_state. Falling back to 0 here would
+  // silently disable the daily loss cap.
+  const { data: pnlToday, error: pnlErr } = await admin.rpc(
+    "realized_pnl_today",
+    { p_user_id: userId },
+  );
+  if (pnlErr) {
+    console.warn("signal-engine: realized_pnl_today RPC failed", pnlErr);
+  }
+  const dailyRealizedPnlUsd = Number(pnlToday ?? 0);
 
   // Daily trade count (UTC day)
   const dayStart = new Date();
