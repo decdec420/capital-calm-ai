@@ -80,7 +80,38 @@ export default function Trades() {
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setCloseFor(openPosition)}>Close at market</Button>
-              <Button size="sm" variant="destructive" onClick={() => setDiscardFor(openPosition)}>Discard</Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="destructive">Discard</Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent className="bg-card border-border">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Discard this trade?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently removes the position record. No broker order is sent — this only deletes it from your log. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <div className="text-sm text-status-caution border border-status-caution/30 bg-status-caution/10 rounded-md p-3">
+                    Make sure you have already closed this position on the exchange if it was a live trade.
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={async () => {
+                        try {
+                          await remove(openPosition.id);
+                          toast.success("Trade discarded.");
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Couldn't discard trade");
+                        }
+                      }}
+                    >
+                      Yes, discard position
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
 
