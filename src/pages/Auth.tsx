@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Activity, ArrowLeft, Eye, EyeOff, Loader2 } from "lucide-react";
+import { WELCOME_KEY } from "@/pages/Welcome";
 
 const emailSchema = z.string().trim().email("Enter a valid email").max(255);
 const passwordSchema = z
