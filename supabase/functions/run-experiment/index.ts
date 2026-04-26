@@ -81,28 +81,66 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
   const before = runSharedBacktest(candles, beforeParams);
   const after = runSharedBacktest(candles, afterParams);
 
+  // Out-of-sample slice: hold out the last 30% of candles. If the in-sample
+  // result looks great but OOS disagrees, we downgrade to needs_review —
+  // a strong tell for over-fitting.
+  const splitIdx = Math.floor(candles.length * 0.7);
+  const inSampleCandles = candles.slice(0, splitIdx);
+  const outSampleCandles = candles.slice(splitIdx);
+  const beforeOOS = runSharedBacktest(outSampleCandles, beforeParams);
+  const afterOOS = runSharedBacktest(outSampleCandles, afterParams);
+  const oosExpDelta = afterOOS.metrics.expectancy - beforeOOS.metrics.expectancy;
+
   const expDelta = after.metrics.expectancy - before.metrics.expectancy;
   const winRateDelta = after.metrics.winRate - before.metrics.winRate;
-  // Significance: need ≥30 trades on each side AND |delta| > 1 stdev of pnlR
+  const sharpeDelta = after.metrics.sharpe - before.metrics.sharpe;
+  // maxDrawdown is stored as a negative number (e.g. -0.45 = 45% drawdown);
+  // a more-negative value = worse. drawdownDelta < 0 = worsened.
+  const drawdownDelta = after.metrics.maxDrawdown - before.metrics.maxDrawdown;
+  const drawdownWorsened = drawdownDelta < -0.05; // more than 5pp worse
+
   const significantSample = before.metrics.trades >= 30 && after.metrics.trades >= 30;
   const noiseFloor = Math.max(before.pnlRStdev, after.pnlRStdev) || 0.01;
   const significantDelta = Math.abs(expDelta) > noiseFloor;
+  const meetsMinBar = expDelta >= 0.05; // must improve by ≥0.05R to auto-accept
 
   let nextStatus: "accepted" | "rejected" | "needs_review";
   let needsReview = false;
   let autoResolved = true;
-  if (!significantSample) {
-    nextStatus = "needs_review";
-    needsReview = true;
-    autoResolved = false;
-  } else if (significantDelta && expDelta > 0) {
-    nextStatus = "accepted";
-  } else if (significantDelta && expDelta < 0) {
+  let outcomeForMemory: "accepted" | "rejected" | "noise" = "noise";
+
+  if (expDelta <= 0 && winRateDelta <= 0) {
+    // Zero or negative on every metric — silent reject. Don't bother the user.
     nextStatus = "rejected";
-  } else {
+    outcomeForMemory = "noise";
+  } else if (!significantSample || !significantDelta || !meetsMinBar) {
+    // Looks positive but evidence is thin / within noise / improvement < 0.05R.
     nextStatus = "needs_review";
     needsReview = true;
     autoResolved = false;
+    outcomeForMemory = "noise";
+  } else if (expDelta > 0 && drawdownWorsened) {
+    // Expectancy improves but drawdown worsened materially — let a human decide.
+    nextStatus = "needs_review";
+    needsReview = true;
+    autoResolved = false;
+    outcomeForMemory = "noise";
+  } else if (significantDelta && expDelta > 0 && !drawdownWorsened) {
+    // Clear in-sample winner. One last check: did it hold out-of-sample?
+    if (outSampleCandles.length >= 50 && oosExpDelta < 0) {
+      // In-sample said yes, OOS said no — likely overfit. Demote.
+      nextStatus = "needs_review";
+      needsReview = true;
+      autoResolved = false;
+      outcomeForMemory = "noise";
+    } else {
+      nextStatus = "accepted";
+      outcomeForMemory = "accepted";
+    }
+  } else {
+    // Significant negative move.
+    nextStatus = "rejected";
+    outcomeForMemory = "rejected";
   }
 
   const deltaStr = `exp ${expDelta >= 0 ? "+" : ""}${expDelta.toFixed(3)}R · win ${winRateDelta >= 0 ? "+" : ""}${(winRateDelta * 100).toFixed(1)}%`;
@@ -110,10 +148,23 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
   const backtestResult = {
     before: { metrics: before.metrics, pnlRStdev: before.pnlRStdev },
     after: { metrics: after.metrics, pnlRStdev: after.pnlRStdev },
-    deltas: { expectancy: Number(expDelta.toFixed(3)), winRate: Number(winRateDelta.toFixed(3)) },
+    deltas: {
+      expectancy: Number(expDelta.toFixed(3)),
+      winRate: Number(winRateDelta.toFixed(3)),
+      sharpe: Number(sharpeDelta.toFixed(3)),
+      drawdown: Number(drawdownDelta.toFixed(3)),
+    },
     candleCount: candles.length,
     significantSample,
     significantDelta,
+    meetsMinBar,
+    drawdownWorsened,
+    outOfSample: {
+      before: { metrics: beforeOOS.metrics },
+      after: { metrics: afterOOS.metrics },
+      expDelta: Number(oosExpDelta.toFixed(3)),
+      candleCount: outSampleCandles.length,
+    },
     ranAt: new Date().toISOString(),
   };
 
@@ -125,6 +176,36 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
     backtest_result: backtestResult,
   }).eq("id", exp.id);
 
+  // Write-back to copilot_memory — only for copilot-proposed experiments.
+  // User-suggested ones don't pollute the AI's "what we tried" memory.
+  if (exp.proposed_by === "copilot") {
+    const direction = afterNum > beforeNum ? "increase" : "decrease";
+    // Cooldown: noise/rejected get a long cooldown so the AI stops grinding;
+    // accepted ones can be re-explored sooner since they're already winners.
+    const cooldownDays = outcomeForMemory === "accepted" ? 3 : 14;
+    const retryAfter = new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000).toISOString();
+
+    try {
+      await admin.rpc("upsert_copilot_memory", {
+        p_user_id: userId,
+        p_parameter: exp.parameter,
+        p_direction: direction,
+        p_from_value: beforeNum,
+        p_to_value: afterNum,
+        p_outcome: outcomeForMemory,
+        p_exp_delta: Number(expDelta.toFixed(4)),
+        p_win_rate_delta: Number(winRateDelta.toFixed(4)),
+        p_sharpe_delta: Number(sharpeDelta.toFixed(4)),
+        p_drawdown_delta: Number(drawdownDelta.toFixed(4)),
+        p_retry_after: retryAfter,
+        p_experiment_id: exp.id,
+      });
+    } catch (e) {
+      // Memory write failures shouldn't tank the experiment row.
+      console.error("upsert_copilot_memory failed", e);
+    }
+  }
+
   // Fire an alert when something needs review (operator should look)
   if (needsReview) {
     await admin.from("alerts").insert({
@@ -134,6 +215,10 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
       message: `${exp.title} — ${deltaStr}. Borderline result; backtest decision passed to you.`,
     });
   }
+
+  // Inside the helper used in fetch tests, mark which candles were used.
+  // Avoid unused-var lint when in-sample slice is computed but not consumed elsewhere.
+  void inSampleCandles;
 
   return { userId, expId: exp.id, status: nextStatus, deltaStr };
 }

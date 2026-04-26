@@ -117,15 +117,45 @@ export interface ExperimentBacktestSide {
   metrics: StrategyMetrics;
   pnlRStdev: number;
 }
+/** Out-of-sample slice — last 30% of candles, run after the full backtest. */
+export interface ExperimentBacktestOutOfSample {
+  before: { metrics: StrategyMetrics };
+  after: { metrics: StrategyMetrics };
+  expDelta: number;
+  candleCount: number;
+}
 export interface ExperimentBacktestResult {
   before: ExperimentBacktestSide;
   after: ExperimentBacktestSide;
-  deltas: { expectancy: number; winRate: number };
+  deltas: { expectancy: number; winRate: number; sharpe?: number; drawdown?: number };
   candleCount: number;
   significantSample: boolean;
   significantDelta: boolean;
+  /** Improvement passes the 0.05R minimum bar. */
+  meetsMinBar?: boolean;
+  /** Drawdown got worse by >5pp. */
+  drawdownWorsened?: boolean;
+  outOfSample?: ExperimentBacktestOutOfSample;
   ranAt: string;
   error?: string;
+}
+
+/** Persistent record of what the copilot has tried, mirroring `copilot_memory`. */
+export interface CopilotMemoryRow {
+  id: string;
+  parameter: string;
+  direction: "increase" | "decrease";
+  fromValue: number;
+  toValue: number;
+  outcome: "accepted" | "rejected" | "noise";
+  expDelta: number | null;
+  winRateDelta: number | null;
+  sharpeDelta: number | null;
+  drawdownDelta: number | null;
+  attemptCount: number;
+  lastTriedAt: string;
+  retryAfter: string | null;
+  experimentId: string | null;
 }
 
 export interface SystemState {
@@ -224,6 +254,12 @@ export interface StrategyMetrics {
   maxDrawdown: number;
   sharpe: number;
   trades: number;
+  /** Gross profit / gross loss (in R). 999 sentinel = no losses. */
+  profitFactor?: number;
+  /** Average winning trade in R. */
+  avgWin?: number;
+  /** Average losing trade in R (positive number). */
+  avgLoss?: number;
 }
 
 export interface StrategyVersion {

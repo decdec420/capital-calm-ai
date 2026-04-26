@@ -10,6 +10,12 @@ export interface SharedMetrics {
   maxDrawdown: number;
   sharpe: number;
   trades: number;
+  /** Gross profit / gross loss in R. 999 sentinel when there are no losses. */
+  profitFactor: number;
+  /** Average winning trade in R. */
+  avgWin: number;
+  /** Average losing trade magnitude in R (positive number). */
+  avgLoss: number;
 }
 export interface SharedTrade {
   side: "long" | "short";
@@ -88,7 +94,7 @@ function atr(candles: SharedCandle[], period: number): number[] {
 
 export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]): SharedBacktestResult {
   const empty: SharedBacktestResult = {
-    metrics: { expectancy: 0, winRate: 0, maxDrawdown: 0, sharpe: 0, trades: 0 },
+    metrics: { expectancy: 0, winRate: 0, maxDrawdown: 0, sharpe: 0, trades: 0, profitFactor: 0, avgWin: 0, avgLoss: 0 },
     trades: [],
     candleCount: candles.length,
     equityCurve: [],
@@ -176,6 +182,16 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
   const stdev = Math.sqrt(variance);
   const sharpe = stdev > 0 ? (mean / stdev) * Math.sqrt(trades.length) : 0;
 
+  // Profit factor + average win/loss — useful tells for over-fit results
+  // (huge expectancy from one big winner shows up as profitFactor close to 1).
+  const winnersArr = trades.filter((t) => t.pnlR > 0);
+  const losersArr = trades.filter((t) => t.pnlR < 0);
+  const grossProfit = winnersArr.reduce((s, t) => s + t.pnlR, 0);
+  const grossLoss = Math.abs(losersArr.reduce((s, t) => s + t.pnlR, 0));
+  const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 999 : 1) : grossProfit / grossLoss;
+  const avgWin = winnersArr.length > 0 ? grossProfit / winnersArr.length : 0;
+  const avgLoss = losersArr.length > 0 ? grossLoss / losersArr.length : 0;
+
   return {
     metrics: {
       expectancy: Number(expectancy.toFixed(3)),
@@ -183,6 +199,9 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
       maxDrawdown: Number(maxDrawdown.toFixed(3)),
       sharpe: Number(sharpe.toFixed(3)),
       trades: trades.length,
+      profitFactor: Number(profitFactor.toFixed(2)),
+      avgWin: Number(avgWin.toFixed(3)),
+      avgLoss: Number(avgLoss.toFixed(3)),
     },
     trades,
     candleCount: candles.length,

@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Experiment, ExperimentStatus, ExperimentBacktestResult } from "@/lib/domain-types";
+import type {
+  Experiment,
+  ExperimentStatus,
+  ExperimentBacktestResult,
+  CopilotMemoryRow,
+} from "@/lib/domain-types";
 
 function mapRow(r: any): Experiment {
   return {
@@ -23,6 +28,25 @@ function mapRow(r: any): Experiment {
   };
 }
 
+function mapMemory(r: any): CopilotMemoryRow {
+  return {
+    id: r.id,
+    parameter: r.parameter,
+    direction: r.direction,
+    fromValue: Number(r.from_value),
+    toValue: Number(r.to_value),
+    outcome: r.outcome,
+    expDelta: r.exp_delta != null ? Number(r.exp_delta) : null,
+    winRateDelta: r.win_rate_delta != null ? Number(r.win_rate_delta) : null,
+    sharpeDelta: r.sharpe_delta != null ? Number(r.sharpe_delta) : null,
+    drawdownDelta: r.drawdown_delta != null ? Number(r.drawdown_delta) : null,
+    attemptCount: Number(r.attempt_count ?? 1),
+    lastTriedAt: r.last_tried_at,
+    retryAfter: r.retry_after,
+    experimentId: r.experiment_id,
+  };
+}
+
 export interface NewExperimentInput {
   title: string;
   parameter: string;
@@ -36,16 +60,27 @@ export interface NewExperimentInput {
 export function useExperiments() {
   const { user } = useAuth();
   const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [memory, setMemory] = useState<CopilotMemoryRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refetch = async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from("experiments")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-    setExperiments((data ?? []).map(mapRow));
+    const [{ data: expData }, { data: memData }] = await Promise.all([
+      supabase
+        .from("experiments")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      // copilot_memory rows live alongside experiments and drive the "what
+      // have we already learned" panel + the AI proposer's cooldown logic.
+      supabase
+        .from("copilot_memory" as any)
+        .select("*")
+        .eq("user_id", user.id)
+        .order("last_tried_at", { ascending: false }),
+    ]);
+    setExperiments((expData ?? []).map(mapRow));
+    setMemory(((memData ?? []) as any[]).map(mapMemory));
     setLoading(false);
   };
 
@@ -91,6 +126,19 @@ export function useExperiments() {
     await refetch();
   };
 
+  /** Wipe memory for one parameter — useful after a strategy rewrite when
+   * what we "learned" about ema_fast no longer applies. */
+  const clearMemory = async (parameter: string) => {
+    if (!user) return;
+    const { error } = await supabase
+      .from("copilot_memory" as any)
+      .delete()
+      .eq("user_id", user.id)
+      .eq("parameter", parameter);
+    if (error) throw error;
+    await refetch();
+  };
+
   // Promote an accepted experiment into a new candidate strategy version that
   // copies the approved strategy's params and overrides the tested knob.
   const promoteToStrategy = async (id: string) => {
@@ -99,7 +147,6 @@ export function useExperiments() {
     if (!exp) throw new Error("Experiment not found");
     if (exp.status !== "accepted") throw new Error("Only accepted experiments can be promoted");
 
-    // Find approved strategy as the base
     const { data: base } = await supabase
       .from("strategies")
       .select("name,version,params,description")
@@ -158,5 +205,21 @@ export function useExperiments() {
     [experiments],
   );
 
-  return { experiments, loading, create, setStatus, remove, refetch, promoteToStrategy, counts, needsReview, inFlight, accepted, recentlyAutoResolved };
+  return {
+    experiments,
+    loading,
+    create,
+    setStatus,
+    remove,
+    refetch,
+    promoteToStrategy,
+    counts,
+    needsReview,
+    inFlight,
+    accepted,
+    recentlyAutoResolved,
+    memory,
+    memoryCount: memory.length,
+    clearMemory,
+  };
 }

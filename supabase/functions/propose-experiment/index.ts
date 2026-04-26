@@ -31,17 +31,33 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
     .in("status", ["queued", "running"]);
   if ((queuedCount ?? 0) >= 2) return { userId, skipped: "already_busy" };
 
-  // 2. Context — approved strategy + recent trades + recent gate reasons
-  const [{ data: strategy }, { data: trades }, { data: sys }] = await Promise.all([
-    admin.from("strategies").select("id,version,name,params,metrics").eq("user_id", userId).eq("status", "approved").order("updated_at", { ascending: false }).maybeSingle(),
-    admin.from("trades").select("symbol,side,outcome,pnl_pct,reason_tags,closed_at").eq("user_id", userId).eq("status", "closed").order("closed_at", { ascending: false }).limit(50),
+  // 2. Context — strategy + trades + gate reasons + PERSISTENT MEMORY.
+  // Memory is the source of truth for "what have we already tried" so the
+  // copilot stops grinding the same parameter to dust.
+  const [{ data: strategy }, { data: trades }, { data: sys }, { data: memory }] = await Promise.all([
+    admin.from("strategies").select("id,version,name,params,metrics")
+      .eq("user_id", userId).eq("status", "approved")
+      .order("updated_at", { ascending: false }).maybeSingle(),
+    admin.from("trades").select("symbol,side,outcome,pnl_pct,reason_tags,closed_at")
+      .eq("user_id", userId).eq("status", "closed")
+      .order("closed_at", { ascending: false }).limit(50),
     admin.from("system_state").select("last_engine_snapshot").eq("user_id", userId).maybeSingle(),
+    admin.from("copilot_memory").select("*").eq("user_id", userId),
   ]);
   if (!strategy) return { userId, skipped: "no_approved_strategy" };
 
   const params: Array<{ key: string; value: number | string | boolean }> = (strategy.params ?? []) as any;
   const tweakable = params.filter((p) => TWEAKABLE.includes(p.key as any) && typeof p.value === "number");
   if (tweakable.length === 0) return { userId, skipped: "no_tweakable_params" };
+
+  // Hard-block parameter+direction combos still on cooldown — these never
+  // even get shown to the AI as candidates.
+  const now = new Date();
+  const onCooldown = new Set(
+    (memory ?? [])
+      .filter((m: any) => m.retry_after && new Date(m.retry_after) > now)
+      .map((m: any) => `${m.parameter}:${m.direction}`)
+  );
 
   const recentGates = ((sys?.last_engine_snapshot as any)?.gateReasons ?? [])
     .slice(0, 5)
@@ -50,11 +66,35 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   const wins = (trades ?? []).filter((t: any) => t.outcome === "win").length;
   const losses = (trades ?? []).filter((t: any) => t.outcome === "loss").length;
 
+  const whatWeKnow = (memory ?? []).map((m: any) => ({
+    parameter: m.parameter,
+    direction: m.direction,
+    triedTimes: m.attempt_count,
+    lastOutcome: m.outcome,
+    expDelta: m.exp_delta,
+    onCooldownUntil: m.retry_after?.slice(0, 10) ?? null,
+  }));
+
   const contextPacket = {
     strategy: { name: strategy.name, version: strategy.version, currentParams: tweakable },
-    recentTrades: { total: trades?.length ?? 0, wins, losses, lastFew: (trades ?? []).slice(0, 8).map((t: any) => ({ symbol: t.symbol, side: t.side, outcome: t.outcome, pnlPct: t.pnl_pct, tags: t.reason_tags })) },
+    recentTrades: {
+      total: trades?.length ?? 0, wins, losses,
+      lastFew: (trades ?? []).slice(0, 8).map((t: any) => ({
+        symbol: t.symbol, side: t.side, outcome: t.outcome, pnlPct: t.pnl_pct, tags: t.reason_tags,
+      })),
+    },
     recentGateReasons: recentGates,
-    instructions: "Pick exactly ONE parameter from currentParams to test. Propose a small adjustment (10-30% delta typically). Be conservative — we'd rather test small tweaks well than swing wildly.",
+    persistentMemory: {
+      summary: whatWeKnow,
+      onCooldown: Array.from(onCooldown),
+      instructions: [
+        "persistentMemory.onCooldown lists parameter:direction combos you MUST NOT propose — they are on cooldown because they showed no improvement or were rejected.",
+        "persistentMemory.summary shows what each direction has already produced. Do NOT re-propose a direction that already showed noise (expDelta near 0) or rejection.",
+        "Actively diversify: if stop_atr_mult has been tried many times, explore ema_fast, ema_slow, rsi_period, or tp_r_mult instead.",
+        "If a parameter has been tried in both directions and both failed, leave it alone entirely this round.",
+      ].join(" "),
+    },
+    proposalInstructions: "Pick exactly ONE parameter from currentParams that is NOT on cooldown and has NOT already been exhausted. Propose a meaningful adjustment (10-30% change). Hypothesis must be specific and grounded in recent trades or gate reasons.",
   };
 
   // 3. AI tool call

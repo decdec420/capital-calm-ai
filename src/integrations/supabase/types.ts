@@ -184,6 +184,66 @@ export type Database = {
           },
         ]
       }
+      copilot_memory: {
+        Row: {
+          attempt_count: number
+          created_at: string
+          direction: string
+          drawdown_delta: number | null
+          exp_delta: number | null
+          experiment_id: string | null
+          from_value: number
+          id: string
+          last_tried_at: string
+          outcome: string
+          parameter: string
+          retry_after: string | null
+          sharpe_delta: number | null
+          to_value: number
+          updated_at: string
+          user_id: string
+          win_rate_delta: number | null
+        }
+        Insert: {
+          attempt_count?: number
+          created_at?: string
+          direction: string
+          drawdown_delta?: number | null
+          exp_delta?: number | null
+          experiment_id?: string | null
+          from_value: number
+          id?: string
+          last_tried_at?: string
+          outcome: string
+          parameter: string
+          retry_after?: string | null
+          sharpe_delta?: number | null
+          to_value: number
+          updated_at?: string
+          user_id: string
+          win_rate_delta?: number | null
+        }
+        Update: {
+          attempt_count?: number
+          created_at?: string
+          direction?: string
+          drawdown_delta?: number | null
+          exp_delta?: number | null
+          experiment_id?: string | null
+          from_value?: number
+          id?: string
+          last_tried_at?: string
+          outcome?: string
+          parameter?: string
+          retry_after?: string | null
+          sharpe_delta?: number | null
+          to_value?: number
+          updated_at?: string
+          user_id?: string
+          win_rate_delta?: number | null
+        }
+        Relationships: []
+      }
       doctrine_settings: {
         Row: {
           consecutive_loss_limit: number
@@ -952,6 +1012,23 @@ export type Database = {
         Returns: undefined
       }
       realized_pnl_today: { Args: { p_user_id: string }; Returns: number }
+      upsert_copilot_memory: {
+        Args: {
+          p_direction: string
+          p_drawdown_delta: number
+          p_exp_delta: number
+          p_experiment_id?: string
+          p_from_value: number
+          p_outcome: string
+          p_parameter: string
+          p_retry_after: string
+          p_sharpe_delta: number
+          p_to_value: number
+          p_user_id: string
+          p_win_rate_delta: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
