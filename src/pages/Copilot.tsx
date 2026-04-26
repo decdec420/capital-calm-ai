@@ -346,7 +346,7 @@ export default function Copilot() {
       {/* SIGNAL BRIDGE — top of page, above everything else */}
       {activeSignal ? (
         <div className="space-y-2">
-          <SignalCard signal={activeSignal} />
+          <SignalCard signal={activeSignal} busy={busy} onDecide={decide} />
           <div className="flex justify-end">
             <Button
               size="sm"
