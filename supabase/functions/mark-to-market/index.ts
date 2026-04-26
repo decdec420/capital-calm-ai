@@ -80,16 +80,25 @@ function tickerToSyntheticCandle(t: Ticker) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function runMarkToMarket(admin: any) {
+async function runMarkToMarket(
+  admin: any,
+  opts: { userId?: string } = {},
+) {
   const nowIso = new Date().toISOString();
 
-  // 1. Load every open trade across all users (service role — no RLS).
-  const { data: openTrades, error: openErr } = await admin
+  // 1. Load open trades. Cron path (no userId) processes every user globally
+  //    via service role; user-JWT path scopes to the caller so a browser nudge
+  //    never touches another user's positions.
+  let openQuery = admin
     .from("trades")
     .select(
       "id,user_id,symbol,side,size,original_size,entry_price,stop_loss,take_profit,tp1_price,tp1_filled,pnl,current_price,unrealized_pnl,lifecycle_phase,lifecycle_transitions,status,strategy_id,strategy_version,notes",
     )
     .eq("status", "open");
+  if (opts.userId) {
+    openQuery = openQuery.eq("user_id", opts.userId);
+  }
+  const { data: openTrades, error: openErr } = await openQuery;
 
   if (openErr) {
     console.error("mark-to-market: openTrades query failed", openErr);
@@ -414,10 +423,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // In user mode we still call runMarkToMarket with the service role; it'll
-    // process every open trade globally (cheap — the cron should own this).
-    // The browser just uses this to nudge a refresh after manual actions.
-    const result = await runMarkToMarket(admin);
+    // User-JWT mode: scope to the caller's open trades only. Service role is
+    // still used for the writes (RLS-bypass), but we filter by user_id so a
+    // browser nudge never spills into other users' positions.
+    const result = await runMarkToMarket(admin, {
+      userId: userData.user.id,
+    });
     return new Response(
       JSON.stringify({ mode: "user", userId: userData.user.id, ...result }),
       {
