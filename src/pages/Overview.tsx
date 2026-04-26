@@ -36,7 +36,23 @@ import { computeRegime } from "@/lib/regime";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
+import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
 import type { Alert, Regime } from "@/lib/domain-types";
+
+function FreshnessDot({ timestamp }: { timestamp: number | null }) {
+  const label = useRelativeTime(timestamp);
+  const stale = isStale(timestamp);
+  const tone = stale ? "text-status-caution" : "text-muted-foreground";
+  return (
+    <span className={`inline-flex items-center gap-1 font-mono text-[10px] ${tone}`}>
+      <span
+        className={`inline-block rounded-full ${stale ? "bg-status-caution" : "bg-muted-foreground"}`}
+        style={{ width: 5, height: 5 }}
+      />
+      {label}
+    </span>
+  );
+}
 
 export default function Overview() {
   const { data: account, loading: accountLoading } = useAccountState();
