@@ -11,12 +11,12 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 import { AlertTriangle, Compass, Plug } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
-import type { SystemMode } from "@/lib/domain-types";
+
 import { toast } from "sonner";
 
 export default function Settings() {
@@ -45,7 +45,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <SectionHeader eyebrow="Settings" title="Workspace & runtime" description="Manage paper account, mode controls, and runtime config." />
+      <SectionHeader eyebrow="Settings" title="Workspace & runtime" description="Manage paper account, bot controls, and runtime config." />
 
       <Section title="Workspace">
         <ProfileEditor />
@@ -71,33 +71,8 @@ export default function Settings() {
       )}
 
       {system && (
-        <Section title="Mode controls">
+        <Section title="Bot controls">
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Mode</Label>
-              <Select
-                value={system.mode}
-                onValueChange={async (v) => {
-                  try {
-                    await updateSystem({ mode: v as SystemMode });
-                    toast.success(`Mode → ${v}.`);
-                  } catch {
-                    toast.error("Couldn't change mode.");
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="research">Research</SelectItem>
-                  <SelectItem value="paper">Paper</SelectItem>
-                  <SelectItem value="learning">Learning</SelectItem>
-                  <SelectItem value="live" disabled={!system.liveTradingEnabled}>
-                    Live {!system.liveTradingEnabled && "(gated)"}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium text-foreground">Kill-switch engaged</div>

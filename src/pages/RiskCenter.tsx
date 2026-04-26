@@ -217,7 +217,7 @@ export default function RiskCenter() {
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Toggling live mode requires every guardrail to pass and explicit operator confirmation. This control lives in Settings → Mode controls.
+          Toggling live mode requires every guardrail to pass and explicit operator confirmation. This control lives in Settings → Bot controls.
         </p>
       </div>
 

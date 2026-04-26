@@ -449,7 +449,7 @@ function LiveModeDrilldown({ open, onClose, system }: Common) {
       </p>
       <Button variant="outline" size="sm" asChild className="w-full">
         <Link to="/settings" onClick={onClose}>
-          Open Settings → Mode controls <ArrowRight className="h-3.5 w-3.5 ml-1" />
+          Open Settings → Bot controls <ArrowRight className="h-3.5 w-3.5 ml-1" />
         </Link>
       </Button>
     </MetricDrilldownSheet>

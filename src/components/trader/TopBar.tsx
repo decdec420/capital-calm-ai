@@ -1,26 +1,10 @@
-import { ShieldAlert, WifiOff } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusBadge } from "./StatusBadge";
-import { Explain } from "./Explain";
 import { ExplainModeToggle } from "./ExplainModeToggle";
 import { LiveModeIndicator } from "./LiveModeIndicator";
-import type { SystemMode } from "@/lib/domain-types";
 import { useSystemState } from "@/hooks/useSystemState";
-
-const modeTone: Record<SystemMode, "neutral" | "candidate" | "accent" | "blocked"> = {
-  research: "neutral",
-  paper: "candidate",
-  learning: "accent",
-  live: "blocked",
-};
-
-const modeHints: Record<SystemMode, string> = {
-  research: "No orders. Just looking, taking notes, kicking tires.",
-  paper: "Simulated trades against live prices. No real money at risk.",
-  learning: "Bot proposes trades but waits for you to approve each one.",
-  live: "Real money, real orders. All guardrails active. Be sure.",
-};
 
 export function TopBar() {
   const { data: s } = useSystemState();
@@ -32,20 +16,8 @@ export function TopBar() {
 
       {s && (
         <>
-          {/* System mode → settings */}
-          <Explain inline title="System mode" hint={modeHints[s.mode]}>
-            <Link
-              to="/settings"
-              className="rounded-full hover:opacity-80 transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              aria-label={`System mode: ${s.mode}. Open settings.`}
-            >
-              <StatusBadge tone={modeTone[s.mode]} dot pulse={s.mode === "live"}>
-                {s.mode}
-              </StatusBadge>
-            </Link>
-          </Explain>
-
-          {/* Persistent live/paper indicator — always visible, screams when armed. */}
+          {/* Money-mode indicator — driven by the real liveTradingEnabled
+              switch. The only mode that matters: paper or live. */}
           <LiveModeIndicator liveTradingEnabled={s.liveTradingEnabled} />
 
           {/* Bot status → risk center (where kill-switch lives) */}
@@ -61,18 +33,6 @@ export function TopBar() {
             >
               bot {s.bot}
             </StatusBadge>
-          </Link>
-
-          {/* Broker status — until a real broker integration ships, this
-              always reads "Paper Mode" so the UI doesn't lie about a
-              connection that doesn't exist. */}
-          <Link
-            to="/settings"
-            className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-accent outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            aria-label="Paper Mode — no real broker connected. Open settings."
-          >
-            <WifiOff className="h-3.5 w-3.5 text-status-caution" />
-            <span className="tabular">Paper Mode</span>
           </Link>
         </>
       )}
