@@ -167,16 +167,35 @@ export function useExperiments() {
     const baseVersion = base?.version ?? "v1";
     const nextVersion = `${baseVersion}+${exp.parameter}=${exp.after}`;
 
-    const { error } = await supabase.from("strategies").insert({
-      user_id: user.id,
-      name: base?.name ?? "trend-rev",
-      version: nextVersion,
-      status: "candidate",
-      description: `Promoted from experiment: ${exp.title}. ${exp.hypothesis ?? ""}`.trim(),
-      params: nextParams as any,
-      metrics: (exp.backtestResult?.after?.metrics ?? {}) as any,
-    });
+    // Insert the new candidate strategy and grab its id so we can stamp it
+    // back on the experiment — that's how we know "this one already shipped"
+    // and stop showing it in the "ready to ship" pile.
+    const { data: inserted, error } = await supabase
+      .from("strategies")
+      .insert({
+        user_id: user.id,
+        name: base?.name ?? "trend-rev",
+        version: nextVersion,
+        status: "candidate",
+        description: `Promoted from experiment: ${exp.title}. ${exp.hypothesis ?? ""}`.trim(),
+        params: nextParams as any,
+        metrics: (exp.backtestResult?.after?.metrics ?? {}) as any,
+      })
+      .select("id")
+      .single();
     if (error) throw error;
+
+    // Mark the experiment as promoted by linking it to the new strategy. The
+    // experiment itself stays accepted (history), but the UI now treats it as
+    // shipped instead of "ready to ship".
+    if (inserted?.id) {
+      await supabase
+        .from("experiments")
+        .update({ strategy_id: inserted.id })
+        .eq("id", id)
+        .eq("user_id", user.id);
+    }
+    await refetch();
     return nextVersion;
   };
 
@@ -196,8 +215,14 @@ export function useExperiments() {
 
   const needsReview = useMemo(() => experiments.filter((e) => e.needsReview), [experiments]);
   const inFlight = useMemo(() => experiments.filter((e) => e.status === "queued" || e.status === "running"), [experiments]);
+  // "Ready to ship" = accepted but not yet promoted into a candidate strategy.
+  // Once promoted (strategyId set), it moves to the Promoted section instead.
   const accepted = useMemo(
-    () => experiments.filter((e) => e.status === "accepted").slice(0, 20),
+    () => experiments.filter((e) => e.status === "accepted" && !e.strategyId).slice(0, 20),
+    [experiments],
+  );
+  const promoted = useMemo(
+    () => experiments.filter((e) => !!e.strategyId).slice(0, 20),
     [experiments],
   );
   const recentlyAutoResolved = useMemo(
@@ -217,6 +242,7 @@ export function useExperiments() {
     needsReview,
     inFlight,
     accepted,
+    promoted,
     recentlyAutoResolved,
     memory,
     memoryCount: memory.length,

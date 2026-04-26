@@ -31,7 +31,7 @@ const memOutcomeTone: Record<CopilotMemoryRow["outcome"], "safe" | "blocked" | "
 export default function Learning() {
   const {
     loading, create, setStatus, remove, promoteToStrategy,
-    counts, needsReview, inFlight, accepted, recentlyAutoResolved,
+    counts, needsReview, inFlight, accepted, promoted, recentlyAutoResolved,
     memory, memoryCount, clearMemory,
   } = useExperiments();
   const [newOpen, setNewOpen] = useState(false);
@@ -224,6 +224,26 @@ export default function Learning() {
         </div>
       )}
 
+      {/* PROMOTED — already shipped as a candidate strategy version */}
+      {promoted.length > 0 && (
+        <div className="panel">
+          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wider text-primary font-semibold">Promoted to candidate</span>
+              <StatusBadge tone="accent" size="sm">{promoted.length}</StatusBadge>
+            </div>
+            <span className="text-xs text-muted-foreground">Live as a candidate strategy version. Track it on Strategy Lab.</span>
+          </div>
+          <div className="divide-y divide-border">
+            {promoted.map((e) => (
+              <ExperimentRow key={e.id} exp={e} isPromoted
+                onRemove={() => remove(e.id).then(() => toast.success("Removed."))}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* AUTO-RESOLVED */}
       <Collapsible open={showResolved} onOpenChange={setShowResolved}>
         <div className="panel">
@@ -301,6 +321,7 @@ function ExperimentRow({
   onPromote,
   onRemove,
   showChecklist,
+  isPromoted,
 }: {
   exp: Experiment;
   onAccept?: () => void;
@@ -308,6 +329,7 @@ function ExperimentRow({
   onPromote?: () => void;
   onRemove?: () => void;
   showChecklist?: boolean;
+  isPromoted?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const isCopilot = exp.proposedBy === "copilot";
@@ -317,6 +339,11 @@ function ExperimentRow({
     <div className="px-4 py-3 group">
       <div className="flex items-center gap-3 flex-wrap">
         <StatusBadge tone={statusTone[exp.status]} size="sm" dot>{exp.status.replace("_", " ")}</StatusBadge>
+        {isPromoted && (
+          <StatusBadge tone="accent" size="sm">
+            <Rocket className="h-2.5 w-2.5" /> promoted
+          </StatusBadge>
+        )}
         {isCopilot && (
           <StatusBadge tone="accent" size="sm">
             <Sparkles className="h-2.5 w-2.5" /> copilot
