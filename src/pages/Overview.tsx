@@ -98,6 +98,8 @@ export default function Overview() {
     return c;
   }, [alerts]);
 
+  const lastCandleTime = candles[candles.length - 1]?.t != null ? candles[candles.length - 1].t * 1000 : null;
+
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
   const floorDistance = account ? ((account.equity - account.balanceFloor) / account.equity) * 100 : 0;
