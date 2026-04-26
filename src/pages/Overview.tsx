@@ -215,8 +215,11 @@ export default function Overview() {
         <div className="flex-1" />
         <div className="text-right">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC-USD live</div>
-          <div className="text-sm font-medium text-foreground tabular">
-            ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-sm font-medium text-foreground tabular">
+              ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </span>
+            <FreshnessDot timestamp={lastCandleTime} />
           </div>
           <div className={`text-[11px] tabular ${pctChange >= 0 ? "text-status-safe" : "text-status-blocked"}`}>
             {pctChange >= 0 ? "+" : ""}
