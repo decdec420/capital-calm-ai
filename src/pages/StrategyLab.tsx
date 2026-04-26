@@ -14,6 +14,7 @@ import type { StrategyParam, StrategyStatus, StrategyVersion } from "@/lib/domai
 import { ArrowRight, Beaker, Check, FlaskConical, Loader2, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
+import { ParamEditor } from "@/components/trader/ParamEditor";
 
 export default function StrategyLab() {
   const { strategies, loading, create, update, remove } = useStrategies();
@@ -306,9 +307,7 @@ function StrategyDialog({
   const [version, setVersion] = useState(strategy?.version ?? "v1.0-cand");
   const [status, setStatus] = useState<StrategyStatus>(strategy?.status ?? "candidate");
   const [description, setDescription] = useState(strategy?.description ?? "");
-  const [paramsText, setParamsText] = useState(
-    strategy ? JSON.stringify(strategy.params, null, 2) : `[\n  {"key":"ma_fast","value":9},\n  {"key":"stop_pct","value":0.7,"unit":"%"}\n]`,
-  );
+  const [params, setParams] = useState<StrategyParam[]>(strategy?.params ?? []);
   const [metricsText, setMetricsText] = useState(
     strategy ? JSON.stringify(strategy.metrics, null, 2) : `{\n  "expectancy": 0,\n  "winRate": 0,\n  "maxDrawdown": 0,\n  "sharpe": 0,\n  "trades": 0\n}`,
   );
@@ -319,19 +318,13 @@ function StrategyDialog({
       setVersion(strategy.version);
       setStatus(strategy.status);
       setDescription(strategy.description);
-      setParamsText(JSON.stringify(strategy.params, null, 2));
+      setParams(strategy.params);
       setMetricsText(JSON.stringify(strategy.metrics, null, 2));
     }
   }, [strategy]);
 
   const submit = () => {
-    let params: StrategyParam[];
     let metrics: any;
-    try {
-      params = JSON.parse(paramsText);
-    } catch {
-      return toast.error("Params is not valid JSON.");
-    }
     try {
       metrics = JSON.parse(metricsText);
     } catch {
@@ -374,10 +367,10 @@ function StrategyDialog({
             <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Description</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Params (JSON)</Label>
-              <Textarea value={paramsText} onChange={(e) => setParamsText(e.target.value)} rows={8} className="font-mono text-xs" />
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Params</Label>
+              <ParamEditor value={params} onChange={setParams} />
             </div>
             <div className="space-y-1.5">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Metrics (JSON)</Label>
