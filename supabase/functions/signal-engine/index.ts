@@ -125,6 +125,16 @@ async function decideForSymbol(opts: {
   // deno-lint-ignore no-explicit-any
   contextPacket: any;
   LOVABLE_API_KEY: string;
+  /** Live strategy parameters that shape the prompt. The AI is told the
+   * stop band and TP-R multiple to use so changing the approved strategy
+   * actually changes how live trades get sized — not just the backtest. */
+  stratParams: {
+    emaFast: number;
+    emaSlow: number;
+    rsiPeriod: number;
+    stopAtrMult: number;
+    tpRMult: number;
+  };
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -140,7 +150,17 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY } = opts;
+  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY, stratParams } = opts;
+
+  // Translate stop_atr_mult into an approximate price-percent band so the
+  // AI has a concrete target. This is a heuristic — final stop is hard
+  // computed in Stage 4 from `regime.atrPct * stopAtrMult` — but the
+  // prompt needs *some* concrete number to anchor on.
+  const stopAtrMult = stratParams.stopAtrMult;
+  const tpRMult = stratParams.tpRMult;
+  // Rough conversion: an ATR-multiple of 1.5 on hourly BTC ≈ 1.0–1.5%.
+  const stopPctLow = Math.max(0.4, stopAtrMult * 0.7).toFixed(1);
+  const stopPctHigh = Math.max(0.6, stopAtrMult * 1.1).toFixed(1);
 
   const systemPrompt = `You are the Trader OS Signal Engine for ${symbol}.
 Disciplined, conservative, risk-first, compounding-focused. A SKIP is data, not failure.
@@ -153,13 +173,19 @@ PROPOSE_TRADE only when ALL are true:
 - no guardrail blocked or above 0.85 utilization
 - For LONGS: strongly prefer pullback==true (RSI dipped <45 then curled up while slow EMA still rising). A clean pullback is the highest-quality buy.
 
+STRATEGY PARAMETERS (from the live approved strategy):
+- EMA fast: ${stratParams.emaFast} · EMA slow: ${stratParams.emaSlow} · RSI period: ${stratParams.rsiPeriod}
+- stop_atr_mult: ${stopAtrMult} → place proposed_stop ~${stopPctLow}–${stopPctHigh}% from entry
+- tp_r_mult: ${tpRMult} → proposed_target should be ${tpRMult}R from entry (TP1 = 1R)
+These are the live knobs. If the strategy widens stops, your proposed_stop must reflect that.
+
 PATTERN MEMORY: review patternMemory in context. If a symbol or regime has been losing recently, raise your bar. If it has been winning, you may be slightly more aggressive on size (still capped by doctrine at $${MAX_ORDER_USD}/order).
 
 SIZING (compounding-friendly, survival-first):
 - size_pct: 0.10–0.25 of equity, scaled by confidence and pullback quality
-- proposed_stop: ~1.2–1.8% from entry
+- proposed_stop: ~${stopPctLow}–${stopPctHigh}% from entry (per stop_atr_mult above)
 - proposed_tp1: 1R from entry — half closes here, stop moves to breakeven
-- proposed_target (TP2): 2R from entry — runner exits here
+- proposed_target (TP2): ${tpRMult}R from entry — runner exits here
 
 Your numbers will be hard-clamped by the doctrine ($${MAX_ORDER_USD} max notional per order). Propose honestly.
 
