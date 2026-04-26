@@ -14,6 +14,7 @@ export function AutonomyToggle() {
   const { data: system, update } = useSystemState();
   const [busy, setBusy] = useState(false);
   const current = system?.autonomyLevel ?? "manual";
+  const isLive = system?.liveTradingEnabled === true;
 
   const setLevel = async (level: AutonomyLevel) => {
     if (level === current || busy) return;
