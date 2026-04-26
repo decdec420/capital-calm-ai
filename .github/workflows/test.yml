@@ -1,0 +1,44 @@
+name: test
+
+# Runs on every PR targeting main and on direct pushes to main.
+# Catches broken tests + type errors at PR-time so they can't slip
+# through the way PR #5's broken assertions did (CodeRabbit / Codex
+# review the diff, but neither runs vitest).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# If a new commit is pushed to the same PR, cancel the in-flight run.
+# Saves CI minutes and gives the latest commit's status, not a stale one.
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.38
+
+      # --ignore-scripts skips esbuild's postinstall version-validator,
+      # which is fragile across Node versions. The actual binaries are
+      # still downloaded; we just skip the validator that compares them.
+      - name: Install dependencies
+        run: bun install --ignore-scripts --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
