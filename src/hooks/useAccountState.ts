@@ -91,5 +91,5 @@ export function useAccountState() {
     await refetch();
   };
 
-  return { data, loading, error, refetch, update };
+  return { data, lastUpdatedAt, loading, error, refetch, update };
 }
