@@ -75,11 +75,13 @@ export function useStrategies() {
       user_id: user.id,
       name: input.name,
       version: input.version,
+      display_name: input.displayName ?? null,
+      friendly_summary: input.friendlySummary ?? null,
       status: input.status ?? "candidate",
       description: input.description ?? "",
       params: (input.params ?? []) as any,
       metrics: (input.metrics ?? {}) as any,
-    });
+    } as any);
     if (error) throw error;
     await refetch();
   };
@@ -89,6 +91,8 @@ export function useStrategies() {
     const dbPatch: any = {};
     if (patch.name) dbPatch.name = patch.name;
     if (patch.version) dbPatch.version = patch.version;
+    if (patch.displayName !== undefined) dbPatch.display_name = patch.displayName;
+    if (patch.friendlySummary !== undefined) dbPatch.friendly_summary = patch.friendlySummary;
     if (patch.status) dbPatch.status = patch.status;
     if (patch.description !== undefined) dbPatch.description = patch.description;
     if (patch.params) dbPatch.params = patch.params;
