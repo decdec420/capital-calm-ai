@@ -39,7 +39,7 @@ import { Brain } from "lucide-react";
 import type { Alert, Regime } from "@/lib/domain-types";
 
 export default function Overview() {
-  const { data: account } = useAccountState();
+  const { data: account, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
   const { open, closed } = useTrades();
   const { alerts, dismiss } = useAlerts();
