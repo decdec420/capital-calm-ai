@@ -27,6 +27,8 @@ export function AppLayout() {
         </div>
         {/* Always-visible kill switch — reachable in <2s from any page. */}
         <FloatingKillSwitch />
+        {/* Global keyboard shortcuts (?, k). */}
+        <KeyboardShortcutsOverlay />
       </div>
     </SidebarProvider>
   );
