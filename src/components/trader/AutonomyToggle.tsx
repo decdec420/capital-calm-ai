@@ -35,7 +35,13 @@ export function AutonomyToggle() {
     <div className="panel p-4 space-y-3">
       <div className="flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Autonomy</span>
-        <span className="text-[10px] text-muted-foreground">paper-only until live armed</span>
+        {isLive ? (
+          <span className="text-[10px] uppercase tracking-wider font-semibold text-status-blocked">
+            LIVE — real money
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">paper-only until live armed</span>
+        )}
       </div>
       <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-md border border-border">
         {LEVELS.map((l) => (
