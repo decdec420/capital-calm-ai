@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Sparkles, Calculator } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface AIInsightPanelProps {
   title: string;
