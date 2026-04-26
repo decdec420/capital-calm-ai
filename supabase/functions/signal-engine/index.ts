@@ -677,6 +677,7 @@ async function runTickForUser(
     regime: winner.regime,
     contextPacket,
     LOVABLE_API_KEY,
+    stratParams: liveParams,
   });
 
   if ("error" in aiResult) {
