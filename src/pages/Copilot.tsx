@@ -298,10 +298,7 @@ export default function Copilot() {
         }
       />
 
-      {/* MULTI-SYMBOL WATCHLIST — what the engine is hunting across */}
-      <MultiSymbolStrip />
-
-      {/* SIGNAL BRIDGE — top of page */}
+      {/* SIGNAL BRIDGE — top of page, above everything else */}
       {activeSignal ? (
         <div className="space-y-2">
           <SignalCard signal={activeSignal} />
@@ -329,8 +326,9 @@ export default function Copilot() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* CONVERSATION SIDEBAR — your thread history, persistent across refreshes */}
-        <div className="lg:col-span-1 lg:row-span-2" style={{ minHeight: "55vh" }}>
+        {/* LEFT COLUMN — multi-symbol watchlist + conversation history */}
+        <div className="lg:col-span-1 lg:row-span-2 space-y-3" style={{ minHeight: "55vh" }}>
+          <MultiSymbolStrip />
           <ConversationSidebar
             conversations={conversations}
             activeId={activeId}
