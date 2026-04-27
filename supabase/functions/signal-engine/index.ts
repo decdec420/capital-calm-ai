@@ -62,6 +62,56 @@ import {
 // explodes at cold-start instead of silently mis-sizing a live order.
 validateDoctrineInvariants();
 
+// ── LLM Circuit Breaker ───────────────────────────────────────────
+// Tracks consecutive AI gateway failures across warm invocations.
+// Fail-safe: when open, the engine skips AI calls and locks the tick
+// with AI_ERROR rather than firing signals without AI confirmation.
+// Module-level state survives warm invocations; cold starts reset it,
+// which is intentional (a cold start probes the gateway fresh).
+
+const CB_STATE = {
+  failures: 0,
+  openedAt: 0 as number,
+  state: "closed" as "closed" | "open" | "half-open",
+};
+
+const OPEN_THRESHOLD = 3;       // Trip after 3 consecutive failures
+const RESET_AFTER_MS = 60_000;  // Stay open for 60s, then probe
+
+function cbAllow(): boolean {
+  if (CB_STATE.state === "closed") return true;
+  if (CB_STATE.state === "open") {
+    if (Date.now() - CB_STATE.openedAt >= RESET_AFTER_MS) {
+      CB_STATE.state = "half-open";
+      console.log("[signal-engine] circuit breaker: half-open — probing AI");
+      return true; // allow one probe
+    }
+    return false;
+  }
+  // half-open: allow the probe
+  return true;
+}
+
+function cbSuccess(): void {
+  if (CB_STATE.state !== "closed") {
+    console.log("[signal-engine] circuit breaker: closed — AI gateway recovered");
+  }
+  CB_STATE.failures = 0;
+  CB_STATE.state = "closed";
+}
+
+function cbFailure(): void {
+  CB_STATE.failures += 1;
+  if (CB_STATE.state === "half-open" || CB_STATE.failures >= OPEN_THRESHOLD) {
+    CB_STATE.state = "open";
+    CB_STATE.openedAt = Date.now();
+    console.error(
+      `[signal-engine] circuit breaker: OPEN after ${CB_STATE.failures} consecutive AI failures. ` +
+        `Skipping AI calls for ${RESET_AFTER_MS / 1000}s.`,
+    );
+  }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -261,6 +311,13 @@ async function decideForSymbol(opts: {
   const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride } = opts;
   const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
+  // Circuit breaker: skip AI entirely if the gateway has been failing.
+  // The caller treats { error } as AI_ERROR → lock gate (fail-safe).
+  if (!cbAllow()) {
+    console.warn(`[signal-engine] ${symbol}: circuit breaker open — skipping AI analysis`);
+    return { error: "circuit_open" };
+  }
+
   const liveStopAtrMult = stratParams.stopAtrMult;
   const liveTpMult = stratParams.tpRMult;
 
@@ -429,15 +486,22 @@ You MUST call submit_decision. No plain text responses.
   if (!aiResp.ok) {
     const t = await aiResp.text().catch(() => "");
     console.error(`AI gateway error ${symbol}`, aiResp.status, t);
+    cbFailure();
     return { error: "ai_error", status: aiResp.status };
   }
 
   const aiJson = await aiResp.json();
   const toolCall = aiJson.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) return { error: "no_decision" };
+  if (!toolCall) {
+    cbFailure();
+    return { error: "no_decision" };
+  }
   try {
-    return { decision: JSON.parse(toolCall.function.arguments) };
+    const parsed = JSON.parse(toolCall.function.arguments);
+    cbSuccess();
+    return { decision: parsed };
   } catch {
+    cbFailure();
     return { error: "parse_error" };
   }
 }
@@ -578,12 +642,17 @@ What is your verdict?
         `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL}, status=${resp.status})`,
         await resp.text().catch(() => ""),
       );
+      cbFailure();
       return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
     }
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
-    if (!args) return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
+    if (!args) {
+      cbFailure();
+      return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
+    }
     const parsed = JSON.parse(args);
+    cbSuccess();
     return {
       verdict: parsed.verdict,
       sizeMultiplier: parsed.size_multiplier,
@@ -594,6 +663,7 @@ What is your verdict?
       `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL})`,
       e,
     );
+    cbFailure();
     return { verdict: "approve", reason: "Risk manager exception — approving by default." };
   }
 }
