@@ -1,6 +1,7 @@
 // market-brief edge function — generates a terse trader brief using Lovable AI.
 // Reads the caller's recent trades + journals via service-role, plus client-supplied
 // market context (regime + recent candles), and returns a 2-3 sentence brief.
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
