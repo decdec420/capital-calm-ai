@@ -6,6 +6,7 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronUp,
+  ClipboardCopy,
   Info,
   Play,
   RefreshCw,
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAlerts } from "@/hooks/useAlerts";
 import { useSystemState } from "@/hooks/useSystemState";
 import type { Alert, AlertSeverity } from "@/lib/domain-types";
 import { classifyAlert } from "@/lib/alert-classification";
