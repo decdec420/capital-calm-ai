@@ -635,3 +635,77 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+
+function KatrinaPanel({
+  review,
+  onRun,
+  running,
+}: {
+  review: KatrinaReview | null;
+  onRun: () => void;
+  running: boolean;
+}) {
+  const trend = review?.win_rate_trend ?? "stable";
+  const trendIcon = trend === "improving"
+    ? <TrendingUp className="h-3 w-3" />
+    : trend === "declining"
+      ? <TrendingDown className="h-3 w-3" />
+      : <Minus className="h-3 w-3" />;
+  const trendTone: "safe" | "blocked" | "neutral" =
+    trend === "improving" ? "safe" : trend === "declining" ? "blocked" : "neutral";
+
+  const promoteCount = review?.promote_ids?.length ?? 0;
+  const killCount = review?.kill_ids?.length ?? 0;
+  const continueCount = review?.continue_ids?.length ?? 0;
+
+  return (
+    <div className="panel p-5 bg-gradient-to-br from-accent/10 via-card to-card border-accent/20">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="h-10 w-10 rounded-md bg-accent/20 text-foreground flex items-center justify-center shrink-0">
+            <Scale className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-foreground">Katrina's Review</span>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Strategy Lab</span>
+            </div>
+            {review ? (
+              <>
+                <p className="text-sm text-foreground/90 mt-2 leading-relaxed">
+                  {review.brief_text}
+                </p>
+                <div className="flex items-center gap-3 mt-3 flex-wrap text-xs">
+                  <StatusBadge tone={trendTone} size="sm">
+                    {trendIcon} {trend}
+                  </StatusBadge>
+                  <span className="text-muted-foreground tabular">
+                    {new Date(review.reviewed_at).toLocaleDateString("default", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {" · "}
+                    {review.trades_analyzed} trade{review.trades_analyzed === 1 ? "" : "s"} analyzed
+                  </span>
+                  {promoteCount > 0 && (
+                    <span className="text-status-safe">↑ {promoteCount} ready to promote</span>
+                  )}
+                  {killCount > 0 && (
+                    <span className="text-status-blocked">✗ {killCount} recommended to close</span>
+                  )}
+                  {continueCount > 0 && (
+                    <span className="text-muted-foreground">→ {continueCount} keep running</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed max-w-xl">
+                Katrina's first review runs Sunday at 08:00 UTC, or after your 10th closed trade — whichever comes first. You can also run her now if you have at least 3 closed trades in the last 30 days.
+              </p>
+            )}
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={onRun} disabled={running} className="shrink-0">
+          {running ? "Reviewing…" : review ? "Run new review" : "Run now"}
+        </Button>
+      </div>
+    </div>
+  );
+}
