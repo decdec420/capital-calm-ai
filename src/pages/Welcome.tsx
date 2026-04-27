@@ -87,8 +87,8 @@ const STEPS: Step[] = [
 export default function Welcome() {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
-  const [equity, setEquity] = useState("10000");
-  const [floor, setFloor] = useState("8500");
+  const [equity, setEquity] = useState("");
+  const [floor, setFloor] = useState("");
   const [lossCap, setLossCap] = useState("1.5");
   const [saving, setSaving] = useState(false);
   const current = STEPS[step];
@@ -208,6 +208,7 @@ export default function Welcome() {
                       inputMode="decimal"
                       type="number"
                       min="0"
+                      placeholder="e.g. 10.00"
                       value={equity}
                       onChange={(e) => setEquity(e.target.value)}
                       className="pl-7 font-mono"
@@ -225,6 +226,7 @@ export default function Welcome() {
                       inputMode="decimal"
                       type="number"
                       min="0"
+                      placeholder="e.g. 8.00"
                       value={floor}
                       onChange={(e) => setFloor(e.target.value)}
                       className="pl-7 font-mono"
