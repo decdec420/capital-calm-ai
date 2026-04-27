@@ -1886,15 +1886,28 @@ Deno.serve(async (req) => {
     });
 
     if (isCronFanout) {
+      // Each cron tier targets one profile. The default 5-min cron has
+      // no tier hint and is treated as "sentinel". This way each user
+      // is scanned at exactly their profile's cadence — no double-firing.
+      const profileTier =
+        body?.profileTier === "active" || body?.profileTier === "aggressive"
+          ? body.profileTier
+          : "sentinel";
+
       const { data: activeUsers } = await admin
         .from("system_state")
-        .select("user_id")
+        .select("user_id, active_profile")
         .eq("bot", "running")
         .eq("kill_switch_engaged", false);
 
       // deno-lint-ignore no-explicit-any
       const results: any[] = [];
       for (const u of activeUsers ?? []) {
+        const userTier =
+          u.active_profile === "active" || u.active_profile === "aggressive"
+            ? u.active_profile
+            : "sentinel";
+        if (userTier !== profileTier) continue; // wrong cron for this user
         try {
           const r = await runTickForUser(
             admin,
@@ -1917,6 +1930,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           mode: "cron_fanout",
+          profileTier,
           users: results.length,
           symbols: SYMBOLS,
           results,
