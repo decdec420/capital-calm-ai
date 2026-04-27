@@ -375,16 +375,16 @@ export default function Copilot() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr_180px] gap-4 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)_280px] 2xl:grid-cols-[300px_minmax(0,1fr)_320px] gap-4 items-start">
         {/* LEFT COLUMN — symbol context + gate readout */}
         <div className="space-y-3">
           <MultiSymbolStrip />
 
           <div className="panel p-4">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-2">
               <div className="text-sm font-medium text-foreground">Last engine tick</div>
               {snapshot && (
-                <span className="text-[10px] text-muted-foreground tabular">
+                <span className="text-[10px] text-muted-foreground tabular shrink-0">
                   {new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                 </span>
               )}

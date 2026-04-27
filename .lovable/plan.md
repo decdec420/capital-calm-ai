@@ -1,67 +1,46 @@
-# Let Max Trade More, Faster — Without Breaking the Safety Model
+# Fix Copilot Layout in Fullscreen
 
 ## The problem
-Current doctrine = paper-mode safety harness:
-- 5 trades/day max
-- $1 per order, 1% risk
-- Market scanned only every 5 minutes
-- $2 daily loss = benched
+The Copilot page locks its three columns to `[180px _ 1fr _ 180px]` at the `lg` breakpoint (≥1024px). At any larger size (the fullscreen screenshot is ~1500px wide), the side columns stay at 180px and everything inside them gets squeezed:
 
-This is correct for "don't blow up an $8 test account," but mathematically **cannot generate meaningful profit** and ignores fast crypto moves.
+- Left column: "Engine watchlist · 3 markets" header wraps to 3 lines; the BTC/ETH/SOL cards collapse to a vertical stack instead of using the 3-column grid they were designed for.
+- "Last engine tick" header collides with its timestamp.
+- Right column: "Autonomy" label overlaps "paper-only until live armed"; the Manual/Assisted/Autonomous segmented toggle is too narrow for its labels; the green/orange status banner wraps awkwardly.
 
-## The approach: Trading Profiles
-Instead of one rigid doctrine, introduce **three named profiles** the user picks from. The doctrine invariants (kill switch, whitelist, no overriding guardrails *philosophy*) stay; only the *numbers* change per profile.
+The center chat panel is fine — the bug is purely in the side rails and how their contents flex.
 
-| Profile | Trades/day | Per-order | Risk/trade | Daily loss cap | Scan interval | Use case |
-|---|---|---|---|---|---|---|
-| **Sentinel** (current) | 5 | $1 | 1% | $2 | 5 min | Paper-prove the edge |
-| **Active** (new default once armed) | 15 | $5 | 1.5% | $10 | 2 min | Real but cautious |
-| **Aggressive** | 30 | $25 | 2% | $50 | 1 min | Funded + edge proven |
+## What I'll change
 
-User can switch profiles from the Doctrine settings panel. **Live-arming still requires explicit consent** (that principle stays).
+### 1. Copilot page grid (`src/pages/Copilot.tsx`)
+Replace the rigid `lg:grid-cols-[180px_1fr_180px]` with a tiered, fluid layout:
 
-## Faster reaction time
-Drop the cron from 5 min → configurable per profile (1, 2, or 5 min). This is the single biggest unlock — Max literally can't react to a candle he doesn't see.
+- `< md` (≤768px): single column, stacked (already works).
+- `md` (768–1279px): single column, but the chat keeps its tall height and the side panels sit above/below.
+- `xl` (≥1280px): three columns at `[260px_1fr_280px]` — wide enough that the symbol cards, engine-tick row, autonomy toggle, and "What Max sees" panel all breathe.
+- `2xl` (≥1536px): three columns at `[300px_1fr_320px]` — fullscreen on a 15"+ display.
 
-For *true* split-second behavior we'd need a websocket stream (Coinbase pushes ticks live), but that's a bigger architectural change. The cron speedup gets us 80% of the benefit at 5% of the work.
+This eliminates the squeeze while keeping the chat the dominant column.
 
-## UI changes
-1. **Doctrine page**: profile picker (3 cards), shows the active limits
-2. **Status footer**: shows current profile name (`SENTINEL · 2/5`, `ACTIVE · 7/15`, etc.)
-3. **Copilot context panel**: pulls limits from the active profile, not hardcoded
-4. **Max's chat**: when he refuses a trade, the reason cites the profile (`"Active profile: 15/15 trades hit"` instead of generic `"daily cap"`)
+### 2. MultiSymbolStrip (`src/components/trader/MultiSymbolStrip.tsx`)
+- Header row uses `flex-wrap gap-2` so the title and "snapshot · Xm ago" don't collide when the column is narrow.
+- Symbol grid drops the `md:grid-cols-3` (which only made sense in the old wide center layout) and uses `grid-cols-1` everywhere — three small cards stacked vertically reads cleanly in a side rail and the cards are no longer squished.
 
-## What stays locked (non-negotiable)
-- Kill switch at $8 floor
-- Symbol whitelist (BTC/ETH/SOL only)
-- Stop-loss on every order
-- Spread + stale-data gates
-- Anti-tilt (loss-streak halt) — *still applies, scaled per profile*
-- Live trading requires explicit arm
+### 3. AutonomyToggle (`src/components/trader/AutonomyToggle.tsx`)
+- Top row becomes `flex-wrap` so "Autonomy" and the "paper-only until live armed" / "LIVE — real money" tag stack on a new line when the column is narrow instead of overlapping.
+- Segmented buttons: drop the inline `(paper)` / `(LIVE)` qualifier from the buttons themselves (it's already shown in the header) so each button just shows its label and never truncates.
+- The "All clear signals execute automatically" callout: shorten to "Auto-executes within doctrine limits" so it never wraps to 3 lines.
 
-## Files to change
+### 4. "Last engine tick" panel (in Copilot.tsx)
+Wrap the header `flex` with `flex-wrap gap-y-1` so the timestamp falls to a second line gracefully if the column is narrow, instead of wrapping the title.
 
-**Backend**
-- `supabase/functions/_shared/doctrine.ts` — refactor to export profiles, not constants. Keep invariants but per-profile.
-- `supabase/functions/_shared/snapshot.ts` — make scan interval read from active profile
-- `supabase/functions/signal-engine/index.ts` — read limits from user's active profile
-- New migration: add `active_profile` column to `system_state`, add cron jobs at 1m/2m intervals (gated by profile)
+### 5. "What Max sees" context panel (in Copilot.tsx)
+Already uses `flex justify-between` per row — add `min-w-0` and `truncate` to the value cells so very long engine-pick text stays on one line, and keep the panel readable at the new 280–320px width.
 
-**Frontend**
-- `src/lib/doctrine-constants.ts` — export profiles object
-- New `src/components/trader/ProfilePicker.tsx`
-- `src/components/trader/StatusFooter.tsx` — show profile name
-- `src/pages/Copilot.tsx` — read from active profile
-- `src/components/trader/DoctrineGuardrailGrid.tsx` — show active profile limits
+## What I'm NOT changing
+- The center chat panel — its `min(72vh, 760px)` height and overflow logic are correct.
+- The Risk Center page — that one's fine in fullscreen, the screenshot only flagged Copilot.
+- The signal bridge banner at the top — it spans full width and already responds well.
+- The sidebar — it's controlled by the global `AppLayout` and isn't part of this bug.
 
-**Tests**
-- Update `doctrine.test.ts` to validate each profile's invariants independently
-- Add `profile-switch.test.ts` to verify limits swap correctly
-
-## What I'm NOT doing yet
-- **Websocket live-tick streaming** — needs a separate plan (persistent Deno worker, Coinbase WS, reconnect logic). Worth doing as a follow-up once profiles prove out.
-- **Auto-profile-promotion** (e.g., auto-upgrade Sentinel→Active after N green days) — premature; you should choose.
-- **Removing the $8 kill switch** — never. That's the "don't lose your shirt" backstop.
-
-## Open question
-Want me to also raise the profile numbers above? I picked conservative defaults. If you want **Aggressive** to be e.g. 50 trades/day at $100 orders, say so now and I'll bake it in.
+## Verification
+After the changes I'll spot-check the file structure and run the existing test suite (`bunx vitest run`) to make sure nothing breaks. Tests cover doctrine/risk/sizing logic, not layout, so they should all stay green.
