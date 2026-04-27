@@ -521,10 +521,13 @@ export default function Copilot() {
             </TabsContent>
 
             <TabsContent value="history" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-medium text-foreground">Signal history</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium text-foreground">Signal log</div>
                 <span className="text-xs text-muted-foreground">{history.length} decisions</span>
               </div>
+              <p className="text-[11px] text-muted-foreground mb-3">
+                Every engine decision. Click the <Telescope className="inline h-3 w-3 align-text-bottom" /> icon on any row for the full reasoning.
+              </p>
               {history.length === 0 ? (
                 <div className="panel p-6 text-center text-xs text-muted-foreground italic">
                   No history yet. Every tick — propose, skip, or halt — lands here.
@@ -565,6 +568,9 @@ export default function Copilot() {
             </TabsContent>
 
             <TabsContent value="calibration" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
+              <p className="text-[11px] text-muted-foreground mb-3">
+                Dots on the diagonal = the AI knows when its hand is good. Builds after 10+ executed signals.
+              </p>
               <CalibrationChart signals={history} />
             </TabsContent>
           </Tabs>
