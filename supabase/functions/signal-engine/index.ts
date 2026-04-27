@@ -1495,17 +1495,27 @@ Deno.serve(async (req) => {
       if (tok && tok === body.cronToken) isCronFanout = true;
     }
 
-    // Fetch ALL symbols' candles in parallel — shared across users this tick.
-    const candleResults = await Promise.allSettled(
-      SYMBOLS.map((s) => fetchCandles(s)),
-    );
+    // Fetch BOTH 1h and 4h candles for ALL symbols in parallel — shared
+    // across users this tick. The 4h provides multi-timeframe context so
+    // the Technical Analyst AI can confirm 1h entries against the 4h trend.
+    const [candleResults1h, candleResults4h] = await Promise.all([
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 14400))),
+    ]);
     const candlesBySymbol = {} as Record<Symbol, Candle[]>;
+    const candlesBySymbol4h = {} as Record<Symbol, Candle[]>;
     SYMBOLS.forEach((s, i) => {
-      const r = candleResults[i];
-      if (r.status === "fulfilled") candlesBySymbol[s] = r.value;
+      const r1h = candleResults1h[i];
+      const r4h = candleResults4h[i];
+      if (r1h.status === "fulfilled") candlesBySymbol[s] = r1h.value;
       else {
-        console.error(`Failed to fetch ${s}:`, r.reason);
+        console.error(`Failed to fetch ${s} 1h:`, r1h.reason);
         candlesBySymbol[s] = [];
+      }
+      if (r4h.status === "fulfilled") candlesBySymbol4h[s] = r4h.value;
+      else {
+        console.error(`Failed to fetch ${s} 4h:`, r4h.reason);
+        candlesBySymbol4h[s] = [];
       }
     });
 
