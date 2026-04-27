@@ -212,7 +212,7 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
 }
 
 /** A reason with severity "halt" or "block" is a refusal. */
-export function isRefusal(r: GateReason): boolean {
+function isRefusal(r: GateReason): boolean {
   return r.severity === "halt" || r.severity === "block";
 }
 
