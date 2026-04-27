@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,9 +31,9 @@ import { getProfile } from "@/lib/doctrine-constants";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
 const SUGGESTED = [
-  "What's the current regime telling me?",
-  "Should I be sitting on hands right now?",
-  "Why did my last trade lose / win?",
+  "What's the board looking like right now?",
+  "Should I be sitting on hands?",
+  "What broke on my last trade?",
   "Which guardrail is closest to tripping?",
 ];
 
@@ -43,6 +43,11 @@ export default function Copilot() {
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
+  const [intelTimestamps, setIntelTimestamps] = useState<Record<string, string>>({});
+  const [pipelineStep, setPipelineStep] = useState<
+    null | "braintrust" | "engine" | "briefing" | "done" | "error"
+  >(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { data: system } = useSystemState();
   const { data: account } = useAccountState();
@@ -74,9 +79,44 @@ export default function Copilot() {
   const activeSignal = pending[0];
   const activeProfile = getProfile(system?.activeProfile);
 
+  const lastBrainTrustRun = useMemo(() => {
+    const times = Object.values(intelTimestamps).map((t) => new Date(t).getTime()).filter(Boolean);
+    if (times.length === 0) return null;
+    return new Date(Math.max(...times));
+  }, [intelTimestamps]);
+
+  const lastEngineRun = useMemo(() => {
+    const ts = (system?.lastEngineSnapshot as { ranAt?: string } | null)?.ranAt;
+    return ts ? new Date(ts) : null;
+  }, [system]);
+
+  const formatAge = (d: Date | null): string => {
+    if (!d) return "never";
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  };
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from("market_intelligence")
+        .select("symbol, generated_at");
+      if (data) {
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+        }
+        setIntelTimestamps(map);
+      }
+    };
+    load();
+  }, []);
 
   // Render a single structured gate reason as a sonner toast.
   const toastForGate = (g: GateReason) => {
@@ -144,6 +184,94 @@ export default function Copilot() {
       toast.error("Engine connection error.");
     } finally {
       setRunning(false);
+    }
+  };
+
+  const runFullPipeline = async () => {
+    if (pipelineStep !== null && pipelineStep !== "done" && pipelineStep !== "error") return;
+    setPipelineStep("braintrust");
+    setPipelineError(null);
+
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        toast.error("Sign in first.");
+        setPipelineStep("error");
+        setPipelineError("auth failed");
+        return;
+      }
+
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      };
+
+      // Step 1: Brain Trust
+      const brainRes = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-intelligence`,
+        { method: "POST", headers, body: JSON.stringify({}) },
+      );
+      if (!brainRes.ok) {
+        const e = await brainRes.json().catch(() => ({}));
+        setPipelineStep("error");
+        setPipelineError(e.error ?? "Brain Trust failed");
+        toast.error("Brain Trust failed — check function logs.");
+        return;
+      }
+      const { data: freshIntel } = await supabase
+        .from("market_intelligence")
+        .select("symbol, generated_at");
+      if (freshIntel) {
+        const map: Record<string, string> = {};
+        for (const row of freshIntel) {
+          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+        }
+        setIntelTimestamps(map);
+      }
+
+      // Step 2: Signal Engine (Donna)
+      setPipelineStep("engine");
+      const engineRes = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-engine`,
+        { method: "POST", headers, body: JSON.stringify({}) },
+      );
+      let engineJson: Record<string, unknown> = {};
+      if (engineRes.ok) {
+        engineJson = await engineRes.json().catch(() => ({}));
+      } else {
+        const e = await engineRes.json().catch(() => ({}));
+        setPipelineStep("error");
+        setPipelineError((e as { error?: string }).error ?? "Engine failed");
+        toast.error("Donna failed — check function logs.");
+        return;
+      }
+
+      // Step 3: Harvey briefing
+      setPipelineStep("briefing");
+      const tick = (engineJson.tick as string) ?? "unknown";
+      const reasons = Array.isArray(engineJson.gateReasons)
+        ? (engineJson.gateReasons as Array<{ message?: string }>)
+        : [];
+      const firstReason = reasons[0]?.message ?? null;
+      const pipelinePrompt = [
+        `[Pipeline run complete — Brain Trust refreshed, Donna ticked]`,
+        `Engine result: ${tick}${firstReason ? ` — ${firstReason}` : ""}.`,
+        `Give me your two-sentence Harvey briefing on what this means for the next window.`,
+      ].join(" ");
+
+      if (activeId) {
+        await send(pipelinePrompt);
+      }
+
+      setPipelineStep("done");
+      setTimeout(() => setPipelineStep(null), 8000);
+    } catch (err) {
+      setPipelineStep("error");
+      setPipelineError("unexpected error");
+      toast.error("Pipeline error — see console.");
+      console.error("[runFullPipeline]", err);
     }
   };
 
@@ -347,6 +475,92 @@ export default function Copilot() {
           </>
         }
       />
+
+      {/* Pipeline Status Strip */}
+      <div className="flex items-center gap-4 px-1 py-2 border-b border-border/40 text-[11px] text-muted-foreground flex-wrap">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mr-1">Agents</span>
+
+        {/* Brain Trust */}
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            "w-1.5 h-1.5 rounded-full",
+            lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
+              ? "bg-status-safe" : "bg-muted-foreground/40"
+          )} />
+          <span>Brain Trust</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="tabular">{formatAge(lastBrainTrustRun)}</span>
+        </div>
+
+        <span className="text-border">|</span>
+
+        {/* Signal Engine (Donna) */}
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            "w-1.5 h-1.5 rounded-full",
+            lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
+              ? "bg-status-safe animate-pulse"
+              : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
+                ? "bg-status-safe" : "bg-muted-foreground/40"
+          )} />
+          <span>Donna</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="tabular">{formatAge(lastEngineRun)}</span>
+        </div>
+
+        <span className="text-border">|</span>
+
+        {/* Harvey */}
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-safe" />
+          <span>Harvey</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="text-muted-foreground/50">gemini-flash</span>
+        </div>
+
+        {/* Pipeline run progress inline */}
+        {pipelineStep && (
+          <>
+            <span className="text-border">|</span>
+            <div className="flex items-center gap-2 ml-1">
+              {(["braintrust", "engine", "briefing"] as const).map((step, i) => {
+                const labels = { braintrust: "Brain Trust", engine: "Donna", briefing: "Harvey" };
+                const stepOrder = ["braintrust", "engine", "briefing", "done"];
+                const currentIdx = stepOrder.indexOf(pipelineStep);
+                const done = pipelineStep === "done" || currentIdx > i;
+                const active = currentIdx === i;
+                const errored = pipelineStep === "error" && active;
+                return (
+                  <span key={step} className={cn(
+                    "flex items-center gap-1",
+                    done ? "text-status-safe" : active ? "text-foreground" : "text-muted-foreground/40"
+                  )}>
+                    {errored ? "✗" : done ? "✓" : active ? "·" : "○"}
+                    {labels[step]}
+                  </span>
+                );
+              })}
+              {pipelineStep === "done" && <span className="text-status-safe text-[10px]">pipeline complete</span>}
+              {pipelineStep === "error" && <span className="text-status-blocked text-[10px]">{pipelineError}</span>}
+            </div>
+          </>
+        )}
+
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1.5 border border-border/50 hover:border-border"
+            disabled={pipelineStep !== null && pipelineStep !== "done" && pipelineStep !== "error"}
+            onClick={runFullPipeline}
+          >
+            <Sparkles className="h-3 w-3" />
+            {pipelineStep && pipelineStep !== "done" && pipelineStep !== "error"
+              ? "Running…"
+              : "⚡ Run full pipeline"}
+          </Button>
+        </div>
+      </div>
 
       {/* SIGNAL BRIDGE — top of page, above everything else */}
       {activeSignal ? (
@@ -587,7 +801,7 @@ export default function Copilot() {
 
           <div className="panel p-4 space-y-3">
             <div>
-              <div className="text-sm font-medium text-foreground">What Max sees</div>
+              <div className="text-sm font-medium text-foreground">What Harvey sees</div>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 Auto-attached to every message you send.
               </p>
