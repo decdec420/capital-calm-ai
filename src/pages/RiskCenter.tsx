@@ -58,6 +58,7 @@ export default function RiskCenter() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <StartingEquityModal />
       <SectionHeader
         eyebrow="Risk Control"
         title="Guardrails & kill-switches"
