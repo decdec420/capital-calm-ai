@@ -35,20 +35,20 @@ export function MultiSymbolStrip({ className, onSelect, selected }: MultiSymbolS
 
   return (
     <div className={cn("panel p-3", className)}>
-      <div className="flex items-center justify-between mb-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-2.5">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
           Engine watchlist · {rows.length || ENGINE_SYMBOLS.length} markets
         </div>
-        <div className="text-[10px] text-muted-foreground">
+        <div className="text-[10px] text-muted-foreground shrink-0">
           {ranAgo ? `engine snapshot · ${ranAgo}` : "no snapshot yet — run the engine"}
         </div>
       </div>
       {rows.length === 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {ENGINE_SYMBOLS.map((s) => (
             <div
               key={s}
-              className="rounded-md border border-dashed border-border bg-card/50 px-3 py-4 text-center"
+              className="rounded-md border border-dashed border-border bg-card/50 px-3 py-3 text-center"
             >
               <div className="text-sm font-medium text-foreground">{s}</div>
               <div className="text-[10px] text-muted-foreground mt-1">awaiting first tick…</div>
@@ -56,7 +56,7 @@ export function MultiSymbolStrip({ className, onSelect, selected }: MultiSymbolS
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 gap-2">
           {rows.map((r) => {
             const isSelected = selected === r.symbol;
             const lockedOut = r.lockGate !== null;
