@@ -244,7 +244,10 @@ export default function Trades() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <Cell label="Side" value={selected.side.toUpperCase()} />
-                  <Cell label="Size" value={`${selected.size.toFixed(4)}`} />
+                  <Cell
+                    label="Size"
+                    value={`${formatBaseQty(selected.size)} · ${formatUsd(selected.size * (selected.exitPrice ?? selected.entryPrice))}`}
+                  />
                   <Cell label="Entry" value={`$${selected.entryPrice.toFixed(2)}`} />
                   <Cell label="Exit" value={selected.exitPrice !== null ? `$${selected.exitPrice.toFixed(2)}` : "—"} />
                   <Cell label="PnL" value={`${(selected.pnl ?? 0) >= 0 ? "+" : ""}$${(selected.pnl ?? 0).toFixed(2)}`} tone={(selected.pnl ?? 0) >= 0 ? "safe" : "blocked"} />
