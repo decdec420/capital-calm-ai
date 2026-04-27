@@ -651,7 +651,7 @@ async function runTickForUser(
       .eq("user_id", userId),
     admin
       .from("doctrine_settings")
-      .select("loss_cooldown_minutes,consecutive_loss_limit")
+      .select("*")
       .eq("user_id", userId)
       .maybeSingle(),
     admin
