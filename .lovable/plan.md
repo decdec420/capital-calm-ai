@@ -1,75 +1,75 @@
-# Strategy Lab — Calmer Promotions + Friendlier UI
+# Multi-test pipeline + clearer auto-pilot + scaling readiness scope
 
-Two things at once: stop the bot from flipping strategies on weak evidence, and make the page readable without a finance degree.
+Three small but related issues to fix on the Strategy Lab:
 
----
-
-## Part 1 — Stop the bot from constantly shifting
-
-The current auto-promotion is too eager: 50 trades, "≥" beats anything, no cooldown. We tighten it on three axes so promotions become rare and meaningful.
-
-### Changes to `evaluate-candidate` (the cron job)
-
-- **Raise the trade bar from 50 → 100.** Doubles statistical confidence. The "Promotion progress" bar in the UI updates to match (`100 / 100 paper trades`).
-- **Require a real margin, not just "better".** Today `cExp >= aExp` passes if the candidate is 0.001R better. New rule: candidate must beat live by **≥0.05R expectancy AND ≥3pp win rate** (same threshold the Learning evaluator already uses). Drawdown still can't be more than 10pp worse. Sharpe still must be ≥ live.
-- **7-day cooldown after any promotion.** Once a strategy is auto-promoted, the next auto-promotion is locked for 7 days. Forces real-world validation before the next swap. (You can still force-promote manually from the menu — the cooldown only blocks the cron.)
-- **Soft-confirm window (optional, off by default).** When a candidate passes, instead of swapping immediately, write a "ready to promote in 24h — reply to veto" alert. If you don't object, the promotion runs the next day. We'll add a toggle for this in Settings; default off so the auto-pilot works out-of-the-box, and you can opt in if you want a sanity check window.
-
-### How often promotions actually happen after this
-
-With paper trading at current pace, a candidate needs roughly **2–4 weeks** to accumulate 100 trades. Then it must clear the higher bar on every metric. Realistic expectation: **0–1 promotions per month**, with most candidates getting retired instead. That's the right tempo — strategies should evolve, not thrash.
+1. The pipeline only allows **one** strategy in testing — you want many running in parallel.
+2. The "🤖 Auto-pilot" banner doesn't actually explain what it's evaluating when the queue is bigger.
+3. The "🔒 Scaling readiness" panel is account-wide but reads like it might be tied to a specific strategy.
 
 ---
 
-## Part 2 — Make the page look less like a math textbook
+## 1. Multiple paper tests at once
 
-The bones are good, the language is the problem. "trend-rev v1.3+stop_atr_mult=2", "EXPECTANCY 0.04R", "SHARPE 0.05" — true but unfriendly.
+**Today:** The hook picks exactly one `inTesting` candidate (the one with the most paper trades). Everyone else is "Queue." The auto-pilot only ever evaluates that single winner.
 
-### Friendlier names
+**Change:**
+- Treat **every** `candidate`-status strategy as actively paper-testing in parallel. They all collect trades simultaneously already (trades carry `strategy_id`); we were just hiding them.
+- Replace the single "In testing" panel with an **"In testing (N)"** section that lists each candidate as a compact row showing: friendly name, version, trade progress (`X / 100`), key deltas vs live (expectancy, win rate), and per-row actions (Run check now · Edit · Retire · Force promote).
+- Drop the "Queue" concept entirely. The current queue panel only existed because there was one slot to fight over. Duplicate detection + "Remove N duplicates" stays — just moves up into the testing list header.
+- Keep the empty state for when there are zero candidates.
 
-- **Strategy display name** gets a separate `display_name` field (still keeps the technical `name`/`version` for the engine). Defaults: instead of `trend-rev v1.3` the live card shows something like **"Steady Trender"** with the technical id in small text underneath. We'll seed sensible defaults for existing strategies and let you rename any time from the Edit menu.
-- **Candidate names** get auto-generated readable summaries: instead of `trend-rev v1.3+stop_atr_mult=2` it shows **"Wider stops experiment"** with the parameter diff still visible in the "Changes vs live" box below.
+**Auto-pilot behavior:**
+- `evaluate-candidate` already loops candidates per user; just stop picking only the one with the most trades. Evaluate **every** candidate that has ≥100 paper trades. Each one is independently:
+  - promoted (if it clearly beats live + we're past the 7-day cooldown), or
+  - retired (if it failed the bar), or
+  - paused for review (if drawdown blew up), or
+  - skipped (not enough trades / cooldown).
+- If two candidates both pass on the same run, promote the one with the **largest expectancy margin** vs live. The rest stay candidates and get re-evaluated next cycle (after cooldown).
 
-### Translate the metrics into English
+## 2. Clarify the auto-pilot banner
 
-Keep the precise numbers (you need them) but add one-line plain-English subtitles under each:
+Replace the current single-line banner with one that adapts to what's actually happening:
 
-- **Expectancy 0.04R** → subtitle "Avg profit per trade"
-- **Win rate 67%** → subtitle "How often it wins"
-- **Max DD -1.9%** → subtitle "Worst losing streak"
-- **Sharpe 0.05** → subtitle "Smoothness of returns"
-- **Trades 3** → subtitle "Sample size"
+> 🤖 **Auto-pilot active** — checking all 4 paper tests every 30 min. Promotes one to live if it clearly beats the current strategy after 100 trades, then waits 7 days before swapping again.
 
-Use a tooltip with a longer explanation for each (we already have the `Explain` component).
+When there's only one candidate it reads naturally too ("checking 1 paper test"). When there are zero, the banner is hidden.
 
-### Visual breathing room
+Also add a small inline **"Last check: 14 min ago · next in 16 min"** hint so it's obvious the loop is alive (computed from `system_state.last_auto_promoted_at` for the "last promoted" timestamp + a `last_evaluated_at` we'll add).
 
-- **Plain-English banner replaces the cron line.** "Auto-pilot active · evaluates every 30 min · promotes automatically if it beats the baseline" becomes a single soft-colored line: **"On auto-pilot — checking every 30 min, replaces only after 100 trades and a clear win."**
-- **Status badges instead of all-caps eyebrows.** "● LIVE  CURRENTLY TRADING" → just a green pill that says **"Now trading"**. "● IN TESTING  ACCUMULATING PAPER TRADES" → amber pill **"Paper testing"**.
-- **Hide the "Changes vs live" box behind a small "see what changed" toggle** — it's reference, not a primary thing to read.
-- **Promotion progress bar** gets a friendly label: "On track for review in ~12 days" (computed from trades/day pace) instead of just "47 to go".
+## 3. Scaling readiness — what it's tied to
 
-### What stays the same
+It's currently **account-wide**, not tied to any single strategy — it's measuring "is your overall paper-trading record good enough to start risking real money beyond $1/trade." The labels just don't say so.
 
-- The actual numbers (expectancy, win rate, etc.) — they're correct and useful, just need context
-- The pipeline structure (Live → In Testing → Queue → Archive)
-- Scaling readiness checklist
-- All the dropdown actions (clone, edit, force promote, retire)
+Change the panel header copy from `🔒 Scaling readiness 3/6` to:
 
----
+> 🔒 **Account-wide scaling readiness · 3/6**
+> Across **all** your paper trades and strategies — not any one test. All green before raising real-money caps.
 
-## Files touched
-
-- `supabase/functions/evaluate-candidate/index.ts` — new thresholds, cooldown logic
-- `supabase/migrations/<new>` — add `display_name` column to `strategies`, `last_auto_promoted_at` to `system_state`, optional `auto_promote_soft_confirm` flag to `system_state`
-- `src/pages/StrategyLab.tsx` — Live + In Testing panels: friendlier names, plain-English metric subtitles, calmer banner, cleaner header pills
-- `src/components/trader/MetricExplain.tsx` (small new helper) — wraps each metric with subtitle + tooltip
-- `src/lib/strategy-naming.ts` (small new helper) — generates "Wider stops experiment" style names from the parameter diff
-- `TRADES_TO_PROMOTE` constant: 50 → 100 in both UI and cron
-- `src/pages/Settings.tsx` — optional toggle for soft-confirm mode
+And add a one-line tooltip on each item saying which data source it pulls from (e.g. "All closed paper trades, all strategies").
 
 ---
 
-## What you'll see when this ships
+## Files to touch
 
-The page becomes scannable in 5 seconds without reading any technical text. The live strategy looks like *"Steady Trender — now trading. Avg profit per trade: 0.04R. Wins 67% of the time."* The candidate becomes *"Wider stops experiment — paper testing, on track for review in ~12 days."* The auto-promotion still happens, just with real evidence behind it.
+**Frontend**
+- `src/hooks/useStrategies.ts` — replace `inTesting` / `queued` with a single `inTestingList: StrategyVersion[]` (sorted by trade progress desc). Keep `duplicateIds` + `removeDuplicates`.
+- `src/pages/StrategyLab.tsx` — replace `InTestingPanel` + `QueuePanel` with one `InTestingListPanel` rendering compact rows. Update the auto-pilot banner copy. Re-wire `triggerEvaluate` to summarize multi-result responses ("Promoted v1.4 · 2 still collecting trades · 1 retired").
+- `src/components/trader/ScalingReadinessPanel.tsx` — header copy + per-item tooltips.
+
+**Backend**
+- `supabase/functions/evaluate-candidate/index.ts` — loop **all** candidates (not just the top-trade one). On a single cron pass, at most one promotion happens (highest expectancy margin wins); others get retired/skipped independently. Return one result per candidate so the UI can summarize.
+- Migration: add `last_evaluated_at TIMESTAMPTZ` to `system_state` so the banner can show "last check: N min ago."
+
+## What stays the same
+
+- The 100-trade bar, 0.05R + 3pp margins, drawdown veto, and 7-day cooldown — all unchanged. Parallel testing doesn't loosen the promotion bar.
+- "Force promote" on a candidate still requires ≥100 trades.
+- The pipeline diagram in your head: **Live (1) → In testing (N) → Archive**. Just N instead of 1.
+
+---
+
+## Technical notes
+
+- No schema change to `strategies` needed — "in testing" is just `status = 'candidate'`. The single-slot illusion was purely UI-side.
+- `moveTesting` becomes obsolete (no slot to move into) and gets removed from the hook.
+- The cooldown stays per-user (not per-strategy), so back-to-back promotions of two different candidates are still blocked for 7 days. That's intentional — the cooldown protects against thrashing the live engine, regardless of which candidate won.
