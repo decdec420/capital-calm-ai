@@ -160,8 +160,8 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
   }
 
   // 3. Kill-switch floor: equity minus this order must stay above the floor.
-  //    If it wouldn't, block outright.
-  if (equityUsd - proposedQuoteUsd < KILL_SWITCH_FLOOR_USD) {
+  //    If it wouldn't, block outright. Uses per-user resolved floor when present.
+  if (equityUsd - proposedQuoteUsd < floorUsd) {
     return {
       sizeUsd: 0,
       qty: 0,
@@ -170,8 +170,8 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
         gate(
           GATE_CODES.DOCTRINE_KILL_SWITCH_FLOOR,
           "block",
-          `Order would drop equity below the $${KILL_SWITCH_FLOOR_USD} kill-switch floor.`,
-          { equityUsd, proposedQuoteUsd, floor: KILL_SWITCH_FLOOR_USD },
+          `Order would drop equity below the $${floorUsd.toFixed(2)} kill-switch floor.`,
+          { equityUsd, proposedQuoteUsd, floor: floorUsd },
         ),
       ],
     };
