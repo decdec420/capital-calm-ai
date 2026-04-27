@@ -1218,6 +1218,7 @@ async function runTickForUser(
         tp1,
         pullback: winner.regime.pullback,
         doctrineClampedBy: clamp.clampedBy,
+        riskManagerVerdict: riskVerdict ?? null,
       },
       status: "pending",
     })
