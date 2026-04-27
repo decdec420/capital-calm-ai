@@ -311,6 +311,13 @@ async function decideForSymbol(opts: {
   const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride } = opts;
   const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
+  // Circuit breaker: skip AI entirely if the gateway has been failing.
+  // The caller treats { error } as AI_ERROR → lock gate (fail-safe).
+  if (!cbAllow()) {
+    console.warn(`[signal-engine] ${symbol}: circuit breaker open — skipping AI analysis`);
+    return { error: "circuit_open" };
+  }
+
   const liveStopAtrMult = stratParams.stopAtrMult;
   const liveTpMult = stratParams.tpRMult;
 
