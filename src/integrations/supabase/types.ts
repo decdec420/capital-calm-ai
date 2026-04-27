@@ -788,6 +788,7 @@ export type Database = {
           last_engine_snapshot: Json
           last_evaluated_at: string | null
           last_heartbeat: string
+          last_jessica_decision: Json | null
           last_mark_to_market_at: string | null
           latency_ms: number
           live_money_acknowledged_at: string | null
@@ -815,6 +816,7 @@ export type Database = {
           last_engine_snapshot?: Json
           last_evaluated_at?: string | null
           last_heartbeat?: string
+          last_jessica_decision?: Json | null
           last_mark_to_market_at?: string | null
           latency_ms?: number
           live_money_acknowledged_at?: string | null
@@ -842,6 +844,7 @@ export type Database = {
           last_engine_snapshot?: Json
           last_evaluated_at?: string | null
           last_heartbeat?: string
+          last_jessica_decision?: Json | null
           last_mark_to_market_at?: string | null
           latency_ms?: number
           live_money_acknowledged_at?: string | null
@@ -1213,6 +1216,7 @@ export type Database = {
       }
       get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
+      get_jessica_cron_token: { Args: never; Returns: string }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
       get_post_trade_learn_token: { Args: never; Returns: string }
