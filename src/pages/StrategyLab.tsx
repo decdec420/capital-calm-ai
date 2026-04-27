@@ -497,17 +497,25 @@ function InTestingPanel({
   }, [approved, inTesting]);
 
   return (
+  const friendly = displayNameFor(inTesting);
+  const baseValueForFirstDiff = paramDiffs[0]?.before;
+  const summary =
+    inTesting.friendlySummary ??
+    autoSummaryFromVersion(inTesting.version, baseValueForFirstDiff) ??
+    "Tweaked variant";
+
+  return (
     <div className="panel p-5 space-y-4 border-status-candidate/30">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <StatusBadge tone="candidate" size="sm" dot pulse>In testing</StatusBadge>
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">accumulating paper trades</span>
+          <StatusBadge tone="candidate" size="sm" dot pulse>Paper testing</StatusBadge>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h2 className="text-xl font-semibold text-foreground">{summary}</h2>
+            <span className="text-xs text-muted-foreground font-mono">{inTesting.name} {inTesting.version}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-foreground">{inTesting.name}</h2>
-            <span className="text-sm text-muted-foreground">{inTesting.version}</span>
-          </div>
+          <p className="text-sm text-muted-foreground">
+            Trying a tweak on <span className="text-foreground">{friendly}</span> — collecting paper trades to see if it actually does better.
+          </p>
           {promotionTitle && (
             <p className="text-[11px] text-muted-foreground italic">
               Promoted from experiment:{" "}
@@ -580,55 +588,61 @@ function InTestingPanel({
         </div>
       </div>
 
-      {/* Metric row with deltas vs approved */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-border">
-        <DeltaMetric label="Expectancy" cur={m.expectancy} base={approved?.metrics.expectancy ?? null} suffix="R" untested={trades === 0} />
-        <DeltaMetric label="Win rate" cur={m.winRate * 100} base={approved ? approved.metrics.winRate * 100 : null} suffix="%" untested={trades === 0} />
-        <DeltaMetric label="Max DD" cur={m.maxDrawdown * 100} base={approved ? approved.metrics.maxDrawdown * 100 : null} suffix="%" inverse untested={trades === 0} />
-        <DeltaMetric label="Sharpe" cur={m.sharpe} base={approved?.metrics.sharpe ?? null} untested={trades === 0} />
-        <Metric label="Trades" value={trades === 0 ? "—" : String(trades)} />
+      {/* Metric row with deltas vs approved — friendly subtitles */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-border">
+        <FriendlyDeltaMetric label="Avg profit per trade" sub="Expectancy" cur={m.expectancy} base={approved?.metrics.expectancy ?? null} suffix="R" untested={trades === 0} hint="How many R you make on an average trade." />
+        <FriendlyDeltaMetric label="How often it wins" sub="Win rate" cur={m.winRate * 100} base={approved ? approved.metrics.winRate * 100 : null} suffix="%" untested={trades === 0} hint="% of trades that closed in profit." />
+        <FriendlyDeltaMetric label="Worst losing streak" sub="Max drawdown" cur={m.maxDrawdown * 100} base={approved ? approved.metrics.maxDrawdown * 100 : null} suffix="%" inverse untested={trades === 0} hint="Closer to 0 is better." />
+        <FriendlyDeltaMetric label="Smoothness" sub="Sharpe" cur={m.sharpe} base={approved?.metrics.sharpe ?? null} untested={trades === 0} hint="Higher = less rollercoaster." />
+        <FriendlyMetric label="Sample size" sub="Trades" value={trades === 0 ? "—" : String(trades)} hint="More trades = more confidence in the numbers." />
       </div>
 
-      {/* Promotion progress */}
+      {/* Promotion progress with friendlier label */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">
-            Promotion progress · {trades} / {TRADES_TO_PROMOTE} paper trades
+            Building evidence · {trades} of {TRADES_TO_PROMOTE} paper trades
           </span>
           <span className="text-muted-foreground tabular">
-            {canForcePromote ? "Ready to evaluate" : `${remaining} to go`}
+            {canForcePromote ? "Ready for review" : `${remaining} to go`}
           </span>
         </div>
         <Progress value={progress} className="h-2" />
       </div>
 
-      {/* Param diff (changed only) */}
+      {/* Param diff — collapsed by default */}
       {paramDiffs.length > 0 && (
-        <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-1.5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-            Changes vs live
-          </div>
-          {paramDiffs.map((d) => (
-            <div key={d.key} className="flex items-center justify-between text-sm">
-              <span className="font-mono text-xs text-muted-foreground">{d.key}</span>
-              <span className="tabular text-foreground">
-                <span className="text-muted-foreground">{String(d.before)}</span>{" "}
-                <ArrowRight className="inline h-3 w-3 text-muted-foreground mx-1" />{" "}
-                <span className="text-primary font-medium">{String(d.after)}</span>
-              </span>
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
+            >
+              <ChevronDown className="h-3 w-3" />
+              See what changed ({paramDiffs.length})
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-1.5">
+              {paramDiffs.map((d) => (
+                <div key={d.key} className="flex items-center justify-between text-sm">
+                  <span className="font-mono text-xs text-muted-foreground">{d.key}</span>
+                  <span className="tabular text-foreground">
+                    <span className="text-muted-foreground">{String(d.before)}</span>{" "}
+                    <ArrowRight className="inline h-3 w-3 text-muted-foreground mx-1" />{" "}
+                    <span className="text-primary font-medium">{String(d.after)}</span>
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
 
-      {/* Auto-pilot indicator */}
-      <div className="rounded-md bg-primary/5 border border-primary/20 p-3 flex items-center gap-2 flex-wrap">
-        <span className="text-base">🤖</span>
-        <span className="text-xs text-foreground">Auto-pilot active</span>
-        <span className="text-xs text-muted-foreground">·</span>
-        <span className="text-xs text-muted-foreground">evaluates every 30 min</span>
-        <span className="text-xs text-muted-foreground">·</span>
-        <span className="text-xs text-muted-foreground">promotes automatically if it beats the baseline</span>
+      {/* Calmer auto-pilot banner */}
+      <div className="rounded-md bg-primary/5 border border-primary/20 p-3 text-sm text-foreground/90 leading-relaxed">
+        <span className="text-base mr-1.5">🤖</span>
+        On auto-pilot — checking every 30 min. Only swaps the live strategy after <span className="text-foreground font-medium">{TRADES_TO_PROMOTE} paper trades</span> and a clear win, then waits a week before swapping again.
       </div>
     </div>
   );
