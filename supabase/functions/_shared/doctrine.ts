@@ -22,7 +22,7 @@ export interface CapitalPreservationDoctrine {
   hardRules: {
     maxOrderUsdHardCap: 1;
     maxDailyTradesHardCap: 5;
-    maxDailyLossUsdHardCap: 2;
+    maxDailyLossUsdHardCap: 1;
     minBalanceUsdKillSwitch: 8;
     symbolWhitelist: readonly ["BTC-USD", "ETH-USD", "SOL-USD"];
     maxSpreadBps: 30;
@@ -39,7 +39,7 @@ export interface CapitalPreservationDoctrine {
     /** Maximum daily loss as % of equity (3% = 0.03). */
     maxDailyLossPct: 0.03;
     /** Max number of correlated open positions across whitelisted symbols. */
-    maxCorrelatedPositions: 1;
+    maxCorrelatedPositions: 3;
   };
 }
 
