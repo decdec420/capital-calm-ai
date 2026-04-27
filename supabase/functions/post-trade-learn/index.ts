@@ -389,6 +389,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Trade Coach — additive AI-powered post-trade lesson + experiment hypothesis.
+    // Best-effort: never block the journal write or fail the function on coach errors.
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (LOVABLE_API_KEY) {
+      try {
+        await runTradeCoach(admin, t, sig, outcome, LOVABLE_API_KEY);
+      } catch (e) {
+        console.error("trade coach failed (non-fatal):", e);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
