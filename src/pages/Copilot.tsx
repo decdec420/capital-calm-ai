@@ -426,7 +426,11 @@ export default function Copilot() {
   });
 
   const send = async (text: string) => {
-    if (!text.trim() || streaming) return;
+    if (!text.trim()) return;
+    if (streaming) {
+      toast.info("Hold on — Harvey is still answering.");
+      return;
+    }
 
     // Make sure we have an active conversation. If not, create one on the fly.
     let convoId = activeId;
@@ -439,10 +443,14 @@ export default function Copilot() {
     }
 
     appendLocalMessage({ role: "user", content: text });
+    // Seed an empty assistant bubble immediately so the user sees Harvey "thinking"
+    // even before the first SSE token arrives. updateLastAssistant will fill it in.
+    appendLocalMessage({ role: "assistant", content: "" });
     setInput("");
     setStreaming(true);
 
     let buffer = "";
+    let streamSucceeded = false;
     const upsert = (chunk: string) => {
       buffer += chunk;
       updateLastAssistant(buffer);
@@ -514,13 +522,21 @@ export default function Copilot() {
         }
       }
 
+      streamSucceeded = true;
       // Reload from server so we get canonical IDs and the auto-set title.
+      // Only on success — otherwise the DB reload could clobber the optimistic
+      // user message if the assistant insert never landed.
       await reloadActiveMessages();
     } catch (e) {
       console.error(e);
       toast.error("Copilot connection error.");
     } finally {
       setStreaming(false);
+      // If we never got any tokens AND the stream failed, drop the empty assistant
+      // placeholder so the UI doesn't show a stranded "…" bubble.
+      if (!streamSucceeded && buffer.length === 0) {
+        updateLastAssistant("⚠️ No response — try again.");
+      }
     }
   };
 
