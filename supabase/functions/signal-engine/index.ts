@@ -67,6 +67,90 @@ const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
 // Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
 const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
 
+// ─── Coach: per-(symbol, side) historical loss penalty ─────────
+// Looks at recent closed trades for this symbol+side. If win-rate is poor
+// over a meaningful sample, returns:
+//   - a confidence multiplier (≤1) applied before persisting the signal
+//   - a one-line warning string to inject into the AI prompt
+// Returns null when there's no actionable signal (sample too small or
+// performance is fine).
+export interface CoachVerdict {
+  confidenceMultiplier: number;
+  warning: string;
+  sampleSize: number;
+  winRate: number;
+  netPnlUsd: number;
+}
+
+export function computeCoachVerdict(
+  recentTrades: ReadonlyArray<{ pnl: number | null; outcome?: string | null }>,
+): CoachVerdict | null {
+  const sample = recentTrades.filter((t) => t.pnl != null).slice(0, 10);
+  if (sample.length < 3) return null;
+  const wins = sample.filter((t) => Number(t.pnl) > 0).length;
+  const winRate = wins / sample.length;
+  const netPnlUsd = sample.reduce((s, t) => s + Number(t.pnl ?? 0), 0);
+  if (winRate >= 0.4 && netPnlUsd >= 0) return null;
+
+  let confidenceMultiplier = 1;
+  let tone = "";
+  if (winRate < 0.25) {
+    confidenceMultiplier = 0.7;
+    tone = "STRONG WARNING";
+  } else if (winRate < 0.4 || netPnlUsd < 0) {
+    confidenceMultiplier = 0.85;
+    tone = "Caution";
+  } else {
+    return null;
+  }
+
+  const warning =
+    `${tone}: last ${sample.length} trades on this symbol/side ` +
+    `won ${wins}/${sample.length} (${(winRate * 100).toFixed(0)}%), ` +
+    `net ${netPnlUsd >= 0 ? "+" : ""}$${netPnlUsd.toFixed(2)}. ` +
+    `Confidence will be penalized ×${confidenceMultiplier.toFixed(2)} unless edge is exceptional.`;
+
+  return { confidenceMultiplier, warning, sampleSize: sample.length, winRate, netPnlUsd };
+}
+
+// ─── News flags: extract active + critical from intel.news_flags ──
+// market_intelligence.news_flags is jsonb; we expect an array of
+// { label: string, severity: "critical" | "warning" | "info", active?: boolean,
+//   note?: string, until?: string }.
+// We treat missing `active` as true and missing `severity` as "info".
+export interface NewsFlagSummary {
+  active: Array<{ label: string; severity: string; note?: string; until?: string }>;
+  hasCritical: boolean;
+}
+
+export function summarizeNewsFlags(rawFlags: unknown): NewsFlagSummary {
+  if (!Array.isArray(rawFlags)) return { active: [], hasCritical: false };
+  const now = Date.now();
+  const active: NewsFlagSummary["active"] = [];
+  let hasCritical = false;
+  for (const f of rawFlags) {
+    if (!f || typeof f !== "object") continue;
+    const flag = f as {
+      label?: string;
+      severity?: string;
+      active?: boolean;
+      note?: string;
+      until?: string;
+    };
+    if (!flag.label) continue;
+    if (flag.active === false) continue;
+    if (flag.until) {
+      const untilTs = Date.parse(flag.until);
+      if (Number.isFinite(untilTs) && untilTs < now) continue;
+    }
+    const severity = (flag.severity ?? "info").toLowerCase();
+    active.push({ label: flag.label, severity, note: flag.note, until: flag.until });
+    if (severity === "critical") hasCritical = true;
+  }
+  return { active, hasCritical };
+}
+
+
 // ─── Expired-pending sweep ─────────────────────────────────────
 // Marks stale pending signals as expired and appends a lifecycle
 // transition via the FSM helper.
@@ -834,11 +918,27 @@ async function runTickForUser(
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
-    // The first refusal is the "lock" reason we show per-row. Re-entry
-    // cooldown takes precedence so the operator sees WHY this symbol is
-    // skipped rather than a generic "no setup" message.
+    // The first refusal is the "lock" reason we show per-row. Order of
+    // precedence (most-actionable first):
+    //   1. Critical news flag on this symbol (FOMC/CPI/etc. in window)
+    //   2. Re-entry cooldown after a recent loss
+    //   3. First halt/block from the standard risk gate
+    const symbolIntel = intelligenceBySymbol[symbol] ?? null;
+    const newsSummary = summarizeNewsFlags(symbolIntel?.news_flags);
     const reentryHit = reentryLockedSymbols.get(symbol);
-    const lockGate = reentryHit
+    const lockGate = newsSummary.hasCritical
+      ? gate(
+          GATE_CODES.NEWS_FLAG_CRITICAL,
+          "block",
+          `${symbol}: critical news flag active — ${
+            newsSummary.active
+              .filter((f) => f.severity === "critical")
+              .map((f) => f.label)
+              .join(", ")
+          }.`,
+          { symbol, activeNewsFlags: newsSummary.active },
+        )
+      : reentryHit
       ? gate(
           GATE_CODES.REENTRY_COOLDOWN,
           "block",
@@ -1123,6 +1223,9 @@ async function runTickForUser(
           ? `${Math.round((Date.now() - new Date(intel.generated_at).getTime()) / 60000)}min ago`
           : "not available",
         isStale: intel._stale ?? false,
+        // Active news/event flags (critical ones already hard-gated upstream;
+        // this surfaces the warnings/info ones to the AI so it can be cautious).
+        activeNewsFlags: summarizeNewsFlags(intel.news_flags).active,
       }
       : {
         error:
@@ -1227,6 +1330,18 @@ async function runTickForUser(
   const side = decision.side ?? "long";
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
 
+  // ── Coach: penalize confidence if recent (symbol, side) has bled ──
+  // Looks at the last 10 closed trades for this exact pair. If win-rate
+  // is poor over a meaningful sample, we shrink the confidence score
+  // (which feeds size + auto-execute threshold) and prepend a warning
+  // so the operator sees why a high-conviction setup landed at lower
+  // confidence in the UI.
+  const sameSidedRecent = (recentClosedTrades ?? []).filter(
+    (t: { symbol: string; side?: string | null; pnl: number | null }) =>
+      t.symbol === winner.symbol && (t.side ?? null) === side,
+  );
+  const coachVerdict = computeCoachVerdict(sameSidedRecent);
+
   // Stop fallback uses the strategy's stop_atr_mult so the param actually
   // changes live trades, not just backtests. We approximate ATR as 1% of
   // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
@@ -1245,7 +1360,16 @@ async function runTickForUser(
     0.05,
     Math.min(0.25, Number(decision.size_pct ?? 0.15)),
   );
-  const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const rawConf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const conf = coachVerdict
+    ? Math.max(0, Math.min(1, rawConf * coachVerdict.confidenceMultiplier))
+    : rawConf;
+  if (coachVerdict) {
+    decision.reasoning = `[Coach] ${coachVerdict.warning} ${decision.reasoning ?? ""}`.trim();
+    console.log(
+      `coach: ${winner.symbol}/${side} conf ${rawConf.toFixed(2)} → ${conf.toFixed(2)} (${coachVerdict.warning})`,
+    );
+  }
   const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
   // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
   const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
@@ -1426,6 +1550,9 @@ async function runTickForUser(
         pullback: winner.regime.pullback,
         doctrineClampedBy: clamp.clampedBy,
         riskManagerVerdict: riskVerdict ?? null,
+        coachVerdict: coachVerdict ?? null,
+        rawConfidence: rawConf,
+        activeNewsFlags: summarizeNewsFlags(intel?.news_flags).active,
       },
       status: "pending",
     })
