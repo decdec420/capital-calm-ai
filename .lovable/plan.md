@@ -1,55 +1,71 @@
-# Copilot Chat Latency Fix
+## What you're seeing
 
-## What you saw
+Two separate bugs, both real:
 
-You sent a message → waited ~30s → sent a second message → the **first** answer streamed in **below** your second send, and the second is still pending. So responses came back out of order relative to where you typed.
+### 1. "View all 20 alerts in Journals" link is a dead end
+The Overview page links overflow alerts to `/journals`, but the Journals page never renders alerts — it only shows journal entries. So you click and see nothing alert-related. There is no dedicated alerts viewer in the app today.
 
-## Root causes
+### 2. The "Jessica heartbeat lost" alerts are false alarms
+I checked the cron jobs and the database:
 
-I traced this to two real issues in `supabase/functions/copilot-chat/index.ts` and `src/pages/Copilot.tsx`:
+- `jessica-tick` cron is firing **every minute, succeeding every time** (last 10 runs all `succeeded`, most recent at 22:02 UTC).
+- But `system_state.last_jessica_decision.ran_at` is **24 minutes stale**.
+- The Postgres heartbeat checker (`check_jessica_heartbeat`, runs every 3 min) reads `ran_at`, sees it's >4 min old, and raises a "critical" alert — deduped to once per 30 min, which matches exactly what you're seeing (02:48, 02:18, 01:45, 01:12 …).
 
-**1. The function does a slow blocking "tool-detection" pass before streaming.**
-Every chat turn currently runs **two** Lovable AI Gateway calls back-to-back:
-- Pass 1: non-streaming call with `tools: DESK_TOOLS, tool_choice: "auto"` to see if Harvey wants to call a tool. This is fully synchronous — nothing reaches the browser until it finishes. With Gemini-flash + a long system prompt + 80 turns of history + agent-health enrichment, this can easily take 10–30s. **That is your dead air.**
-- Pass 2: the actual streaming call.
+**Root cause**: in `supabase/functions/jessica/index.ts` (lines 342–355), Jessica returns early with `{ skipped: true, reason: "kill_switch_engaged" | "bot_paused" | "paused until …" | "equity_critical_near_floor" }` **before** writing `last_jessica_decision`. Your bot is currently paused, so every tick exits early, `ran_at` never updates, and the watchdog screams. Cron is fine. Jessica is fine. The heartbeat signal is broken.
 
-In ~95% of chat turns Harvey doesn't call any tool, so pass 1 is wasted latency.
+---
 
-**2. The UI doesn't actually block the second send the way it looks like it does.**
-`send()` early-returns when `streaming === true`, so your second Enter should have been ignored — but looking at the code, the input textarea isn't disabled and there's no visible "thinking…" placeholder bubble in the message list while pass 1 is running. So it *feels* like nothing is happening, you hit send again, and then when pass 1 finally completes the stream lands and `reloadActiveMessages()` re-pulls from the DB. The DB now has: [your msg 1, assistant reply 1, your msg 2 (which never got sent because streaming was true and it bailed silently)]. Result: the second message looks "stuck" because it was never actually sent — just visually queued in the input box, or appended locally then wiped on reload.
+## Plan
 
-## The fix
+### Fix 1 — Make alerts a first-class page
 
-### Edge function — `supabase/functions/copilot-chat/index.ts`
+- Add `/alerts` route and `src/pages/Alerts.tsx`:
+  - Full list of alerts (paginated/scrollable), filter chips for `critical / warning / info`, search box.
+  - Each row opens the existing `AlertDetailSheet` (already supports deep-links and dismiss).
+  - "Dismiss" and "Dismiss all read" actions wired through `useAlerts`.
+- Add `/alerts` to `AppSidebar` nav.
+- Update `src/pages/Overview.tsx` line 541: change `to="/journals"` → `to="/alerts"` and the label to "View all N alerts →".
+- (Optional but cheap) Add a "Mark all dismissed" bulk action on the Alerts page.
 
-- **Remove the blocking first-pass tool detection by default.** Switch to single-pass streaming with `tools: DESK_TOOLS, tool_choice: "auto"` and `stream: true`. Lovable AI Gateway returns tool_calls in the SSE stream — handle them inline. If the model emits tool_calls instead of text content, execute the tools after the stream ends, then make a follow-up streaming call with the tool results. This means: in the common no-tool case, the user sees the first token in 1–3s instead of 15–30s.
-- **Cut the agent_health DB read out of the hot path.** Move it behind a small in-memory cache (e.g. fetch only if the cached value is >60s old). Right now it runs on every single message.
-- **Reduce `MAX_HISTORY_TURNS` from 80 to 30.** 80 turns of history is huge and dominates tokenization/processing time — 30 is more than enough context for chat.
+### Fix 2 — Stop the false Jessica heartbeat alarms
 
-### Frontend — `src/pages/Copilot.tsx` + `useConversations.ts`
+Two-part fix so the watchdog stays useful but stops crying wolf:
 
-- **Disable the textarea and send button while `streaming` is true** so the user can't fire a second message into the void. Show a clear "Harvey is thinking…" affordance under the input.
-- **Show an immediate placeholder assistant bubble** (empty, with a pulsing cursor or "…") the moment `send()` is called, so there's visible feedback even before the first SSE chunk arrives. This is what `appendLocalMessage` was supposed to do but it only inserts the user message — also seed an empty assistant message immediately.
-- **Surface a toast if `send()` is called while streaming** ("Hold on — Harvey is still answering") instead of silently returning.
-- **On stream error/abort, do NOT call `reloadActiveMessages()`** — only reload after a successful completion. Right now an aborted stream can wipe the local optimistic user message because the DB reload becomes the source of truth.
+**a) Always update `ran_at`, even on skipped ticks** (`supabase/functions/jessica/index.ts`)
+Refactor the four early-return branches (lines 342–355) so they write a minimal decision summary first:
+```ts
+{ ran_at, skipped: true, reason: "bot_paused", actions: 0 }
+```
+This is the correct heartbeat semantics: "the function ran" is what we want to track, not "the function took an action."
 
-## What this changes for you
+**b) Make the heartbeat checker tolerant** (`check_jessica_heartbeat` SQL function, via migration)
+- Bump the staleness threshold from 4 min → 8 min (cron runs every 1 min, watchdog every 3 min — 8 min covers two missed ticks plus jitter).
+- When `system_state.bot = 'paused'` or `kill_switch_engaged = true`, mark health as `degraded` instead of `failed` and **do not raise an alert** — these are operator-intended states, not outages.
+- Keep the existing 30-min alert dedupe.
 
-- First token from Harvey in **1–3s** (down from 10–30s).
-- Input is locked while a reply is in flight, with a clear "thinking" indicator.
-- Second message can't be silently dropped.
-- Tool calls (approve_signal, run_engine_tick, etc.) still work — just executed inline during streaming instead of via a separate blocking pre-pass.
+### Cleanup
+- Delete the existing 16 stale "Jessica heartbeat lost" critical alerts so the count drops to the real 3 info alerts. (One-shot SQL via migration.)
 
-## Files to change
+---
 
-- `supabase/functions/copilot-chat/index.ts` — single-pass streaming with inline tool handling, cached agent_health, smaller history window.
-- `src/pages/Copilot.tsx` — disabled input while streaming, immediate empty-assistant placeholder, guarded reload-on-success-only, "still answering" toast on retry.
-- `src/hooks/useConversations.ts` — small helper to seed an empty assistant placeholder atomically with the user message.
+## Files touched
 
-## What I will not touch
+- `src/App.tsx` — add `/alerts` route
+- `src/pages/Alerts.tsx` — new
+- `src/components/trader/AppSidebar.tsx` — add nav entry
+- `src/pages/Overview.tsx` — repoint "View all" link to `/alerts`
+- `supabase/functions/jessica/index.ts` — write `ran_at` on skip paths
+- `supabase/migrations/<new>.sql` — update `check_jessica_heartbeat()` thresholds + paused-state handling, and delete stale heartbeat alerts
 
-- The system prompt / Harvey persona.
-- Tool definitions in `_shared/desk-tools.ts`.
-- Rate limiting (20 req/60s stays).
-- The conversation/message DB schema.
-- All existing tests must still pass.
+No schema changes, no new tables, no impact on tools/Harvey/cron wiring.
+
+---
+
+## Verification after build
+
+1. Click "View all alerts" on Overview → lands on `/alerts` showing all 20.
+2. Confirm filter + dismiss work; sheet opens on row click.
+3. Within ~3 min of deploy: `system_state.last_jessica_decision.ran_at` updates every minute even though bot is paused.
+4. No new "Jessica heartbeat lost" alert appears within the next 30 min while paused.
+5. Manually flip cron off (or simulate by stopping ran_at writes) → confirm watchdog still fires after 8 min — i.e. it's tolerant, not blind.
