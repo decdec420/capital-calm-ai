@@ -880,6 +880,7 @@ async function runTickForUser(
   const intel = intelligenceBySymbol[winner.symbol] ?? null;
   const candles1h = candlesBySymbol[winner.symbol] ?? [];
   const candles4h = candlesBySymbol4h[winner.symbol] ?? [];
+  const candles15m = candlesBySymbol15m[winner.symbol] ?? [];
 
   const trend1h = (() => {
     if (candles1h.length < 20) return "insufficient_data";
@@ -902,6 +903,26 @@ async function runTickForUser(
       : secondHalf < firstHalf * 0.99
       ? "down"
       : "flat";
+  })();
+  // 15m momentum: are the last few bars going WITH the proposed direction?
+  // Used for entry timing — gives the AI a "right now / wait" signal.
+  const momentum15m = (() => {
+    if (candles15m.length < 8) {
+      return { trend: "insufficient_data", lastBarPct: 0, last3BarsPct: 0 };
+    }
+    const recent = candles15m.slice(-8).map((c) => c.c);
+    const last = recent[recent.length - 1];
+    const prev = recent[recent.length - 2];
+    const threeAgo = recent[recent.length - 4];
+    const lastBarPct = ((last - prev) / prev) * 100;
+    const last3BarsPct = ((last - threeAgo) / threeAgo) * 100;
+    const trend =
+      last3BarsPct > 0.15 ? "up" : last3BarsPct < -0.15 ? "down" : "flat";
+    return {
+      trend,
+      lastBarPct: Number(lastBarPct.toFixed(3)),
+      last3BarsPct: Number(last3BarsPct.toFixed(3)),
+    };
   })();
 
   const contextPacket = {
