@@ -43,6 +43,7 @@ function mapRow(r: any): SystemState {
       profile === "active" || profile === "aggressive" || profile === "sentinel"
         ? profile
         : "sentinel",
+    lastJessicaDecision: r.last_jessica_decision ?? null,
   };
 }
 
