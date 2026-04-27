@@ -657,11 +657,6 @@ export default function Copilot() {
               </div>
             </div>
 
-            <div className="border-t border-border pt-2">
-              <p className="text-[10px] text-muted-foreground italic leading-relaxed">
-                This context is auto-attached to every message.
-              </p>
-            </div>
           </div>
         </div>
       </div>
