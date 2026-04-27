@@ -602,8 +602,8 @@ export default function Copilot() {
                   {chosenSym ? (
                     <span className="inline-flex flex-col items-end gap-1">
                       <span className="capitalize">{chosenSym.replace("-USD", "")}</span>
-                      {chosenRow && (
-                        <RegimeBadge regime={chosenRow.regime} confidence={chosenRow.confidence} />
+                      {chosenRow && chosenRow.regime !== "unknown" && (
+                        <RegimeBadge regime={chosenRow.regime as Exclude<typeof chosenRow.regime, "unknown">} confidence={chosenRow.confidence} />
                       )}
                     </span>
                   ) : (
