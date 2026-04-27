@@ -546,6 +546,8 @@ export type Database = {
           created_at: string
           created_by: string
           description: string
+          display_name: string | null
+          friendly_summary: string | null
           id: string
           metrics: Json
           name: string
@@ -561,6 +563,8 @@ export type Database = {
           created_at?: string
           created_by?: string
           description?: string
+          display_name?: string | null
+          friendly_summary?: string | null
           id?: string
           metrics?: Json
           name: string
@@ -576,6 +580,8 @@ export type Database = {
           created_at?: string
           created_by?: string
           description?: string
+          display_name?: string | null
+          friendly_summary?: string | null
           id?: string
           metrics?: Json
           name?: string
@@ -651,6 +657,7 @@ export type Database = {
           data_feed: string
           id: string
           kill_switch_engaged: boolean
+          last_auto_promoted_at: string | null
           last_engine_snapshot: Json
           last_heartbeat: string
           last_mark_to_market_at: string | null
@@ -672,6 +679,7 @@ export type Database = {
           data_feed?: string
           id?: string
           kill_switch_engaged?: boolean
+          last_auto_promoted_at?: string | null
           last_engine_snapshot?: Json
           last_heartbeat?: string
           last_mark_to_market_at?: string | null
@@ -693,6 +701,7 @@ export type Database = {
           data_feed?: string
           id?: string
           kill_switch_engaged?: boolean
+          last_auto_promoted_at?: string | null
           last_engine_snapshot?: Json
           last_heartbeat?: string
           last_mark_to_market_at?: string | null

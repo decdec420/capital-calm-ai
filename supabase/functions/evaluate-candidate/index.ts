@@ -33,9 +33,13 @@ const json = (b: unknown, s: number) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-const MIN_TRADES_TO_EVALUATE = 50;
+// Tighter thresholds (Apr 2026 audit) — promotions should be rare and earned.
+const MIN_TRADES_TO_EVALUATE = 100;
+const MIN_EXP_MARGIN = 0.05;        // candidate must beat live by ≥0.05R expectancy
+const MIN_WIN_RATE_MARGIN = 0.03;   // …and ≥3pp on win rate
 const DRAWDOWN_TOLERANCE_PP = 0.10; // 10 percentage points
 const DRAWDOWN_CRITICAL_PP = 0.20;  // 20 pp → ask the human
+const COOLDOWN_DAYS = 7;            // lock auto-promotions for 7 days after one runs
 
 type StrategyRow = {
   id: string;
@@ -69,6 +73,7 @@ async function createAlert(
 async function evaluateForUser(
   admin: ReturnType<typeof createClient>,
   userId: string,
+  isCron: boolean,
 ) {
   // Pull approved + all candidates in one round-trip.
   const { data: rows } = await admin
@@ -108,7 +113,7 @@ async function evaluateForUser(
     };
   }
 
-  // Compare on the four criteria.
+  // Compare on the four criteria — now with real margins, not "≥".
   const aExp = metric(approved, "expectancy");
   const cExp = metric(inTesting, "expectancy");
   const aWin = metric(approved, "winRate");
@@ -118,8 +123,8 @@ async function evaluateForUser(
   const aSharpe = metric(approved, "sharpe");
   const cSharpe = metric(inTesting, "sharpe");
 
-  const expOk = cExp >= aExp;
-  const winOk = cWin >= aWin;
+  const expOk = (cExp - aExp) >= MIN_EXP_MARGIN;
+  const winOk = (cWin - aWin) >= MIN_WIN_RATE_MARGIN;
   // Drawdown is stored as a negative fraction. ddDelta > 0 means candidate is BETTER (less negative).
   const ddDelta = cDD - aDD;
   const ddOk = ddDelta >= -DRAWDOWN_TOLERANCE_PP;
@@ -140,16 +145,44 @@ async function evaluateForUser(
   }
 
   if (allPass) {
+    // Cooldown check (cron only — manual "Run check now" can still promote).
+    if (isCron) {
+      const { data: state } = await admin
+        .from("system_state")
+        .select("last_auto_promoted_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const last = (state as { last_auto_promoted_at: string | null } | null)?.last_auto_promoted_at;
+      if (last) {
+        const ageMs = Date.now() - new Date(last).getTime();
+        const cooldownMs = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+        if (ageMs < cooldownMs) {
+          const daysLeft = Math.ceil((cooldownMs - ageMs) / (24 * 60 * 60 * 1000));
+          return {
+            userId,
+            candidate: inTesting.version,
+            skipped: "cooldown",
+            trades,
+            cooldown_days_remaining: daysLeft,
+          };
+        }
+      }
+    }
+
     // Auto-promote: archive old approved, candidate becomes approved.
     await admin.from("strategies").update({ status: "archived" }).eq("id", approved.id);
     await admin.from("strategies").update({ status: "approved" }).eq("id", inTesting.id);
+    await admin
+      .from("system_state")
+      .update({ last_auto_promoted_at: new Date().toISOString() })
+      .eq("user_id", userId);
 
     await createAlert(
       admin,
       userId,
       "info",
       `🚀 Strategy auto-promoted to ${inTesting.version}`,
-      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${trades} paper trades.`,
+      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${trades} paper trades. Auto-promotions paused for ${COOLDOWN_DAYS} days.`,
     );
     return { userId, promoted: inTesting.version, trades };
   }
@@ -158,8 +191,8 @@ async function evaluateForUser(
   await admin.from("strategies").update({ status: "archived" }).eq("id", inTesting.id);
 
   const failReasons = [
-    !expOk && `expectancy (${cExp.toFixed(2)}R vs ${aExp.toFixed(2)}R)`,
-    !winOk && `win rate (${(cWin * 100).toFixed(0)}% vs ${(aWin * 100).toFixed(0)}%)`,
+    !expOk && `expectancy gap too small (${cExp.toFixed(2)}R vs ${aExp.toFixed(2)}R, need +${MIN_EXP_MARGIN.toFixed(2)}R)`,
+    !winOk && `win rate gap too small (${(cWin * 100).toFixed(0)}% vs ${(aWin * 100).toFixed(0)}%, need +${(MIN_WIN_RATE_MARGIN * 100).toFixed(0)}pp)`,
     !ddOk && `drawdown worsened by ${Math.abs(ddDelta * 100).toFixed(1)}pp`,
     !sharpeOk && `sharpe (${cSharpe.toFixed(2)} vs ${aSharpe.toFixed(2)})`,
   ].filter(Boolean).join(", ");
@@ -235,7 +268,7 @@ Deno.serve(async (req: Request) => {
     const results: unknown[] = [];
     for (const uid of userIds) {
       try {
-        results.push(await evaluateForUser(admin, uid));
+        results.push(await evaluateForUser(admin, uid, isCron));
       } catch (e) {
         results.push({ userId: uid, error: e instanceof Error ? e.message : String(e) });
       }

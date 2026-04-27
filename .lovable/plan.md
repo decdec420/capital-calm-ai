@@ -1,108 +1,75 @@
-# Why the Overview shows ~55¢ — and what to actually fix
+# Strategy Lab — Calmer Promotions + Friendlier UI
 
-## The deep dive
-
-I pulled your `account_state` and all 4 trades for user `55ab87c5…0d7d`. The DB is **mathematically correct** — the UI just makes it confusing.
-
-### Your real numbers right now
-
-```text
-account_state
-  equity              = $10,000.55
-  cash                = $10,000.55
-  start_of_day_equity = $10,000.00   ← never been reset since 2026-04-20
-  balance_floor       = $0.00        ← stomped to zero somewhere
-  updated_at          = 2026-04-26 21:50 UTC (fresh, mark-to-market is ticking)
-
-trades (4 total)
-  BTC win  +$0.6300   (closed 04-22)
-  SOL loss -$0.0493   (closed 04-23)
-  ETH loss -$0.0301   (closed 04-23)
-  BTC open  -$0.0023 unrealized (since 04-22)
-                   ─────────
-  realized total =  +$0.5506
-  + open unreal  =  -$0.0023
-                   ─────────
-  net P&L        =  +$0.5483  →  $10,000.5483 ✓ matches equity exactly
-```
-
-So mark-to-market **is** running (every ~30s, confirmed in network logs) and equity **is** updating. The "55 cents" is real — it's the sum of one $0.63 win minus two ~$0.04 losses on microscopic position sizes (BTC trade was 0.000011 BTC ≈ $0.86 of exposure on a $10k account).
-
-### What's actually wrong
-
-1. **`start_of_day_equity` is stale (6 days old).** "Daily PnL" is computed as `equity − start_of_day_equity`, so it shows the *cumulative* P&L since 04-20, not today's. That's why it reads "+$0.55, +0.01%" forever instead of resetting at 00:00 UTC.
-
-2. **`balance_floor = $0`.** Probably overwritten by an earlier test or a buggy Welcome flow write. "Floor distance" reads ~100% which is meaningless.
-
-3. **Position sizing is the root cause of "no movement."** With a $10k account, the engine opened trades worth $0.86 (BTC), $0.86 (ETH), $1.89 (SOL). Even a 3% winner only nets $0.03. The Overview is honest — there just isn't much money in motion.
-
-4. **No automated start-of-day rollover job exists.** Nothing resets `start_of_day_equity` at 00:00. It's stuck at the original onboarding value.
-
-### What's NOT wrong
-- Mark-to-market scheduling — running every ~30s
-- Realtime subscription on `account_state` — `useAccountState` is wired correctly
-- Equity computation — math checks out to the cent
+Two things at once: stop the bot from flipping strategies on weak evidence, and make the page readable without a finance degree.
 
 ---
 
-## Proposed fix (4 surgical changes)
+## Part 1 — Stop the bot from constantly shifting
 
-### 1. Shrink the paper account to $10 (one-off)
-You want smaller, more readable numbers while we tune the agent. I'll run an `UPDATE` on your `account_state`:
+The current auto-promotion is too eager: 50 trades, "≥" beats anything, no cooldown. We tighten it on three axes so promotions become rare and meaningful.
 
-```text
-equity              = 10.00
-cash                = 10.00
-start_of_day_equity = 10.00
-balance_floor       =  8.50   (85% floor — same ratio as before)
-```
+### Changes to `evaluate-candidate` (the cron job)
 
-This is a paper account — zero real-money risk. All 4 existing trades stay in history; only the live equity rebases to $10. After this, a 1% winner shows as "+$0.10" instead of "+$0.0023" — much easier to read at a glance and forces the engine to size meaningfully against a small balance.
+- **Raise the trade bar from 50 → 100.** Doubles statistical confidence. The "Promotion progress" bar in the UI updates to match (`100 / 100 paper trades`).
+- **Require a real margin, not just "better".** Today `cExp >= aExp` passes if the candidate is 0.001R better. New rule: candidate must beat live by **≥0.05R expectancy AND ≥3pp win rate** (same threshold the Learning evaluator already uses). Drawdown still can't be more than 10pp worse. Sharpe still must be ≥ live.
+- **7-day cooldown after any promotion.** Once a strategy is auto-promoted, the next auto-promotion is locked for 7 days. Forces real-world validation before the next swap. (You can still force-promote manually from the menu — the cooldown only blocks the cron.)
+- **Soft-confirm window (optional, off by default).** When a candidate passes, instead of swapping immediately, write a "ready to promote in 24h — reply to veto" alert. If you don't object, the promotion runs the next day. We'll add a toggle for this in Settings; default off so the auto-pilot works out-of-the-box, and you can opt in if you want a sanity check window.
 
-I'll also nudge `doctrine_settings` so the engine knows the new starting equity:
-- `starting_equity_usd = 10`
-- `max_order_abs_cap = 5` (so a single order can be up to half the account, not capped at $50 which is meaningless on $10)
-- `max_order_pct` left at its current value
+### How often promotions actually happen after this
 
-**This does not cap what users can choose** — Welcome / Settings still let anyone set whatever equity they want. This is just a one-off reset for your account.
-
-### 2. Add a daily start-of-day rollover (server)
-New `supabase/functions/rollover-day/index.ts` that copies current `equity` → `start_of_day_equity` for every user once per UTC day. Schedule via `pg_cron` at `5 0 * * *` (00:05 UTC). Idempotent: only writes if `start_of_day_equity` was set more than 20 hours ago.
-
-### 3. Make the Overview honest about small numbers (client)
-In `src/pages/Overview.tsx`:
-- Show 4 decimals when `|dailyPnl| < $1` so "+$0.5483" reads instead of "+$0.55"
-- Show equity to the cent always; add 4-decimal precision on hover
-- Add a tooltip on the Equity card showing `realized today` vs `unrealized` split
-- When `start_of_day_equity` was set >24h ago, badge the Daily PnL card with "since {date}" instead of pretending it's today
-
-### 4. Wire the Copilot learning loop (foundation only — non-breaking)
-You said the AI must learn from every trade. The plumbing already exists (`journal_entries`, `experiments`, mark-to-market closes trades with outcome+reason_tags). What's missing is **automatic post-trade journaling**. I'll add:
-
-- A trigger on `trades` UPDATE (status: open → closed) that calls a new edge function `post-trade-learn`
-- That function reads the closed trade + the originating `trade_signal` (entry reasoning, regime, setup score, confidence) and writes a structured `journal_entries` row of kind `'post_trade'` with: outcome, what worked, what didn't, calibration delta (predicted confidence vs realized outcome)
-- It also appends to a per-strategy rolling metric so Strategy Lab can show "since last 20 trades: win rate, expectancy, calibration error" — which feeds your existing experiment proposal flow
-
-This gives you the foundation: **every trade produces a learning artifact**, and the experiments page already knows how to act on patterns. We can layer smarter analysis later (LLM weekly review of the journal, candidate auto-propose, etc.) without rewiring anything.
-
-I will **not** auto-promote anything — humans (or your existing approval flow) decide. We're building memory + signal, not autonomy.
+With paper trading at current pace, a candidate needs roughly **2–4 weeks** to accumulate 100 trades. Then it must clear the higher bar on every metric. Realistic expectation: **0–1 promotions per month**, with most candidates getting retired instead. That's the right tempo — strategies should evolve, not thrash.
 
 ---
 
-## Files to touch
+## Part 2 — Make the page look less like a math textbook
 
-- `supabase/functions/rollover-day/index.ts` — new edge function
-- `supabase/functions/post-trade-learn/index.ts` — new edge function
-- DB migration — pg_cron schedule for rollover; trigger on `trades` for post-trade journal
-- One-off `UPDATE` on `account_state` + `doctrine_settings` for your user (paper rebase to $10)
-- `src/pages/Overview.tsx` — formatting, tooltip, stale-day badge
-- `src/hooks/useAccountState.ts` — expose `realizedToday` / `unrealizedTotal` derived values
-- `src/pages/StrategyLab.tsx` — surface the rolling per-strategy metrics from journal entries (read-only)
+The bones are good, the language is the problem. "trend-rev v1.3+stop_atr_mult=2", "EXPECTANCY 0.04R", "SHARPE 0.05" — true but unfriendly.
 
-## What this changes for you immediately
+### Friendlier names
 
-- Equity shows $10.00 instead of $10,000.55 — moves are visible
-- Tomorrow morning, "Daily PnL" actually resets
-- "Floor distance" stops showing nonsense
-- Every closed trade automatically writes a learning entry the Copilot can read
-- No change to your trading logic or sizing percentages — just the dollar base
+- **Strategy display name** gets a separate `display_name` field (still keeps the technical `name`/`version` for the engine). Defaults: instead of `trend-rev v1.3` the live card shows something like **"Steady Trender"** with the technical id in small text underneath. We'll seed sensible defaults for existing strategies and let you rename any time from the Edit menu.
+- **Candidate names** get auto-generated readable summaries: instead of `trend-rev v1.3+stop_atr_mult=2` it shows **"Wider stops experiment"** with the parameter diff still visible in the "Changes vs live" box below.
+
+### Translate the metrics into English
+
+Keep the precise numbers (you need them) but add one-line plain-English subtitles under each:
+
+- **Expectancy 0.04R** → subtitle "Avg profit per trade"
+- **Win rate 67%** → subtitle "How often it wins"
+- **Max DD -1.9%** → subtitle "Worst losing streak"
+- **Sharpe 0.05** → subtitle "Smoothness of returns"
+- **Trades 3** → subtitle "Sample size"
+
+Use a tooltip with a longer explanation for each (we already have the `Explain` component).
+
+### Visual breathing room
+
+- **Plain-English banner replaces the cron line.** "Auto-pilot active · evaluates every 30 min · promotes automatically if it beats the baseline" becomes a single soft-colored line: **"On auto-pilot — checking every 30 min, replaces only after 100 trades and a clear win."**
+- **Status badges instead of all-caps eyebrows.** "● LIVE  CURRENTLY TRADING" → just a green pill that says **"Now trading"**. "● IN TESTING  ACCUMULATING PAPER TRADES" → amber pill **"Paper testing"**.
+- **Hide the "Changes vs live" box behind a small "see what changed" toggle** — it's reference, not a primary thing to read.
+- **Promotion progress bar** gets a friendly label: "On track for review in ~12 days" (computed from trades/day pace) instead of just "47 to go".
+
+### What stays the same
+
+- The actual numbers (expectancy, win rate, etc.) — they're correct and useful, just need context
+- The pipeline structure (Live → In Testing → Queue → Archive)
+- Scaling readiness checklist
+- All the dropdown actions (clone, edit, force promote, retire)
+
+---
+
+## Files touched
+
+- `supabase/functions/evaluate-candidate/index.ts` — new thresholds, cooldown logic
+- `supabase/migrations/<new>` — add `display_name` column to `strategies`, `last_auto_promoted_at` to `system_state`, optional `auto_promote_soft_confirm` flag to `system_state`
+- `src/pages/StrategyLab.tsx` — Live + In Testing panels: friendlier names, plain-English metric subtitles, calmer banner, cleaner header pills
+- `src/components/trader/MetricExplain.tsx` (small new helper) — wraps each metric with subtitle + tooltip
+- `src/lib/strategy-naming.ts` (small new helper) — generates "Wider stops experiment" style names from the parameter diff
+- `TRADES_TO_PROMOTE` constant: 50 → 100 in both UI and cron
+- `src/pages/Settings.tsx` — optional toggle for soft-confirm mode
+
+---
+
+## What you'll see when this ships
+
+The page becomes scannable in 5 seconds without reading any technical text. The live strategy looks like *"Steady Trender — now trading. Avg profit per trade: 0.04R. Wins 67% of the time."* The candidate becomes *"Wider stops experiment — paper testing, on track for review in ~12 days."* The auto-promotion still happens, just with real evidence behind it.
