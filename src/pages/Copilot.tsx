@@ -402,7 +402,10 @@ export default function Copilot() {
         </div>
 
         {/* CENTER COLUMN — chat / history / calibration tabs */}
-        <div className="panel flex flex-col" style={{ minHeight: "65vh" }}>
+        <div
+          className="panel flex flex-col overflow-hidden"
+          style={{ height: "min(72vh, 760px)" }}
+        >
           <Tabs defaultValue="chat" className="flex-1 flex flex-col">
             <div className="mx-3 mt-3 flex items-center justify-between gap-2">
               <TooltipProvider delayDuration={200}>
