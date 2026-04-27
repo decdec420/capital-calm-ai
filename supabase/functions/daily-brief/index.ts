@@ -121,7 +121,7 @@ async function buildBriefForUser(
   }
 
   // Session bias derived from macro_bias confidence + caution count.
-  const biases = (intel ?? []).map((r: Record<string, unknown>) => ({
+  const biases: Array<{ bias: string; conf: number }> = ((intel ?? []) as Array<Record<string, unknown>>).map((r) => ({
     bias: String(r.macro_bias ?? "neutral"),
     conf: Number(r.macro_confidence ?? 0.5),
   }));
