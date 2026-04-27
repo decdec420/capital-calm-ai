@@ -181,6 +181,8 @@ export interface SystemState {
   paramsWiredLive: boolean;
   /** When set in the future, signal engine will not propose new trades. */
   tradingPausedUntil: string | null;
+  /** Active trading profile — controls per-order/daily caps and scan cadence. */
+  activeProfile: "sentinel" | "active" | "aggressive";
 }
 
 export interface AccountState {
