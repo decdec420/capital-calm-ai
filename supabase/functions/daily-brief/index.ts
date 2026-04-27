@@ -321,6 +321,10 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Rate limit single-user JWT path: 5 req / 60s
+    const rl = await checkRateLimit(admin, userData.user.id, "daily-brief", 5);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     const result = await buildBriefForUser(admin, userData.user.id, LOVABLE_API_KEY);
     await upsertBrief(admin, userData.user.id, result);
 
