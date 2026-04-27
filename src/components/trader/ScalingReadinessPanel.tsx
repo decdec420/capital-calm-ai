@@ -15,6 +15,7 @@ interface ChecklistItem {
   pass: boolean;
   label: string;
   detail: string;
+  source: string;
 }
 
 export function ScalingReadinessPanel() {
