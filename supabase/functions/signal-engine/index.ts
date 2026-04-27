@@ -61,6 +61,12 @@ const corsHeaders = {
 // Symbols come from the doctrine whitelist — single source of truth.
 const SYMBOLS = SYMBOL_WHITELIST;
 
+// ─── AI Model Assignments ──────────────────────────────────────
+// Technical Analyst stays on Flash — runs on every tick (288×/day).
+const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
+// Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
+const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
+
 // ─── Expired-pending sweep ─────────────────────────────────────
 // Marks stale pending signals as expired and appends a lifecycle
 // transition via the FSM helper.
