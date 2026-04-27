@@ -330,45 +330,63 @@ export type Database = {
           consecutive_loss_limit: number
           created_at: string
           daily_loss_pct: number
+          floor_abs_min: number
           floor_pct: number
           id: string
           loss_cooldown_minutes: number
+          max_correlated_positions: number
           max_order_abs_cap: number
+          max_order_abs_floor: number
           max_order_pct: number
           max_trades_per_day: number
           mode: string
-          starting_equity_usd: number
+          risk_per_trade_pct: number
+          scan_interval_seconds: number
+          starting_equity_usd: number | null
           updated_at: string
+          updated_via: string
           user_id: string
         }
         Insert: {
           consecutive_loss_limit?: number
           created_at?: string
           daily_loss_pct?: number
+          floor_abs_min?: number
           floor_pct?: number
           id?: string
           loss_cooldown_minutes?: number
+          max_correlated_positions?: number
           max_order_abs_cap?: number
+          max_order_abs_floor?: number
           max_order_pct?: number
           max_trades_per_day?: number
           mode?: string
-          starting_equity_usd?: number
+          risk_per_trade_pct?: number
+          scan_interval_seconds?: number
+          starting_equity_usd?: number | null
           updated_at?: string
+          updated_via?: string
           user_id: string
         }
         Update: {
           consecutive_loss_limit?: number
           created_at?: string
           daily_loss_pct?: number
+          floor_abs_min?: number
           floor_pct?: number
           id?: string
           loss_cooldown_minutes?: number
+          max_correlated_positions?: number
           max_order_abs_cap?: number
+          max_order_abs_floor?: number
           max_order_pct?: number
           max_trades_per_day?: number
           mode?: string
-          starting_equity_usd?: number
+          risk_per_trade_pct?: number
+          scan_interval_seconds?: number
+          starting_equity_usd?: number | null
           updated_at?: string
+          updated_via?: string
           user_id?: string
         }
         Relationships: []
@@ -666,6 +684,48 @@ export type Database = {
           trade_closed?: boolean
           trade_opened?: boolean
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      pending_doctrine_changes: {
+        Row: {
+          activated_at: string | null
+          cancelled_at: string | null
+          effective_at: string
+          field: string
+          from_value: number | null
+          id: string
+          reason: string | null
+          requested_at: string
+          status: string
+          to_value: number
+          user_id: string
+        }
+        Insert: {
+          activated_at?: string | null
+          cancelled_at?: string | null
+          effective_at: string
+          field: string
+          from_value?: number | null
+          id?: string
+          reason?: string | null
+          requested_at?: string
+          status?: string
+          to_value: number
+          user_id: string
+        }
+        Update: {
+          activated_at?: string | null
+          cancelled_at?: string | null
+          effective_at?: string
+          field?: string
+          from_value?: number | null
+          id?: string
+          reason?: string | null
+          requested_at?: string
+          status?: string
+          to_value?: number
           user_id?: string
         }
         Relationships: []
@@ -1302,6 +1362,7 @@ export type Database = {
         }
       }
       check_jessica_heartbeat: { Args: never; Returns: undefined }
+      get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }
       get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
