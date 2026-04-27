@@ -204,6 +204,17 @@ export default function Overview() {
         />
       )}
 
+      {system?.tradingPausedUntil && new Date(system.tradingPausedUntil) > new Date() && (
+        <div className="panel p-3 border-status-caution/40 bg-status-caution/5 flex items-center gap-3">
+          <Zap className="h-4 w-4 text-status-caution shrink-0" />
+          <div className="flex-1 text-xs">
+            <span className="font-medium text-foreground">Event Mode active</span>
+            <span className="text-muted-foreground"> — no new trades until {new Date(system.tradingPausedUntil).toLocaleTimeString()}.</span>
+          </div>
+          <Link to="/risk" className="text-xs text-primary hover:underline shrink-0">Resume early</Link>
+        </div>
+      )}
+
       {/* Hero strip */}
       <div className="panel p-5 flex flex-wrap items-center gap-4 bg-gradient-surface">
         <div className="flex items-center gap-3">
