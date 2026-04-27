@@ -27,8 +27,13 @@ interface ChatMessage {
 
 const MAX_USER_MESSAGE_CHARS = 4000;
 const MAX_CONTEXT_CHARS = 8000;
-// Cap how many historical turns we send back to the model. Generous, but bounded.
-const MAX_HISTORY_TURNS = 80;
+// Cap how many historical turns we send back to the model. Bounded for latency.
+const MAX_HISTORY_TURNS = 30;
+
+// In-memory cache for agent_health — refreshed at most once per 60s per isolate.
+// Prevents a DB roundtrip on every chat turn.
+let _agentHealthCache: { rows: Array<Record<string, unknown>>; at: number } | null = null;
+const AGENT_HEALTH_TTL_MS = 60_000;
 
 const buildSystemPrompt = (context?: Record<string, unknown>) => {
   const ctxBlock = context ? JSON.stringify(context, null, 2) : "{}";
