@@ -31,6 +31,15 @@ export interface Ticker {
 const CB = "https://api.exchange.coinbase.com";
 
 /**
+ * Fetch 15-minute candles for entry timing.
+ * Used by the signal engine to confirm whether the 1h setup is right
+ * NOW (15m momentum cooperating) or whether to wait for a better tick.
+ */
+export async function fetchCandles15m(symbol: Symbol): Promise<Candle[]> {
+  return fetchCandles(symbol, 900);
+}
+
+/**
  * Fetch 4-hour candles for multi-timeframe context.
  * Used by the signal engine alongside the default 1h candles so the
  * Technical Analyst AI can confirm 1h entries against the 4h structure.
