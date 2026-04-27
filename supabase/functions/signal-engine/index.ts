@@ -1550,6 +1550,9 @@ async function runTickForUser(
         pullback: winner.regime.pullback,
         doctrineClampedBy: clamp.clampedBy,
         riskManagerVerdict: riskVerdict ?? null,
+        coachVerdict: coachVerdict ?? null,
+        rawConfidence: rawConf,
+        activeNewsFlags: summarizeNewsFlags(intel?.news_flags).active,
       },
       status: "pending",
     })
