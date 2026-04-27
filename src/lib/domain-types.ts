@@ -183,6 +183,13 @@ export interface SystemState {
   tradingPausedUntil: string | null;
   /** Active trading profile — controls per-order/daily caps and scan cadence. */
   activeProfile: "sentinel" | "active" | "aggressive";
+  /** Jessica's most recent autonomous decision summary (set by the jessica edge fn). */
+  lastJessicaDecision: {
+    ran_at: string;
+    actions: number;
+    decision: string;
+    action_log?: Array<{ tool: string; success?: boolean }>;
+  } | null;
 }
 
 export interface AccountState {
