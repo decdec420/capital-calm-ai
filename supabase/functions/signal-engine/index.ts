@@ -241,6 +241,8 @@ async function decideForSymbol(opts: {
   };
   /** Active trading profile — controls per-order cap shown in the prompt. */
   profile: TradingProfile;
+  /** Per-user resolved per-order USD cap. Overrides profile when present. */
+  maxOrderUsdOverride?: number;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
