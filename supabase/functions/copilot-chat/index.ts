@@ -224,8 +224,32 @@ Deno.serve(async (req: Request) => {
       | { role: "system" | "user" | "tool"; content: string; tool_call_id?: string }
       | { role: "assistant"; content: string; tool_calls?: unknown[] };
 
+    // Load agent health so Harvey can proactively report degraded agents.
+    // Falls back gracefully if the table is empty or the read fails.
+    let healthRows: Array<Record<string, unknown>> = [];
+    try {
+      const { data: rows } = await supabase
+        .from("agent_health")
+        .select("agent_name, status, last_success, failure_count, last_error, checked_at")
+        .order("checked_at", { ascending: false });
+      healthRows = (rows ?? []) as Array<Record<string, unknown>>;
+    } catch (e) {
+      console.error("[copilot-chat] agent_health load failed", e);
+    }
+
+    const enrichedContext: Record<string, unknown> = {
+      ...(safeContext ?? {}),
+      agentHealth: healthRows.map((h) => ({
+        agent: h.agent_name,
+        status: h.status,
+        last_success: h.last_success,
+        failures: h.failure_count,
+        error: h.last_error,
+      })),
+    };
+
     const baseMessages: ToolMessage[] = [
-      { role: "system", content: buildSystemPrompt(safeContext) },
+      { role: "system", content: buildSystemPrompt(enrichedContext) },
       ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       { role: "user", content: userMessage },
     ];
