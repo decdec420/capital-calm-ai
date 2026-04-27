@@ -266,7 +266,7 @@ You MUST call submit_decision. No plain text responses.
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: TECHNICAL_ANALYST_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           {
