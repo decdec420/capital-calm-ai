@@ -580,20 +580,80 @@ export default function Copilot() {
         <div className="space-y-3">
           <AutonomyToggle />
 
-          <div className="panel p-4">
-            <div className="text-sm font-medium text-foreground mb-2">Context attached</div>
-            <ul className="text-xs text-muted-foreground space-y-1.5">
-              <li>• Mode: <span className="text-foreground capitalize">{system?.mode ?? "—"}</span></li>
-              <li>
-                • Engine pick:{" "}
-                <span className="text-foreground capitalize">
-                  {chosenSym ?? "none"}
-                  {chosenRow ? ` · ${String(chosenRow.regime).replace("_", " ")}` : ""}
+          <div className="panel p-4 space-y-3">
+            <div className="text-sm font-medium text-foreground">Live context</div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Mode</span>
+                <span className="text-foreground capitalize tabular">{system?.mode ?? "—"}</span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Equity</span>
+                <span className="text-foreground tabular">
+                  {account ? `$${account.equity.toFixed(2)}` : "—"}
                 </span>
-              </li>
-              <li>• Open: <span className="text-foreground">{open[0] ? `${open[0].side} ${open[0].symbol}` : "none"}</span></li>
-              <li>• Pending signal: <span className="text-foreground">{activeSignal ? `${activeSignal.side} (${(activeSignal.confidence*100).toFixed(0)}%)` : "none"}</span></li>
-            </ul>
+              </div>
+
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-muted-foreground shrink-0">Engine pick</span>
+                <span className="text-foreground text-right">
+                  {chosenSym ? (
+                    <span className="inline-flex flex-col items-end gap-1">
+                      <span className="capitalize">{chosenSym.replace("-USD", "")}</span>
+                      {chosenRow && (
+                        <RegimeBadge regime={chosenRow.regime} confidence={chosenRow.confidence} />
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic">none</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Open</span>
+                <span className="text-foreground">
+                  {open[0] ? (
+                    <span className="capitalize">{open[0].side} {open[0].symbol.replace("-USD", "")}</span>
+                  ) : (
+                    <span className="text-muted-foreground italic">none</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Signal</span>
+                <span className="text-foreground">
+                  {activeSignal ? (
+                    <span className="capitalize tabular">
+                      {activeSignal.side} {(activeSignal.confidence * 100).toFixed(0)}%
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic">none</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Corr. cap</span>
+                <span className="text-foreground tabular">
+                  {open.length}/1{" "}
+                  {open.length >= 1 ? (
+                    <span className="text-status-caution">active</span>
+                  ) : (
+                    <span className="text-status-safe">clear</span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-2">
+              <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                This context is auto-attached to every message.
+              </p>
+            </div>
           </div>
         </div>
       </div>
