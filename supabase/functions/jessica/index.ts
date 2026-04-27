@@ -336,22 +336,49 @@ async function runJessicaForUser(
 ): Promise<Record<string, unknown>> {
   const context = await buildContext(admin, userId);
 
-  // Hard safety guards — Jessica doesn't act into a wall
+  // Helper: write a heartbeat so check_jessica_heartbeat sees us alive
+  // even when we intentionally skip (paused, kill-switched, near floor).
+  const writeHeartbeat = async (skipped: boolean, reason: string | null, actions: number, decision: string) => {
+    try {
+      await admin
+        .from("system_state")
+        .update({
+          last_jessica_decision: {
+            ran_at: new Date().toISOString(),
+            skipped,
+            reason,
+            actions,
+            decision: decision.slice(0, 500),
+          },
+        })
+        .eq("user_id", userId);
+    } catch (e) {
+      console.error("[jessica] failed to update last_jessica_decision (skip path)", e);
+    }
+  };
+
+  // Hard safety guards — Jessica doesn't act into a wall, but she still
+  // marks herself as alive so the heartbeat watchdog doesn't false-alarm.
   const sys = context.system as Record<string, unknown>;
   if (sys.kill_switch_engaged) {
+    await writeHeartbeat(true, "kill_switch_engaged", 0, "Kill-switch engaged — sitting.");
     return { skipped: true, reason: "kill_switch_engaged" };
   }
   if (sys.bot === "paused") {
+    await writeHeartbeat(true, "bot_paused", 0, "Bot paused — sitting.");
     return { skipped: true, reason: "bot_paused" };
   }
   if (sys.trading_paused_until) {
     const pausedUntil = new Date(sys.trading_paused_until as string);
     if (pausedUntil > new Date()) {
-      return { skipped: true, reason: `paused until ${pausedUntil.toISOString()}` };
+      const reason = `paused until ${pausedUntil.toISOString()}`;
+      await writeHeartbeat(true, reason, 0, `Trading paused — sitting (${reason}).`);
+      return { skipped: true, reason };
     }
   }
   const acct = context.account as Record<string, unknown>;
   if (acct.critical) {
+    await writeHeartbeat(true, "equity_critical_near_floor", 0, "Equity near floor — sitting.");
     return { skipped: true, reason: "equity_critical_near_floor" };
   }
 
