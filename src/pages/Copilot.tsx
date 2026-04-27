@@ -402,7 +402,10 @@ export default function Copilot() {
         </div>
 
         {/* CENTER COLUMN — chat / history / calibration tabs */}
-        <div className="panel flex flex-col" style={{ minHeight: "65vh" }}>
+        <div
+          className="panel flex flex-col overflow-hidden"
+          style={{ height: "min(72vh, 760px)" }}
+        >
           <Tabs defaultValue="chat" className="flex-1 flex flex-col">
             <div className="mx-3 mt-3 flex items-center justify-between gap-2">
               <TooltipProvider delayDuration={200}>
@@ -581,7 +584,12 @@ export default function Copilot() {
           <AutonomyToggle />
 
           <div className="panel p-4 space-y-3">
-            <div className="text-sm font-medium text-foreground">Live context</div>
+            <div>
+              <div className="text-sm font-medium text-foreground">What Max sees</div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Auto-attached to every message you send.
+              </p>
+            </div>
 
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between gap-2">
@@ -649,11 +657,6 @@ export default function Copilot() {
               </div>
             </div>
 
-            <div className="border-t border-border pt-2">
-              <p className="text-[10px] text-muted-foreground italic leading-relaxed">
-                This context is auto-attached to every message.
-              </p>
-            </div>
           </div>
         </div>
       </div>
