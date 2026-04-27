@@ -7,6 +7,7 @@ import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { PerTradeStopPanel } from "@/components/trader/PerTradeStopPanel";
 import { DoctrineGuardrailGrid } from "@/components/trader/DoctrineGuardrailGrid";
+import { ProfilePicker } from "@/components/trader/ProfilePicker";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -131,6 +132,11 @@ export default function RiskCenter() {
             {filter === "caution" ? "filter active · click to clear" : caution > 0 ? "click to filter" : "—"}
           </div>
         </button>
+      </div>
+
+      {/* Trading profile — sets how aggressive Max can be */}
+      <div className="panel p-5">
+        <ProfilePicker />
       </div>
 
       {/* Per-trade auto-sell — answers "when does the bot bail out?" */}

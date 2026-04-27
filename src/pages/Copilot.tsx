@@ -27,7 +27,7 @@ import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DOCTRINE } from "@/lib/doctrine-constants";
+import { getProfile } from "@/lib/doctrine-constants";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
 const SUGGESTED = [
