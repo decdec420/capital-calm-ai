@@ -1410,6 +1410,7 @@ async function runTickForUser(
     equityUsd: equity,
     symbolPrice: entry,
     symbol: winner.symbol,
+    profile: activeProfile,
   });
 
   if (clamp.blocked) {
