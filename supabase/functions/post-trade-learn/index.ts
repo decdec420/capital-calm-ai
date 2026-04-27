@@ -313,7 +313,7 @@ BRAIN TRUST CONTEXT (current cached intel — proxy for entry-time):
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: TRADE_COACH_MODEL,
         messages: [
           { role: "system", content: TRADE_COACH_SYSTEM },
           {
