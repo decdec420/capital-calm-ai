@@ -91,7 +91,14 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
     symbolPrice,
     symbol,
     minOrderUsd = 0.25,
+    profile: profileInput,
   } = input;
+
+  const activeProfile: TradingProfile =
+    typeof profileInput === "object" && profileInput
+      ? profileInput
+      : getProfile(typeof profileInput === "string" ? profileInput : undefined);
+  const orderCap = activeProfile.maxOrderUsdHardCap;
 
   const reasons: GateReason[] = [];
 
@@ -162,18 +169,18 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
     };
   }
 
-  // 4. Hard cap: clamp to $1 per order. Informational if clamped.
+  // 4. Hard cap: clamp to per-order limit (depends on active profile).
   let sizeUsd = proposedQuoteUsd;
-  if (sizeUsd > MAX_ORDER_USD) {
+  if (sizeUsd > orderCap) {
     reasons.push(
       gate(
         GATE_CODES.DOCTRINE_MAX_ORDER,
         "info",
-        `Proposed $${proposedQuoteUsd.toFixed(2)} clamped to $${MAX_ORDER_USD} per-order cap.`,
-        { proposedQuoteUsd, cap: MAX_ORDER_USD },
+        `Proposed $${proposedQuoteUsd.toFixed(2)} clamped to $${orderCap} per-order cap (${activeProfile.label}).`,
+        { proposedQuoteUsd, cap: orderCap, profile: activeProfile.id },
       ),
     );
-    sizeUsd = MAX_ORDER_USD;
+    sizeUsd = orderCap;
   }
 
   // 5. Minimum viable order: if what's left rounds to below the exchange
