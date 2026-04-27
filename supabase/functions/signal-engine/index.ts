@@ -1987,6 +1987,7 @@ Deno.serve(async (req) => {
       candlesBySymbol15m,
       LOVABLE_API_KEY,
     );
+    await tracker.flushHealth(admin, userData.user.id);
     const status = result.tick === "ai_error" ? 500 : 200;
     return new Response(JSON.stringify(result), {
       status,
