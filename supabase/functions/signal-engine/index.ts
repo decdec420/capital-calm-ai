@@ -228,6 +228,8 @@ async function decideForSymbol(opts: {
     stopAtrMult: number;
     tpRMult: number;
   };
+  /** Active trading profile — controls per-order cap shown in the prompt. */
+  profile: TradingProfile;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -243,7 +245,8 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams } = opts;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile } = opts;
+  const MAX_ORDER_USD = profile.maxOrderUsdHardCap;
 
   const liveStopAtrMult = stratParams.stopAtrMult;
   const liveTpMult = stratParams.tpRMult;
