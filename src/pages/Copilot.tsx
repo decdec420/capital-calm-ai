@@ -402,13 +402,42 @@ export default function Copilot() {
         </div>
 
         {/* CENTER COLUMN — chat / history / calibration tabs */}
-        <div className="panel flex flex-col" style={{ minHeight: "55vh" }}>
+        <div className="panel flex flex-col" style={{ minHeight: "65vh" }}>
           <Tabs defaultValue="chat" className="flex-1 flex flex-col">
-            <TabsList className="mx-3 mt-3 self-start">
-              <TabsTrigger value="chat">Chat</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
-              <TabsTrigger value="calibration">Calibration</TabsTrigger>
-            </TabsList>
+            <div className="mx-3 mt-3 flex items-center justify-between gap-2">
+              <TooltipProvider delayDuration={200}>
+                <TabsList>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TabsTrigger value="chat">Chat</TabsTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Conversation with the Copilot. Live system context auto-attached.</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TabsTrigger value="history">Signal Log</TabsTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Every engine tick — proposed, skipped, executed, or halted.</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TabsTrigger value="calibration">AI Accuracy</TabsTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      When the AI says 80% confidence, is it right 80% of the time? This chart grades its honesty.
+                    </TooltipContent>
+                  </Tooltip>
+                </TabsList>
+              </TooltipProvider>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                onClick={async () => { await createConversation(); }}
+              >
+                <Plus className="h-3 w-3" /> New chat
+              </Button>
+            </div>
 
             <TabsContent value="chat" className="flex-1 flex flex-col mt-2 data-[state=inactive]:hidden">
               {loadingMessages && messages.length === 0 ? (
