@@ -1101,6 +1101,36 @@ async function runTickForUser(
     const symbolIntel = intelligenceBySymbol[symbol] ?? null;
     const newsSummary = summarizeNewsFlags(symbolIntel?.news_flags);
     const reentryHit = reentryLockedSymbols.get(symbol);
+
+    // Brain Trust momentum freshness gate. Required before any proposal:
+    // both 1h and 4h reads must be present AND the read must be ≤2h old.
+    const momentumAt = symbolIntel?.recent_momentum_at
+      ? new Date(symbolIntel.recent_momentum_at).getTime()
+      : null;
+    const momentumAgeMin = momentumAt
+      ? (Date.now() - momentumAt) / 60_000
+      : Number.POSITIVE_INFINITY;
+    const momentum1h = symbolIntel?.recent_momentum_1h ?? null;
+    const momentum4h = symbolIntel?.recent_momentum_4h ?? null;
+    const momentumStale =
+      !momentum1h || !momentum4h || !momentumAt || momentumAgeMin > 120;
+    const momentumGate = momentumStale
+      ? gate(
+          GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE,
+          "block",
+          `${symbol}: Trade blocked — Brain Trust stale or missing short-horizon momentum read.`,
+          {
+            symbol,
+            momentum1h,
+            momentum4h,
+            momentumAgeMinutes: Number.isFinite(momentumAgeMin)
+              ? Math.round(momentumAgeMin)
+              : null,
+            maxAgeMinutes: 120,
+          },
+        )
+      : null;
+
     const lockGate = newsSummary.hasCritical
       ? gate(
           GATE_CODES.NEWS_FLAG_CRITICAL,
@@ -1113,6 +1143,8 @@ async function runTickForUser(
           }.`,
           { symbol, activeNewsFlags: newsSummary.active },
         )
+      : momentumGate
+      ? momentumGate
       : reentryHit
       ? gate(
           GATE_CODES.REENTRY_COOLDOWN,
