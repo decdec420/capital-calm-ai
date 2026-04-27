@@ -61,7 +61,7 @@ export function DoctrineEditSheet({ open, onOpenChange, focusField }: Props) {
   useEffect(() => {
     if (open && settings) {
       const next = {} as Record<DoctrineField, number>;
-      for (const f of EDITABLE_FIELDS) next[f] = Number((settings as Record<string, unknown>)[f] ?? 0);
+      for (const f of EDITABLE_FIELDS) next[f] = Number((settings as unknown as Record<string, unknown>)[f] ?? 0);
       setDrafts(next);
       setStartingEquityDraft(settings.starting_equity_usd?.toString() ?? "");
     }
@@ -71,7 +71,7 @@ export function DoctrineEditSheet({ open, onOpenChange, focusField }: Props) {
     if (!settings) return [];
     return EDITABLE_FIELDS.map((f) => ({
       field: f,
-      current: Number((settings as Record<string, unknown>)[f] ?? 0),
+      current: Number((settings as unknown as Record<string, unknown>)[f] ?? 0),
       draft: drafts[f] ?? 0,
     }));
   }, [drafts, settings]);
