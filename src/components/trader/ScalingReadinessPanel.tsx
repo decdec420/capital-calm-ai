@@ -145,9 +145,9 @@ export function ScalingReadinessPanel() {
       <div className="panel">
         <CollapsibleTrigger asChild>
           <button className="w-full px-4 py-3 border-b border-border flex items-center justify-between hover:bg-accent/30 transition-colors">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-left">
               <span className="text-[11px] uppercase tracking-wider text-foreground font-semibold">
-                🔒 Scaling readiness
+                🔒 Account-wide scaling readiness
               </span>
               <StatusBadge tone={allGreen ? "safe" : "neutral"} size="sm">
                 {passing}/{total}
@@ -161,28 +161,38 @@ export function ScalingReadinessPanel() {
         <CollapsibleContent>
           <div className="px-4 py-3 space-y-3">
             <p className="text-xs text-muted-foreground">
-              All of these must be green before raising doctrine caps beyond $1/trade.
+              Measured across <span className="text-foreground">all</span> your paper trades and strategies — not tied to any one test.
+              All green before raising real-money caps beyond $1/trade.
             </p>
             {loading ? (
               <p className="text-xs text-muted-foreground italic">Loading…</p>
             ) : (
-              <ul className="space-y-2">
-                {items.map((item, idx) => (
-                  <li key={idx} className="flex items-start gap-3 text-xs">
-                    {item.pass ? (
-                      <CheckCircle2 className="h-4 w-4 text-status-safe shrink-0 mt-0.5" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    )}
-                    <div className="flex-1">
-                      <div className={cn("font-medium", item.pass ? "text-foreground" : "text-muted-foreground")}>
-                        {item.label}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground tabular">{item.detail}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <TooltipProvider delayDuration={300}>
+                <ul className="space-y-2">
+                  {items.map((item, idx) => (
+                    <li key={idx} className="flex items-start gap-3 text-xs">
+                      {item.pass ? (
+                        <CheckCircle2 className="h-4 w-4 text-status-safe shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex-1 cursor-help">
+                            <div className={cn("font-medium", item.pass ? "text-foreground" : "text-muted-foreground")}>
+                              {item.label}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground tabular">{item.detail}</div>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[260px] text-xs">
+                          {item.source}
+                        </TooltipContent>
+                      </Tooltip>
+                    </li>
+                  ))}
+                </ul>
+              </TooltipProvider>
             )}
             <div className="text-[11px] text-muted-foreground border-t border-border pt-3">
               When all green: edit <code className="font-mono text-foreground">doctrine.ts</code> to raise{" "}
