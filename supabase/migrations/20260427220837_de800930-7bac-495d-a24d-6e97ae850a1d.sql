@@ -1,0 +1,1 @@
+DELETE FROM public.alerts WHERE title = 'Jessica heartbeat lost' AND created_at < now();
