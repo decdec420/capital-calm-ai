@@ -1942,6 +1942,10 @@ Deno.serve(async (req) => {
             error: String(e),
           });
         }
+        // Flush per-user market-data health regardless of tick outcome.
+        // Tracker is shared across users this tick — the same candle
+        // failures apply to everyone.
+        await tracker.flushHealth(admin, u.user_id);
       }
       return new Response(
         JSON.stringify({
