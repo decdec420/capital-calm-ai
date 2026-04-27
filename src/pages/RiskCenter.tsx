@@ -8,6 +8,8 @@ import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { PerTradeStopPanel } from "@/components/trader/PerTradeStopPanel";
 import { DoctrineGuardrailGrid } from "@/components/trader/DoctrineGuardrailGrid";
 import { ProfilePicker } from "@/components/trader/ProfilePicker";
+import { PendingDoctrineChangesPanel } from "@/components/trader/PendingDoctrineChangesPanel";
+import { StartingEquityModal } from "@/components/onboarding/StartingEquityModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -164,6 +166,9 @@ export default function RiskCenter() {
           <GateReasonList reasons={lastGateReasons} />
         )}
       </div>
+
+      {/* Pending doctrine changes (24h cooldown) — only renders when present. */}
+      <PendingDoctrineChangesPanel />
 
       {/* Doctrine source-of-truth: derived live from doctrine + account + trades. */}
       <DoctrineGuardrailGrid />
