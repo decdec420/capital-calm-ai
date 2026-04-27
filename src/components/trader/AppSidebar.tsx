@@ -1,4 +1,4 @@
-import { Activity, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
+import { Activity, BarChart2, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ const sections = [
       { title: "Overview", url: "/", icon: LayoutDashboard },
       { title: "Market Intel", url: "/market", icon: LineChart },
       { title: "Trades", url: "/trades", icon: Activity },
+      { title: "Performance", url: "/performance", icon: BarChart2 },
       { title: "Journals", url: "/journals", icon: BookOpen },
     ],
   },
