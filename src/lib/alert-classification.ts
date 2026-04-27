@@ -52,22 +52,23 @@ export function classifyAlert(alert: Alert): ClassifiedAlert {
   const hay = `${title} ${message}`.toLowerCase();
 
   // ---- Cron / heartbeat ----
+  // No primary/secondary nav actions: AlertCard renders a live Jessica
+  // triage block + inline actions (Resume bot, Disarm kill-switch, Run
+  // Jessica now) for this category. Nav would be a dead end.
   if (/heartbeat|cron may be down|never recorded a decision/.test(hay)) {
     return {
       category: "cron_health",
       categoryLabel: CATEGORY_LABEL.cron_health,
-      summary: message || "A scheduled job may have stopped running.",
+      summary: message || "Jessica hasn't ticked recently.",
       what:
         message ||
-        "A scheduled background job (cron) hasn't reported in within its expected window.",
-      why: "While the heartbeat is missed, no new signals are generated and automated lifecycle steps (approvals, exits, learning) pause. Open positions are unaffected by the heartbeat itself, but won't be re-evaluated until ticks resume.",
+        "Jessica — the autonomous decision agent that runs every minute — hasn't reported a tick within her expected window.",
+      why: "While Jessica is silent, no new signals are generated and automated lifecycle steps (approvals, exits, learning) pause. Open positions are still tracked but won't be re-evaluated until ticks resume.",
       fixes: [
-        "Open Risk Center to check system state and confirm whether the bot is paused or the kill-switch is engaged.",
-        "If the bot is paused or the kill-switch is engaged, this clears on its own once you resume — the alert will stop firing within a few minutes.",
-        "If the cron really stopped, redeploy the related edge function or contact support.",
+        "Check the live status block above. If the bot is paused or the kill-switch is engaged, this is expected — start the bot and the alert clears within a minute.",
+        "Otherwise, click Run Jessica now to kick a tick. If it succeeds, the heartbeat resets immediately.",
+        "If Run Jessica now fails, the edge function itself is down — open Copilot to check agent logs or contact support.",
       ],
-      primaryAction: { label: "Open Risk Center", to: "/risk" },
-      secondaryAction: { label: "Open Settings", to: "/settings" },
     };
   }
 
