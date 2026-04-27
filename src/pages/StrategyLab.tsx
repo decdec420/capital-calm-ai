@@ -967,6 +967,7 @@ function StrategyDialog({
 }) {
   const [name, setName] = useState(strategy?.name ?? "trend-rev");
   const [version, setVersion] = useState(strategy?.version ?? "v1.0-cand");
+  const [displayName, setDisplayName] = useState(strategy?.displayName ?? "");
   const [status, setStatus] = useState<StrategyStatus>(strategy?.status ?? "candidate");
   const [description, setDescription] = useState(strategy?.description ?? "");
   const [params, setParams] = useState<StrategyParam[]>(strategy?.params ?? []);
@@ -980,6 +981,7 @@ function StrategyDialog({
     if (strategy) {
       setName(strategy.name);
       setVersion(strategy.version);
+      setDisplayName(strategy.displayName ?? "");
       setStatus(strategy.status);
       setDescription(strategy.description);
       setParams(strategy.params);
@@ -995,7 +997,15 @@ function StrategyDialog({
       return toast.error("Metrics is not valid JSON.");
     }
     if (!name.trim() || !version.trim()) return toast.error("Name + version required.");
-    onSubmit({ name, version, status, description, params, metrics });
+    onSubmit({
+      name,
+      version,
+      displayName: displayName.trim() ? displayName.trim() : null,
+      status,
+      description,
+      params,
+      metrics,
+    });
   };
 
   return (
