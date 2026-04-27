@@ -480,6 +480,7 @@ async function runTickForUser(
   admin: any,
   userId: string,
   candlesBySymbol: Record<Symbol, Candle[]>,
+  candlesBySymbol4h: Record<Symbol, Candle[]>,
   LOVABLE_API_KEY: string,
 ) {
   const expiredCount = await expirePendingSignals(admin, userId);
