@@ -133,7 +133,10 @@ export default function Trades() {
 
 
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 pt-4 border-t border-border">
-            <Cell label="Size" value={`${openPosition.size.toFixed(4)}`} />
+            <Cell
+              label="Size"
+              value={`${formatBaseQty(openPosition.size)} · ${formatUsd(openPosition.size * (lastPrice || openPosition.entryPrice))}`}
+            />
             <Cell label="Entry" value={`$${openPosition.entryPrice.toFixed(2)}`} />
             <Cell label="Last" value={lastPrice ? `$${lastPrice.toFixed(2)}` : "—"} />
             <Cell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} tone="blocked" />
