@@ -12,6 +12,8 @@ import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
 import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
 import { ConversationSidebar } from "@/components/trader/ConversationSidebar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,7 +25,7 @@ import { useExperiments } from "@/hooks/useExperiments";
 import { useSignals } from "@/hooks/useSignals";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
+import { Send, Sparkles, Brain, Play, Check, X, Telescope, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
