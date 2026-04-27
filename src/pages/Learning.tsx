@@ -10,7 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useExperiments, type NewExperimentInput } from "@/hooks/useExperiments";
 import type { Experiment, CopilotMemoryRow, StrategyMetrics, ExperimentBacktestResult } from "@/lib/domain-types";
-import { Brain, Check, ChevronDown, FlaskConical, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
+import { Brain, Check, ChevronDown, FlaskConical, GraduationCap, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
