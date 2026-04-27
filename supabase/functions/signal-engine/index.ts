@@ -62,6 +62,56 @@ import {
 // explodes at cold-start instead of silently mis-sizing a live order.
 validateDoctrineInvariants();
 
+// ── LLM Circuit Breaker ───────────────────────────────────────────
+// Tracks consecutive AI gateway failures across warm invocations.
+// Fail-safe: when open, the engine skips AI calls and locks the tick
+// with AI_ERROR rather than firing signals without AI confirmation.
+// Module-level state survives warm invocations; cold starts reset it,
+// which is intentional (a cold start probes the gateway fresh).
+
+const CB_STATE = {
+  failures: 0,
+  openedAt: 0 as number,
+  state: "closed" as "closed" | "open" | "half-open",
+};
+
+const OPEN_THRESHOLD = 3;       // Trip after 3 consecutive failures
+const RESET_AFTER_MS = 60_000;  // Stay open for 60s, then probe
+
+function cbAllow(): boolean {
+  if (CB_STATE.state === "closed") return true;
+  if (CB_STATE.state === "open") {
+    if (Date.now() - CB_STATE.openedAt >= RESET_AFTER_MS) {
+      CB_STATE.state = "half-open";
+      console.log("[signal-engine] circuit breaker: half-open — probing AI");
+      return true; // allow one probe
+    }
+    return false;
+  }
+  // half-open: allow the probe
+  return true;
+}
+
+function cbSuccess(): void {
+  if (CB_STATE.state !== "closed") {
+    console.log("[signal-engine] circuit breaker: closed — AI gateway recovered");
+  }
+  CB_STATE.failures = 0;
+  CB_STATE.state = "closed";
+}
+
+function cbFailure(): void {
+  CB_STATE.failures += 1;
+  if (CB_STATE.state === "half-open" || CB_STATE.failures >= OPEN_THRESHOLD) {
+    CB_STATE.state = "open";
+    CB_STATE.openedAt = Date.now();
+    console.error(
+      `[signal-engine] circuit breaker: OPEN after ${CB_STATE.failures} consecutive AI failures. ` +
+        `Skipping AI calls for ${RESET_AFTER_MS / 1000}s.`,
+    );
+  }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
