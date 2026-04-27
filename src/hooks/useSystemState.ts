@@ -35,6 +35,9 @@ function mapRow(r: any): SystemState {
     autonomyLevel: (r.autonomy_level ?? "manual") as AutonomyLevel,
     lastEngineSnapshot: parseSnapshot(r.last_engine_snapshot),
     liveMoneyAcknowledgedAt: r.live_money_acknowledged_at ?? null,
+    paperAccountBalance: Number(r.paper_account_balance ?? 1000),
+    paramsWiredLive: !!r.params_wired_live,
+    tradingPausedUntil: r.trading_paused_until ?? null,
   };
 }
 
