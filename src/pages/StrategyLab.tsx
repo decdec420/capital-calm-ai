@@ -61,7 +61,6 @@ export default function StrategyLab() {
     remove,
     refetch,
     approved,
-    candidates,
     inTestingList,
     archived,
     duplicateIds,
