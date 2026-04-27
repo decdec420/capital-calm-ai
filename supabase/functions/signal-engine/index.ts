@@ -52,7 +52,7 @@ import {
   transitionTrade,
   type LifecycleTransition,
 } from "../_shared/lifecycle.ts";
-import { buildPatternMemory } from "../_shared/pattern-memory.ts";
+import { buildPatternMemory } from "../_shared/trade-stats.ts";
 import {
   persistSnapshot,
   type PerSymbolSnapshot,
