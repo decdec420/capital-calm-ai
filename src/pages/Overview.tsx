@@ -340,6 +340,8 @@ export default function Overview() {
           value={account ? `$${fmtMoney(account.equity, true)}` : "—"}
           icon={<DollarSign className="h-3.5 w-3.5" />}
           hint={account ? `cash $${fmtMoney(account.cash, true)}` : undefined}
+          sparkValues={equitySeries.slice(-10)}
+          sublabel={closed.length > 0 ? `${closed.length} total trades` : undefined}
           explain={
             account ? (
               <>
@@ -361,15 +363,31 @@ export default function Overview() {
           delta={{ value: `${dailyPnlPct >= 0 ? "+" : ""}${dailyPnlPct.toFixed(2)}%`, direction: dailyPnl >= 0 ? "up" : "down" }}
           tone={dailyPnl >= 0 ? "safe" : "blocked"}
           icon={dailyPnl >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+          progress={
+            dailyPnl < 0
+              ? { value: Math.abs(lossVsCap), max: 1.5, tone: lossVsCap > 1 ? "blocked" : "caution" }
+              : undefined
+          }
+          sublabel={
+            closedToday.length > 0
+              ? `${winsToday}W / ${lossesToday}L today`
+              : "no closed trades yet"
+          }
           explain="Profit & Loss since the start-of-day equity snapshot. Resets daily at 00:05 UTC via automatic rollover."
           onClick={() => setDrilldown("dailyPnl")}
           loading={accountLoading}
         />
         <MetricCard
           label="Trades today"
-          value={String(closedToday.length + open.length)}
-          hint="cap 6"
-          explain="Open + closed positions opened today. Hard cap of 6 to stop revenge-trading after a bad fill."
+          value={String(tradesTodayCount)}
+          hint={`cap ${tradesCap}`}
+          progress={{ value: tradesTodayCount, max: tradesCap, tone: "safe" }}
+          sublabel={
+            open.length > 0
+              ? `${open.length} open · ${closedToday.length} closed`
+              : `${closedToday.length} closed`
+          }
+          explain={`Open + closed positions opened today. Hard cap of ${tradesCap} to stop revenge-trading after a bad fill.`}
           onClick={() => setDrilldown("tradesToday")}
           loading={accountLoading}
         />
@@ -378,6 +396,12 @@ export default function Overview() {
           value={`${lossVsCap.toFixed(2)}%`}
           hint="cap 1.50%"
           tone={lossVsCap > 1 ? "caution" : "safe"}
+          progress={{
+            value: lossVsCap,
+            max: 1.5,
+            tone: lossVsCap > 1 ? "blocked" : lossVsCap > 0.75 ? "caution" : "safe",
+          }}
+          sublabel={lossToday < 0 ? `$${Math.abs(lossToday).toFixed(4)} used` : "no losses today"}
           explain="How much of today's max-loss budget you've already burned. At 100% the bot halts itself for the day."
           onClick={() => setDrilldown("lossVsCap")}
           loading={accountLoading}
@@ -386,6 +410,12 @@ export default function Overview() {
           label="Floor distance"
           value={account ? `${floorDistance.toFixed(1)}%` : "—"}
           hint={account ? `floor $${fmtMoney(account.balanceFloor, true)}` : undefined}
+          progress={{
+            value: floorDistance,
+            max: 100,
+            tone: floorDistance < 5 ? "blocked" : floorDistance < 15 ? "caution" : "safe",
+          }}
+          sublabel={account ? `floor $${account.balanceFloor.toFixed(2)}` : undefined}
           explain="How far equity sits above the absolute balance floor. Hit the floor and the kill-switch trips automatically."
           onClick={() => setDrilldown("floorDistance")}
           loading={accountLoading}
@@ -397,6 +427,7 @@ export default function Overview() {
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
           tone={liveGated ? "blocked" : "safe"}
           hint={liveGated ? "paper-only" : "operator-armed"}
+          sublabel={liveGated ? "arm in Settings →" : "real orders allowed"}
           explain="Gated = paper money only, no real orders. Armed = real orders allowed (still subject to every guardrail). Toggle in Settings."
           onClick={() => setDrilldown("liveMode")}
           loading={accountLoading}
