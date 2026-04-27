@@ -62,7 +62,7 @@ export default function RiskCenter() {
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setNewOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> Add guardrail
+              <Plus className="h-3.5 w-3.5" /> Add annotation
             </Button>
             <Button
               variant="outline"
