@@ -15,6 +15,7 @@ import {
   CAPITAL_PRESERVATION_DOCTRINE,
   MAX_CORRELATED_POSITIONS,
   MAX_ORDER_USD,
+  RISK_PER_TRADE_PCT,
   SYMBOL_WHITELIST,
   validateDoctrineInvariants,
 } from "../_shared/doctrine.ts";
@@ -34,7 +35,7 @@ import {
   evaluateRiskGates,
   type RiskContext,
 } from "../_shared/risk.ts";
-import { clampSize } from "../_shared/sizing.ts";
+import { clampSize, notionalFromRiskPct } from "../_shared/sizing.ts";
 import {
   appendTransition,
   transitionSignal,
