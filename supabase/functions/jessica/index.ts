@@ -66,7 +66,108 @@ Hard rules — these are not negotiable:
 - Capital preservation beats everything. When in doubt, sit.
 - You are not the engine. You are not the risk manager. They do their jobs.
   Your job is to decide WHEN to call them — and when to leave them alone.
+
+HEALTH RECOVERY: agent_health in context shows current agent status.
+- If brain_trust is 'failed' or 'degraded': run_brain_trust immediately
+  (recovery may already have been triggered pre-tick — confirm in your reasoning).
+- If signal_engine is 'failed' (>15m since last tick): run_engine_tick to verify it responds.
+- Surface any 'failed' agent status in your decision text so it appears in the audit log.
 `.trim();
+
+// ─── Agent Health Check (Layer 1 watchdog) ──────────────────────────
+// Jessica inspects each agent's freshness on every tick and writes a row
+// to agent_health. Postgres separately watches Jessica herself via the
+// check_jessica_heartbeat() pg_cron job (Layer 2).
+
+interface AgentHealth {
+  agent: string;
+  status: "healthy" | "degraded" | "failed" | "stale";
+  lastSuccessMinutesAgo: number | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+}
+
+async function checkAgentHealth(
+  admin: SupabaseClient,
+  userId: string,
+  context: Record<string, unknown>,
+): Promise<AgentHealth[]> {
+  const nowIso = new Date().toISOString();
+  const health: AgentHealth[] = [];
+
+  // ── Brain Trust (Mike + Louis via market-intelligence) ──
+  const intelStaleness = (context.brain_trust as Record<string, unknown> | undefined)
+    ?.staleness_minutes as Record<string, number> | undefined;
+  const stalenessValues = intelStaleness ? Object.values(intelStaleness) : [];
+  const maxStaleness = stalenessValues.length > 0 ? Math.max(...stalenessValues) : 9999;
+  const btStatus: AgentHealth["status"] =
+    maxStaleness < 300   ? "healthy"  // < 5h
+    : maxStaleness < 600 ? "stale"    // 5–10h
+    : maxStaleness < 960 ? "degraded" // 10–16h
+    : "failed";                       // >16h — definitely missed a cron run
+  health.push({
+    agent: "brain_trust",
+    status: btStatus,
+    lastSuccessMinutesAgo: maxStaleness < 9999 ? maxStaleness : null,
+    consecutiveFailures: btStatus === "failed" ? 1 : 0,
+    lastError: btStatus === "failed"
+      ? `Stale ${maxStaleness}m — likely Brain Trust cron or upstream candle failure`
+      : null,
+  });
+
+  // ── Signal Engine (Donna) ──
+  const engineAgeSeconds =
+    ((context.engine as Record<string, unknown> | undefined)?.last_tick_seconds_ago as number | undefined) ?? 9999;
+  const engineAgeMinutes = Math.floor(engineAgeSeconds / 60);
+  const engineStatus: AgentHealth["status"] =
+    engineAgeMinutes < 3   ? "healthy"
+    : engineAgeMinutes < 6 ? "stale"
+    : engineAgeMinutes < 15 ? "degraded"
+    : "failed";
+  health.push({
+    agent: "signal_engine",
+    status: engineStatus,
+    lastSuccessMinutesAgo: engineAgeMinutes < 9999 ? engineAgeMinutes : null,
+    consecutiveFailures: engineStatus === "failed" ? 1 : 0,
+    lastError: engineStatus === "failed"
+      ? `No engine tick in ${engineAgeMinutes}m — cron may have stopped`
+      : null,
+  });
+
+  // ── Jessica's self-report (the heartbeat row is written separately by Postgres) ──
+  // This row reflects "Jessica says she's running." The pg_cron heartbeat
+  // writes a separate row called 'jessica_heartbeat' from outside the runtime.
+  health.push({
+    agent: "jessica",
+    status: "healthy",
+    lastSuccessMinutesAgo: 0,
+    consecutiveFailures: 0,
+    lastError: null,
+  });
+
+  // Upsert all health rows. Failures here are non-fatal — Jessica must keep going.
+  for (const h of health) {
+    try {
+      await admin.from("agent_health").upsert(
+        {
+          user_id: userId,
+          agent_name: h.agent,
+          status: h.status,
+          last_success: h.status === "healthy" ? nowIso : undefined,
+          last_failure: h.status === "failed" ? nowIso : undefined,
+          failure_count: h.consecutiveFailures,
+          last_error: h.lastError,
+          checked_at: nowIso,
+        },
+        { onConflict: "user_id,agent_name" },
+      );
+    } catch (e) {
+      console.error(`[jessica] failed to upsert agent_health for ${h.agent}`, e);
+    }
+  }
+
+  return health;
+}
 
 // ─── Context Builder ─────────────────────────────────────────────
 
