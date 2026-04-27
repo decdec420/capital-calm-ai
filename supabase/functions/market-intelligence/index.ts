@@ -691,6 +691,16 @@ async function runIntelligenceForSymbol(
       environment_rating: cryptoResult?.environment_rating ?? "neutral",
       pattern_context: patternResult?.pattern_context ?? "",
       entry_quality_context: patternResult?.entry_quality_context ?? "",
+      // Short-horizon momentum read (mandatory for the engine's freshness gate).
+      // Only stamp recent_momentum_at when we actually got a fresh read this run,
+      // so a partial failure doesn't masquerade as fresh data.
+      recent_momentum_1h: patternResult?.recent_momentum_1h ?? null,
+      recent_momentum_4h: patternResult?.recent_momentum_4h ?? null,
+      recent_momentum_notes: patternResult?.recent_momentum_notes ?? null,
+      recent_momentum_at:
+        patternResult?.recent_momentum_1h && patternResult?.recent_momentum_4h
+          ? new Date().toISOString()
+          : null,
       running_narrative: updatedNarrative,
       news_flags: newsFlags,
       generated_at: new Date().toISOString(),
