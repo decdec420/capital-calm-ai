@@ -281,9 +281,16 @@ export async function fetchCandles(
   };
 
   try {
-    const r = await fetch(
+    let r = await fetch(
       `${CB}/products/${symbol}/candles?granularity=${granularitySeconds}`,
     );
+    if (r.status === 429) {
+      console.warn(`[market] Coinbase rate-limited on ${symbol} candles — retrying in ~1s`);
+      await sleep(1000);
+      r = await fetch(
+        `${CB}/products/${symbol}/candles?granularity=${granularitySeconds}`,
+      );
+    }
     if (!r.ok) {
       const msg = `HTTP ${r.status}`;
       ctx.tracker?.recordFailure(key, msg);
