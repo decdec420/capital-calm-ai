@@ -926,6 +926,7 @@ async function runTickForUser(
         level: g.level,
         utilization: Number(g.utilization ?? 0),
       })),
+      profile: activeProfile,
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
@@ -1149,14 +1150,22 @@ async function runTickForUser(
   })();
 
   const contextPacket = {
+    profile: {
+      id: activeProfile.id,
+      label: activeProfile.label,
+      maxOrderUsd: activeProfile.maxOrderUsdHardCap,
+      maxTradesPerDay: activeProfile.maxDailyTradesHardCap,
+      maxDailyLossUsd: activeProfile.maxDailyLossUsdHardCap,
+      maxCorrelatedPositions: activeProfile.maxCorrelatedPositions,
+      riskPerTradePct: activeProfile.riskPerTradePct,
+      scanIntervalSeconds: activeProfile.scanIntervalSeconds,
+    },
     doctrine: {
-      maxOrderUsd: CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxOrderUsdHardCap,
-      maxTradesPerDay:
-        CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyTradesHardCap,
-      maxDailyLossUsd:
-        CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyLossUsdHardCap,
+      maxOrderUsd: activeProfile.maxOrderUsdHardCap,
+      maxTradesPerDay: activeProfile.maxDailyTradesHardCap,
+      maxDailyLossUsd: activeProfile.maxDailyLossUsdHardCap,
       killSwitchFloorUsd:
-        CAPITAL_PRESERVATION_DOCTRINE.hardRules.minBalanceUsdKillSwitch,
+        CAPITAL_PRESERVATION_DOCTRINE.globalRules.minBalanceUsdKillSwitch,
     },
     market: {
       symbol: winner.symbol,
@@ -1278,6 +1287,7 @@ async function runTickForUser(
     intel,
     LOVABLE_API_KEY,
     stratParams: liveParams,
+    profile: activeProfile,
   });
 
   if ("error" in aiResult) {
