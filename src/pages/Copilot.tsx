@@ -27,6 +27,7 @@ import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { Send, Sparkles, Brain, Play, Check, X, Telescope, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DOCTRINE } from "@/lib/doctrine-constants";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
 const SUGGESTED = [
@@ -647,8 +648,8 @@ export default function Copilot() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Corr. cap</span>
                 <span className="text-foreground tabular">
-                  {open.length}/1{" "}
-                  {open.length >= 1 ? (
+                  {open.length}/{DOCTRINE.MAX_CORRELATED_POSITIONS}{" "}
+                  {open.length >= DOCTRINE.MAX_CORRELATED_POSITIONS ? (
                     <span className="text-status-caution">active</span>
                   ) : (
                     <span className="text-status-safe">clear</span>
