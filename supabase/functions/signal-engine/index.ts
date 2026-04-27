@@ -684,6 +684,15 @@ async function runTickForUser(
     };
   }
 
+  // Resolve the user's active trading profile. Defaults to Sentinel for
+  // any user that hasn't picked a tier yet, so behaviour is unchanged
+  // until they explicitly opt in to Active or Aggressive.
+  const activeProfile: TradingProfile = getProfile(
+    typeof sys.active_profile === "string" ? sys.active_profile : null,
+  );
+  const MAX_CORRELATED_POSITIONS = activeProfile.maxCorrelatedPositions;
+  const RISK_PER_TRADE_PCT = activeProfile.riskPerTradePct;
+
   // Event mode / manual pause check — halts all symbols this tick.
   const tradingPausedUntil = sys.trading_paused_until;
   if (tradingPausedUntil && new Date(tradingPausedUntil) > new Date()) {
@@ -713,8 +722,8 @@ async function runTickForUser(
     const corrGate = gate(
       GATE_CODES.DOCTRINE_CORRELATION_BLOCK,
       "halt",
-      `Max ${MAX_CORRELATED_POSITIONS} correlated position(s) already open across BTC/ETH/SOL.`,
-      { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS },
+      `Max ${MAX_CORRELATED_POSITIONS} correlated position(s) already open across BTC/ETH/SOL (${activeProfile.label} profile).`,
+      { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS, profile: activeProfile.id },
     );
     await persistSnapshot(admin, userId, {
       gateReasons: [corrGate],
