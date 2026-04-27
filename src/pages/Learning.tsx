@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,20 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useExperiments, type NewExperimentInput } from "@/hooks/useExperiments";
 import type { Experiment, CopilotMemoryRow, StrategyMetrics, ExperimentBacktestResult } from "@/lib/domain-types";
-import { Brain, Check, ChevronDown, FlaskConical, GraduationCap, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { Brain, Check, ChevronDown, FlaskConical, GraduationCap, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle, Scale, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+type KatrinaReview = {
+  brief_text: string;
+  reviewed_at: string;
+  win_rate_trend: "improving" | "stable" | "declining" | null;
+  trades_analyzed: number;
+  promote_ids: string[] | null;
+  kill_ids: string[] | null;
+  continue_ids: string[] | null;
+};
 
 const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" | "blocked" | "caution"> = {
   queued: "neutral",
