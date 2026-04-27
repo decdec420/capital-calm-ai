@@ -381,6 +381,8 @@ export default function Overview() {
             }
           />
 
+          <MarketIntelligencePanel />
+
           {openPosition && (
             <Link
               to="/trades"
