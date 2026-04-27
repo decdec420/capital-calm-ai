@@ -486,15 +486,22 @@ You MUST call submit_decision. No plain text responses.
   if (!aiResp.ok) {
     const t = await aiResp.text().catch(() => "");
     console.error(`AI gateway error ${symbol}`, aiResp.status, t);
+    cbFailure();
     return { error: "ai_error", status: aiResp.status };
   }
 
   const aiJson = await aiResp.json();
   const toolCall = aiJson.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) return { error: "no_decision" };
+  if (!toolCall) {
+    cbFailure();
+    return { error: "no_decision" };
+  }
   try {
-    return { decision: JSON.parse(toolCall.function.arguments) };
+    const parsed = JSON.parse(toolCall.function.arguments);
+    cbSuccess();
+    return { decision: parsed };
   } catch {
+    cbFailure();
     return { error: "parse_error" };
   }
 }
