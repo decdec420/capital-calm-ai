@@ -8,12 +8,13 @@
 // supplementary annotations, not what the engine actually checks.
 // ============================================================
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   DollarSign,
   Gauge,
   Hand,
   Layers,
+  Pencil,
   ShieldAlert,
   TrendingDown,
   WifiOff,
@@ -21,9 +22,12 @@ import {
 import { useAccountState } from "@/hooks/useAccountState";
 import { useTrades } from "@/hooks/useTrades";
 import { useSystemState } from "@/hooks/useSystemState";
-import { DOCTRINE, getProfile } from "@/lib/doctrine-constants";
+import { useDoctrineSettings } from "@/hooks/useDoctrineSettings";
+import { DoctrineEditSheet } from "@/components/trader/DoctrineEditSheet";
+import type { DoctrineField } from "@/lib/doctrine-resolver";
 import { formatUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { STALE_DATA_SECONDS } from "@/lib/doctrine-constants";
 import { StatusBadge } from "./StatusBadge";
 
 type Tone = "safe" | "caution" | "blocked";
@@ -37,6 +41,7 @@ interface DerivedRow {
   limit: string;
   utilization: number; // 0-1
   tone: Tone;
+  editField?: DoctrineField;
 }
 
 const toneToClasses: Record<Tone, { bar: string; text: string }> = {
@@ -55,15 +60,22 @@ export function DoctrineGuardrailGrid() {
   const { data: account } = useAccountState();
   const { open, closed } = useTrades();
   const { data: system } = useSystemState();
+  const { resolved } = useDoctrineSettings();
+  const [editOpen, setEditOpen] = useState(false);
+  const [focusField, setFocusField] = useState<DoctrineField | undefined>(undefined);
+
+  const openEdit = (field?: DoctrineField) => {
+    setFocusField(field);
+    setEditOpen(true);
+  };
 
   const rows = useMemo<DerivedRow[]>(() => {
     const equity = account?.equity ?? 0;
-    const profile = getProfile(system?.activeProfile);
-    const PROFILE_MAX_ORDER = profile.maxOrderUsdHardCap;
-    const PROFILE_MAX_TRADES = profile.maxDailyTradesHardCap;
-    const PROFILE_MAX_DAILY_LOSS = profile.maxDailyLossUsdHardCap;
-    const PROFILE_MAX_DAILY_LOSS_PCT = profile.maxDailyLossPct;
-    const PROFILE_MAX_CORR = profile.maxCorrelatedPositions;
+    const PROFILE_MAX_ORDER = resolved.maxOrderUsd;
+    const PROFILE_MAX_TRADES = resolved.maxTradesPerDay;
+    const PROFILE_MAX_DAILY_LOSS = resolved.dailyLossUsd;
+    const PROFILE_MAX_CORR = resolved.maxCorrelatedPositions;
+    const FLOOR_USD = resolved.killSwitchFloorUsd;
 
     // 1. Per-order cap.
     const orderUtil = equity > 0 ? Math.min(1, PROFILE_MAX_ORDER / equity) : 0;
@@ -75,7 +87,7 @@ export function DoctrineGuardrailGrid() {
       .filter((t) => t.closedAt && new Date(t.closedAt) >= utcMidnight)
       .reduce((acc, t) => acc + Math.min(0, t.pnl ?? 0), 0);
     const lossUsdAbs = Math.abs(realizedLossToday);
-    const lossLimitUsd = Math.min(PROFILE_MAX_DAILY_LOSS, equity * PROFILE_MAX_DAILY_LOSS_PCT);
+    const lossLimitUsd = PROFILE_MAX_DAILY_LOSS;
     const lossUtil = lossLimitUsd > 0 ? Math.min(1, lossUsdAbs / lossLimitUsd) : 0;
 
     // 3. Daily trade count.
@@ -84,59 +96,62 @@ export function DoctrineGuardrailGrid() {
       open.filter((t) => t.openedAt && new Date(t.openedAt) >= utcMidnight).length;
     const tradeUtil = Math.min(1, tradesToday / PROFILE_MAX_TRADES);
 
-    // 4. Kill-switch floor (global, never per-profile).
-    const headroomToFloor = Math.max(0, equity - DOCTRINE.KILL_SWITCH_FLOOR_USD);
+    // 4. Kill-switch floor (per-user, derived from starting equity * floor_pct).
+    const headroomToFloor = Math.max(0, equity - FLOOR_USD);
     const floorUtil = equity > 0
-      ? Math.min(1, Math.max(0, 1 - headroomToFloor / Math.max(equity, DOCTRINE.KILL_SWITCH_FLOOR_USD)))
+      ? Math.min(1, Math.max(0, 1 - headroomToFloor / Math.max(equity, FLOOR_USD)))
       : 1;
 
     // 5. Correlated positions cap.
     const corrUtil = Math.min(1, open.length / PROFILE_MAX_CORR);
 
-    // 6. Stale-data check from system state (informational — engine handles
-    // the real check during a tick, this is the dashboard mirror).
+    // 6. Stale-data check from system state.
     const staleHealthy = system?.dataFeed === "connected";
 
     return [
       {
         key: "max-order",
         label: "Max order size",
-        description: `Single order capped at ${formatUsd(PROFILE_MAX_ORDER)} regardless of confidence (${profile.label} profile).`,
+        description: `Single order capped at ${formatUsd(PROFILE_MAX_ORDER)} (${(resolved.basisEquityUsd > 0 ? (PROFILE_MAX_ORDER / resolved.basisEquityUsd) * 100 : 0).toFixed(2)}% of ${formatUsd(equity)} equity).`,
         icon: Gauge,
         current: formatUsd(PROFILE_MAX_ORDER),
         limit: formatUsd(PROFILE_MAX_ORDER),
         utilization: orderUtil,
         tone: "safe",
+        editField: "max_order_pct",
       },
       {
         key: "daily-loss",
         label: "Daily loss cap",
-        description: `Halts new entries at ${formatUsd(lossLimitUsd)} losses today (min of ${formatUsd(PROFILE_MAX_DAILY_LOSS)} or ${(PROFILE_MAX_DAILY_LOSS_PCT * 100).toFixed(0)}% of equity).`,
+        description: `Halts new entries at ${formatUsd(lossLimitUsd)} losses today (${(resolved.dailyLossPct * 100).toFixed(2)}% of equity).`,
         icon: TrendingDown,
         current: formatUsd(lossUsdAbs),
         limit: formatUsd(lossLimitUsd),
         utilization: lossUtil,
         tone: toneFor(lossUtil),
+        editField: "daily_loss_pct",
       },
       {
         key: "trade-count",
         label: "Daily trade cap",
-        description: `Hard ceiling of ${PROFILE_MAX_TRADES} trades per UTC day (${profile.label} profile). Overtrading is failure.`,
+        description: `Hard ceiling of ${PROFILE_MAX_TRADES} trades per UTC day. Overtrading is failure.`,
         icon: Hand,
         current: `${tradesToday}`,
         limit: `${PROFILE_MAX_TRADES}`,
         utilization: tradeUtil,
         tone: toneFor(tradeUtil),
+        editField: "max_trades_per_day",
       },
       {
         key: "balance-floor",
         label: "Kill-switch floor",
-        description: `Trading halts permanently if equity drops below ${formatUsd(DOCTRINE.KILL_SWITCH_FLOOR_USD)}.`,
+        description: `Halts trading if equity drops below ${formatUsd(FLOOR_USD)} (${(resolved.floorPct * 100).toFixed(0)}% of starting equity).`,
         icon: DollarSign,
         current: formatUsd(equity),
-        limit: formatUsd(DOCTRINE.KILL_SWITCH_FLOOR_USD),
+        limit: formatUsd(FLOOR_USD),
         utilization: floorUtil,
         tone: toneFor(floorUtil),
+        editField: "floor_pct",
       },
       {
         key: "correlation",
@@ -151,15 +166,15 @@ export function DoctrineGuardrailGrid() {
       {
         key: "stale-data",
         label: "Live data feed",
-        description: `Signals reject if last tick is older than ${DOCTRINE.STALE_DATA_SECONDS}s.`,
+        description: `Signals reject if last tick is older than ${STALE_DATA_SECONDS}s.`,
         icon: WifiOff,
         current: staleHealthy ? "connected" : "stale",
-        limit: `${DOCTRINE.STALE_DATA_SECONDS}s`,
+        limit: `${STALE_DATA_SECONDS}s`,
         utilization: staleHealthy ? 0.05 : 1,
         tone: staleHealthy ? "safe" : "blocked",
       },
     ];
-  }, [account?.equity, open, closed, system?.dataFeed]);
+  }, [account?.equity, open, closed, system?.dataFeed, resolved]);
 
   return (
     <div className="space-y-3">
@@ -167,26 +182,36 @@ export function DoctrineGuardrailGrid() {
         <div>
           <h3 className="text-sm font-semibold text-foreground">Doctrine guardrails</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            What the engine actually enforces. Live — derived from your account, today's trades, and the doctrine constants.
+            What the engine actually enforces. Click any tile to edit. Tightening applies instantly; loosening waits 24h.
           </p>
         </div>
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          source of truth
-        </span>
+        <button
+          type="button"
+          onClick={() => openEdit()}
+          className="text-[11px] inline-flex items-center gap-1 text-primary hover:underline"
+        >
+          <Pencil className="h-3 w-3" /> Edit doctrine
+        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {rows.map((r) => <DoctrineRow key={r.key} row={r} />)}
+        {rows.map((r) => (
+          <DoctrineRow key={r.key} row={r} onEdit={r.editField ? () => openEdit(r.editField) : undefined} />
+        ))}
       </div>
+      <DoctrineEditSheet open={editOpen} onOpenChange={setEditOpen} focusField={focusField} />
     </div>
   );
 }
 
-function DoctrineRow({ row }: { row: DerivedRow }) {
+function DoctrineRow({ row, onEdit }: { row: DerivedRow; onEdit?: () => void }) {
   const Icon = row.icon;
   const pct = Math.min(100, Math.max(0, row.utilization * 100));
   const tc = toneToClasses[row.tone];
   return (
-    <div className="panel p-4 space-y-3">
+    <div
+      className={cn("panel p-4 space-y-3 group", onEdit && "cursor-pointer hover:border-primary/40 transition-colors")}
+      onClick={onEdit}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex items-start gap-2.5">
           <div className={cn(
