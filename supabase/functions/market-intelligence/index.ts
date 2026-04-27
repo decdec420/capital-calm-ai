@@ -497,6 +497,7 @@ async function runPatternSpecialist(
   candles1h: number[][],
   nearestSupport: number | null,
   nearestResistance: number | null,
+  previousNarrative: string | null,
 ): Promise<Record<string, unknown> | null> {
   const recent1h = candles1h.slice(-48).map((c) => ({
     t: new Date(c[0] * 1000).toISOString().slice(0, 16),
@@ -507,8 +508,13 @@ async function runPatternSpecialist(
   }));
 
   const lastClose = candles1h[candles1h.length - 1]?.[4];
+  const narrCtx = previousNarrative
+    ? `Current running narrative: ${previousNarrative}`
+    : "First run — no prior narrative context.";
   const userMsg = `
 Analyze chart patterns and entry quality context for ${symbol}.
+
+${narrCtx}
 
 Current price: $${lastClose != null ? lastClose.toFixed(2) : "unknown"}
 Nearest support (from macro analyst): $${nearestSupport != null ? nearestSupport.toFixed(2) : "unknown"}
