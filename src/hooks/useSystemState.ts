@@ -35,6 +35,9 @@ function mapRow(r: any): SystemState {
     autonomyLevel: (r.autonomy_level ?? "manual") as AutonomyLevel,
     lastEngineSnapshot: parseSnapshot(r.last_engine_snapshot),
     liveMoneyAcknowledgedAt: r.live_money_acknowledged_at ?? null,
+    paperAccountBalance: Number(r.paper_account_balance ?? 1000),
+    paramsWiredLive: !!r.params_wired_live,
+    tradingPausedUntil: r.trading_paused_until ?? null,
   };
 }
 
@@ -78,6 +81,8 @@ export function useSystemState() {
     if (patch.killSwitchEngaged !== undefined) dbPatch.kill_switch_engaged = patch.killSwitchEngaged;
     if (patch.liveTradingEnabled !== undefined) dbPatch.live_trading_enabled = patch.liveTradingEnabled;
     if (patch.autonomyLevel) dbPatch.autonomy_level = patch.autonomyLevel;
+    if (patch.tradingPausedUntil !== undefined) dbPatch.trading_paused_until = patch.tradingPausedUntil;
+    if (patch.paperAccountBalance !== undefined) dbPatch.paper_account_balance = patch.paperAccountBalance;
     const { error } = await supabase.from("system_state").update(dbPatch).eq("user_id", user.id);
     if (error) throw error;
     await refetch();

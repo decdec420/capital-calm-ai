@@ -18,6 +18,7 @@ import StrategyLab from "./pages/StrategyLab";
 import RiskCenter from "./pages/RiskCenter";
 import Learning from "./pages/Learning";
 import Copilot from "./pages/Copilot";
+import Performance from "./pages/Performance";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -57,6 +58,7 @@ const App = () => (
               <Route path="/risk" element={<RiskCenter />} />
               <Route path="/learning" element={<Learning />} />
               <Route path="/copilot" element={<Copilot />} />
+              <Route path="/performance" element={<Performance />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

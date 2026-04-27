@@ -744,8 +744,10 @@ export type Database = {
           live_money_acknowledged_at: string | null
           live_trading_enabled: boolean
           mode: string
+          paper_account_balance: number
           params_wired_live: boolean
           selected_broker: string | null
+          trading_paused_until: string | null
           updated_at: string
           uptime_hours: number
           user_id: string
@@ -767,8 +769,10 @@ export type Database = {
           live_money_acknowledged_at?: string | null
           live_trading_enabled?: boolean
           mode?: string
+          paper_account_balance?: number
           params_wired_live?: boolean
           selected_broker?: string | null
+          trading_paused_until?: string | null
           updated_at?: string
           uptime_hours?: number
           user_id: string
@@ -790,8 +794,10 @@ export type Database = {
           live_money_acknowledged_at?: string | null
           live_trading_enabled?: boolean
           mode?: string
+          paper_account_balance?: number
           params_wired_live?: boolean
           selected_broker?: string | null
+          trading_paused_until?: string | null
           updated_at?: string
           uptime_hours?: number
           user_id?: string

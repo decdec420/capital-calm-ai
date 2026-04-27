@@ -175,6 +175,12 @@ export interface SystemState {
   /** Set the first time the operator signs the live-money acknowledgment.
    * Required to be non-null before live_trading_enabled can flip true. */
   liveMoneyAcknowledgedAt: string | null;
+  /** Virtual paper-trading balance in USD; powers % position sizing. */
+  paperAccountBalance: number;
+  /** True once strategy params are wired into the live signal engine. */
+  paramsWiredLive: boolean;
+  /** When set in the future, signal engine will not propose new trades. */
+  tradingPausedUntil: string | null;
 }
 
 export interface AccountState {

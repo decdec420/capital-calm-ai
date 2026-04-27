@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
+import { Plus, ShieldAlert, ShieldCheck, Trash2, X, Zap } from "lucide-react";
 import { useGuardrails, type NewGuardrailInput } from "@/hooks/useGuardrails";
 import { useSystemState } from "@/hooks/useSystemState";
 import type { RiskGuardrail, RiskLevel } from "@/lib/domain-types";
@@ -365,3 +365,61 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+
+function EventModePanel() {
+  const { data: system, update } = useSystemState();
+  const pausedUntil = system?.tradingPausedUntil ? new Date(system.tradingPausedUntil) : null;
+  const active = pausedUntil && pausedUntil > new Date();
+
+  const pauseFor = async (hours: number) => {
+    try {
+      await update({ tradingPausedUntil: new Date(Date.now() + hours * 3600000).toISOString() });
+      toast.success(`Trading paused for ${hours}h.`);
+    } catch {
+      toast.error("Couldn't pause trading.");
+    }
+  };
+
+  const resumeNow = async () => {
+    try {
+      await update({ tradingPausedUntil: null });
+      toast.success("Trading resumed.");
+    } catch {
+      toast.error("Couldn't resume.");
+    }
+  };
+
+  return (
+    <div className="panel p-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <Zap className="h-4 w-4 text-status-caution" />
+        <span className="text-sm font-semibold text-foreground">Event Mode</span>
+        <span className={cn(
+          "text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded",
+          active ? "bg-status-caution/15 text-status-caution" : "bg-secondary text-muted-foreground"
+        )}>
+          {active ? "active" : "inactive"}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Pause all new trade proposals around high-impact macro events (FOMC, CPI, Fed speeches).
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {[1, 2, 4, 8, 24].map((h) => (
+          <Button key={h} size="sm" variant="outline" onClick={() => pauseFor(h)}>
+            Pause {h}h
+          </Button>
+        ))}
+        <Button size="sm" variant="outline" onClick={resumeNow} disabled={!active}>
+          Resume Now
+        </Button>
+      </div>
+      {active && pausedUntil && (
+        <p className="text-xs text-status-caution">
+          Resumes at {pausedUntil.toLocaleString()}
+        </p>
+      )}
+    </div>
+  );
+}
+
