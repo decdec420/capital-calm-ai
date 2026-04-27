@@ -13,11 +13,10 @@
 
 import {
   CAPITAL_PRESERVATION_DOCTRINE,
-  MAX_CORRELATED_POSITIONS,
-  MAX_ORDER_USD,
-  RISK_PER_TRADE_PCT,
   SYMBOL_WHITELIST,
+  getProfile,
   validateDoctrineInvariants,
+  type TradingProfile,
 } from "../_shared/doctrine.ts";
 import {
   GATE_CODES,
@@ -229,6 +228,8 @@ async function decideForSymbol(opts: {
     stopAtrMult: number;
     tpRMult: number;
   };
+  /** Active trading profile — controls per-order cap shown in the prompt. */
+  profile: TradingProfile;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -244,7 +245,8 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams } = opts;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile } = opts;
+  const MAX_ORDER_USD = profile.maxOrderUsdHardCap;
 
   const liveStopAtrMult = stratParams.stopAtrMult;
   const liveTpMult = stratParams.tpRMult;
@@ -682,6 +684,15 @@ async function runTickForUser(
     };
   }
 
+  // Resolve the user's active trading profile. Defaults to Sentinel for
+  // any user that hasn't picked a tier yet, so behaviour is unchanged
+  // until they explicitly opt in to Active or Aggressive.
+  const activeProfile: TradingProfile = getProfile(
+    typeof sys.active_profile === "string" ? sys.active_profile : null,
+  );
+  const MAX_CORRELATED_POSITIONS = activeProfile.maxCorrelatedPositions;
+  const RISK_PER_TRADE_PCT = activeProfile.riskPerTradePct;
+
   // Event mode / manual pause check — halts all symbols this tick.
   const tradingPausedUntil = sys.trading_paused_until;
   if (tradingPausedUntil && new Date(tradingPausedUntil) > new Date()) {
@@ -711,8 +722,8 @@ async function runTickForUser(
     const corrGate = gate(
       GATE_CODES.DOCTRINE_CORRELATION_BLOCK,
       "halt",
-      `Max ${MAX_CORRELATED_POSITIONS} correlated position(s) already open across BTC/ETH/SOL.`,
-      { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS },
+      `Max ${MAX_CORRELATED_POSITIONS} correlated position(s) already open across BTC/ETH/SOL (${activeProfile.label} profile).`,
+      { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS, profile: activeProfile.id },
     );
     await persistSnapshot(admin, userId, {
       gateReasons: [corrGate],
@@ -915,6 +926,7 @@ async function runTickForUser(
         level: g.level,
         utilization: Number(g.utilization ?? 0),
       })),
+      profile: activeProfile,
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
@@ -1138,14 +1150,22 @@ async function runTickForUser(
   })();
 
   const contextPacket = {
+    profile: {
+      id: activeProfile.id,
+      label: activeProfile.label,
+      maxOrderUsd: activeProfile.maxOrderUsdHardCap,
+      maxTradesPerDay: activeProfile.maxDailyTradesHardCap,
+      maxDailyLossUsd: activeProfile.maxDailyLossUsdHardCap,
+      maxCorrelatedPositions: activeProfile.maxCorrelatedPositions,
+      riskPerTradePct: activeProfile.riskPerTradePct,
+      scanIntervalSeconds: activeProfile.scanIntervalSeconds,
+    },
     doctrine: {
-      maxOrderUsd: CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxOrderUsdHardCap,
-      maxTradesPerDay:
-        CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyTradesHardCap,
-      maxDailyLossUsd:
-        CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyLossUsdHardCap,
+      maxOrderUsd: activeProfile.maxOrderUsdHardCap,
+      maxTradesPerDay: activeProfile.maxDailyTradesHardCap,
+      maxDailyLossUsd: activeProfile.maxDailyLossUsdHardCap,
       killSwitchFloorUsd:
-        CAPITAL_PRESERVATION_DOCTRINE.hardRules.minBalanceUsdKillSwitch,
+        CAPITAL_PRESERVATION_DOCTRINE.globalRules.minBalanceUsdKillSwitch,
     },
     market: {
       symbol: winner.symbol,
@@ -1267,6 +1287,7 @@ async function runTickForUser(
     intel,
     LOVABLE_API_KEY,
     stratParams: liveParams,
+    profile: activeProfile,
   });
 
   if ("error" in aiResult) {
@@ -1389,6 +1410,7 @@ async function runTickForUser(
     equityUsd: equity,
     symbolPrice: entry,
     symbol: winner.symbol,
+    profile: activeProfile,
   });
 
   if (clamp.blocked) {
@@ -1864,15 +1886,28 @@ Deno.serve(async (req) => {
     });
 
     if (isCronFanout) {
+      // Each cron tier targets one profile. The default 5-min cron has
+      // no tier hint and is treated as "sentinel". This way each user
+      // is scanned at exactly their profile's cadence — no double-firing.
+      const profileTier =
+        body?.profileTier === "active" || body?.profileTier === "aggressive"
+          ? body.profileTier
+          : "sentinel";
+
       const { data: activeUsers } = await admin
         .from("system_state")
-        .select("user_id")
+        .select("user_id, active_profile")
         .eq("bot", "running")
         .eq("kill_switch_engaged", false);
 
       // deno-lint-ignore no-explicit-any
       const results: any[] = [];
       for (const u of activeUsers ?? []) {
+        const userTier =
+          u.active_profile === "active" || u.active_profile === "aggressive"
+            ? u.active_profile
+            : "sentinel";
+        if (userTier !== profileTier) continue; // wrong cron for this user
         try {
           const r = await runTickForUser(
             admin,
@@ -1895,6 +1930,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({
           mode: "cron_fanout",
+          profileTier,
           users: results.length,
           symbols: SYMBOLS,
           results,

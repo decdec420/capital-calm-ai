@@ -12,7 +12,9 @@ import {
   KILL_SWITCH_FLOOR_USD,
   MAX_ORDER_USD,
   RISK_PER_TRADE_PCT,
+  getProfile,
   isWhitelistedSymbol,
+  type TradingProfile,
 } from "./doctrine.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
@@ -24,13 +26,13 @@ import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
  *     notional = (equity × riskPct) / (|entry − stop| / entry)
  *
  * The output still flows through clampSize() so doctrine caps
- * (MAX_ORDER_USD, kill-switch floor, min order) are always applied.
+ * (per-order cap, kill-switch floor, min order) are always applied.
  *
  * @param equityUsd      Current account equity (USD)
  * @param entry          Proposed entry price
  * @param stop           Proposed stop-loss price
  * @param riskPct        Fraction of equity to risk (e.g. 0.01 = 1%)
- *                       Defaults to doctrine RISK_PER_TRADE_PCT.
+ *                       Defaults to Sentinel RISK_PER_TRADE_PCT.
  * @returns              USD notional to send into clampSize(); 0 if inputs are invalid
  */
 export function notionalFromRiskPct(
@@ -67,6 +69,8 @@ export interface ClampSizeInput {
    * un-tradable residuals.
    */
   minOrderUsd?: number;
+  /** Active trading profile id or object. Sentinel default. */
+  profile?: string | TradingProfile;
 }
 
 export interface ClampSizeResult {
@@ -87,7 +91,14 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
     symbolPrice,
     symbol,
     minOrderUsd = 0.25,
+    profile: profileInput,
   } = input;
+
+  const activeProfile: TradingProfile =
+    typeof profileInput === "object" && profileInput
+      ? profileInput
+      : getProfile(typeof profileInput === "string" ? profileInput : undefined);
+  const orderCap = activeProfile.maxOrderUsdHardCap;
 
   const reasons: GateReason[] = [];
 
@@ -158,18 +169,18 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
     };
   }
 
-  // 4. Hard cap: clamp to $1 per order. Informational if clamped.
+  // 4. Hard cap: clamp to per-order limit (depends on active profile).
   let sizeUsd = proposedQuoteUsd;
-  if (sizeUsd > MAX_ORDER_USD) {
+  if (sizeUsd > orderCap) {
     reasons.push(
       gate(
         GATE_CODES.DOCTRINE_MAX_ORDER,
         "info",
-        `Proposed $${proposedQuoteUsd.toFixed(2)} clamped to $${MAX_ORDER_USD} per-order cap.`,
-        { proposedQuoteUsd, cap: MAX_ORDER_USD },
+        `Proposed $${proposedQuoteUsd.toFixed(2)} clamped to $${orderCap} per-order cap (${activeProfile.label}).`,
+        { proposedQuoteUsd, cap: orderCap, profile: activeProfile.id },
       ),
     );
-    sizeUsd = MAX_ORDER_USD;
+    sizeUsd = orderCap;
   }
 
   // 5. Minimum viable order: if what's left rounds to below the exchange

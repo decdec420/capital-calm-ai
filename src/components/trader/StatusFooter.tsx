@@ -1,14 +1,15 @@
 import { useSystemState } from "@/hooks/useSystemState";
 import { useTrades } from "@/hooks/useTrades";
-import { DOCTRINE } from "@/lib/doctrine-constants";
-
-const MAX_CORRELATED_POSITIONS = DOCTRINE.MAX_CORRELATED_POSITIONS;
+import { getProfile } from "@/lib/doctrine-constants";
 
 export function StatusFooter() {
   const { data: s } = useSystemState();
   const { open } = useTrades();
   const openCount = open?.length ?? 0;
-  const corrFull = openCount >= MAX_CORRELATED_POSITIONS;
+
+  const profile = getProfile(s?.activeProfile);
+  const corrCap = profile.maxCorrelatedPositions;
+  const corrFull = openCount >= corrCap;
 
   if (!s) {
     return (
@@ -24,6 +25,10 @@ export function StatusFooter() {
     <footer className="h-7 border-t border-border bg-card/40 px-3 flex items-center gap-4 text-[10px] uppercase tracking-wider text-muted-foreground tabular shrink-0">
       <span>
         mode <span className="text-foreground/80 capitalize">{s.mode}</span>
+      </span>
+      <span className="h-3 w-px bg-border" />
+      <span title={profile.tagline}>
+        profile <span className="text-foreground/80">{profile.label}</span>
       </span>
       <span className="h-3 w-px bg-border" />
       <span>
@@ -48,7 +53,7 @@ export function StatusFooter() {
       <span title={corrFull ? "Correlation cap reached — engine will block new entries" : "Open correlated positions"}>
         corr{" "}
         <span className={corrFull ? "text-status-blocked" : "text-status-safe"}>
-          {openCount}/{MAX_CORRELATED_POSITIONS}
+          {openCount}/{corrCap}
         </span>
       </span>
       <div className="flex-1" />

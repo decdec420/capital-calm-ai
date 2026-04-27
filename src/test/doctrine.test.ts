@@ -11,10 +11,12 @@ import {
   SYMBOL_WHITELIST,
   isWhitelistedSymbol,
   validateDoctrineInvariants,
+  getProfile,
+  ALL_PROFILE_IDS,
 } from "../../supabase/functions/_shared/doctrine";
 
 describe("doctrine constants", () => {
-  it("enforces the capital-preservation hard caps", () => {
+  it("legacy MAX_* aliases mirror the Sentinel profile", () => {
     expect(MAX_ORDER_USD).toBe(1);
     expect(MAX_TRADES_PER_DAY).toBe(5);
     expect(MAX_DAILY_LOSS_USD).toBe(2);
@@ -42,9 +44,41 @@ describe("doctrine constants", () => {
   });
 
   it("defines the TP1 ladder (half-close at 1R, runner to 2R)", () => {
-    expect(CAPITAL_PRESERVATION_DOCTRINE.hardRules.tpLadder.tp1R).toBe(1);
-    expect(CAPITAL_PRESERVATION_DOCTRINE.hardRules.tpLadder.tp2R).toBe(2);
-    expect(CAPITAL_PRESERVATION_DOCTRINE.hardRules.tpLadder.tp1ClosesFraction).toBe(0.5);
-    expect(CAPITAL_PRESERVATION_DOCTRINE.hardRules.tpLadder.moveStopToBreakevenAtTp1).toBe(true);
+    const tp = CAPITAL_PRESERVATION_DOCTRINE.globalRules.tpLadder;
+    expect(tp.tp1R).toBe(1);
+    expect(tp.tp2R).toBe(2);
+    expect(tp.tp1ClosesFraction).toBe(0.5);
+    expect(tp.moveStopToBreakevenAtTp1).toBe(true);
+  });
+});
+
+describe("trading profiles", () => {
+  it("exposes all three profile ids", () => {
+    expect([...ALL_PROFILE_IDS]).toEqual(["sentinel", "active", "aggressive"]);
+  });
+
+  it("orders profiles from least to most permissive", () => {
+    const s = getProfile("sentinel");
+    const a = getProfile("active");
+    const x = getProfile("aggressive");
+    expect(s.maxOrderUsdHardCap).toBeLessThanOrEqual(a.maxOrderUsdHardCap);
+    expect(a.maxOrderUsdHardCap).toBeLessThanOrEqual(x.maxOrderUsdHardCap);
+    expect(s.maxDailyTradesHardCap).toBeLessThanOrEqual(a.maxDailyTradesHardCap);
+    expect(a.maxDailyTradesHardCap).toBeLessThanOrEqual(x.maxDailyTradesHardCap);
+    expect(s.scanIntervalSeconds).toBeGreaterThanOrEqual(a.scanIntervalSeconds);
+    expect(a.scanIntervalSeconds).toBeGreaterThanOrEqual(x.scanIntervalSeconds);
+  });
+
+  it("falls back to sentinel for unknown ids", () => {
+    expect(getProfile(null).id).toBe("sentinel");
+    expect(getProfile(undefined).id).toBe("sentinel");
+    expect(getProfile("garbage").id).toBe("sentinel");
+  });
+
+  it("aggressive caps stay within hard ceilings", () => {
+    const x = getProfile("aggressive");
+    expect(x.maxOrderUsdHardCap).toBeLessThanOrEqual(100);
+    expect(x.maxDailyTradesHardCap).toBeLessThanOrEqual(50);
+    expect(x.maxDailyLossUsdHardCap).toBeLessThanOrEqual(100);
   });
 });

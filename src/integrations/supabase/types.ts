@@ -776,6 +776,7 @@ export type Database = {
       }
       system_state: {
         Row: {
+          active_profile: string
           autonomy_level: string
           bot: string
           broker_connection: string
@@ -801,6 +802,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          active_profile?: string
           autonomy_level?: string
           bot?: string
           broker_connection?: string
@@ -826,6 +828,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          active_profile?: string
           autonomy_level?: string
           bot?: string
           broker_connection?: string
@@ -1214,6 +1217,7 @@ export type Database = {
             }
             Returns: undefined
           }
+      users_on_profile: { Args: { p_profile: string }; Returns: string[] }
     }
     Enums: {
       [_ in never]: never

@@ -13,11 +13,11 @@
 
 import {
   KILL_SWITCH_FLOOR_USD,
-  MAX_DAILY_LOSS_USD,
   MAX_SPREAD_BPS,
-  MAX_TRADES_PER_DAY,
   STALE_DATA_SECONDS,
+  getProfile,
   isWhitelistedSymbol,
+  type TradingProfile,
 } from "./doctrine.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
@@ -46,9 +46,17 @@ export interface RiskContext {
   nowIso?: string;
   /** Optional guardrail rows (flattened) from the DB */
   guardrails?: Array<{ label: string; level: string; utilization: number }>;
+  /** Active trading profile id (sentinel | active | aggressive). Sentinel default. */
+  profile?: string | TradingProfile;
 }
 
 export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
+  const profile: TradingProfile =
+    typeof ctx.profile === "object" && ctx.profile
+      ? ctx.profile
+      : getProfile(typeof ctx.profile === "string" ? ctx.profile : undefined);
+  const MAX_TRADES_PER_DAY = profile.maxDailyTradesHardCap;
+  const MAX_DAILY_LOSS_USD = profile.maxDailyLossUsdHardCap;
   const reasons: GateReason[] = [];
   const now = ctx.nowIso ? new Date(ctx.nowIso) : new Date();
 
