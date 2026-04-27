@@ -985,6 +985,36 @@ async function runTickForUser(
 
     // No-candles gate is additive (surfaced regardless of risk gates)
     if (!candles || candles.length === 0) {
+      // P6-I: this was a silent skip. Surface it in logs and agent_health
+      // so Jessica + the Risk Center know the candle feed dropped.
+      const ranAt = new Date().toISOString();
+      console.error("[signal-engine] empty candle feed", {
+        symbol,
+        userId,
+        ranAt,
+        note: "Coinbase candle endpoint returned no data for this tick.",
+      });
+      // Fire-and-forget — never let a health write block the rest of the tick.
+      admin
+        .from("agent_health")
+        .upsert(
+          {
+            user_id: userId,
+            agent_name: "signal_engine",
+            status: "degraded",
+            last_failure: ranAt,
+            failure_count: 1,
+            last_error: `Candle feed empty for ${symbol} at ${ranAt}.`,
+            checked_at: ranAt,
+          },
+          { onConflict: "user_id,agent_name" },
+        )
+        .then(({ error }) => {
+          if (error) {
+            console.error("[signal-engine] agent_health upsert failed", error);
+          }
+        });
+
       candidates.push({
         symbol,
         lastPrice,
