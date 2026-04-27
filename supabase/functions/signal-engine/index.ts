@@ -818,10 +818,20 @@ async function runTickForUser(
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
-    // The first refusal is the "lock" reason we show per-row.
-    const lockGate = riskGates.find(
-      (r) => r.severity === "halt" || r.severity === "block",
-    );
+    // The first refusal is the "lock" reason we show per-row. Re-entry
+    // cooldown takes precedence so the operator sees WHY this symbol is
+    // skipped rather than a generic "no setup" message.
+    const reentryHit = reentryLockedSymbols.get(symbol);
+    const lockGate = reentryHit
+      ? gate(
+          GATE_CODES.REENTRY_COOLDOWN,
+          "block",
+          `${symbol}: re-entry cooldown — last loss ${Math.round(reentryHit.minutesAgo)}m ago, ${reentryCooldownMin}m window.`,
+          { symbol, ...reentryHit, cooldownMinutes: reentryCooldownMin },
+        )
+      : riskGates.find(
+          (r) => r.severity === "halt" || r.severity === "block",
+        );
 
     // No-candles gate is additive (surfaced regardless of risk gates)
     if (!candles || candles.length === 0) {
