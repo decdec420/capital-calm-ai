@@ -946,8 +946,7 @@ async function runTickForUser(
         utilization: Number(g.utilization ?? 0),
       })),
       profile: activeProfile,
-    };
-    const riskGates = evaluateRiskGates(riskCtx);
+      resolved: resolvedDoctrine,
 
     // The first refusal is the "lock" reason we show per-row. Order of
     // precedence (most-actionable first):
