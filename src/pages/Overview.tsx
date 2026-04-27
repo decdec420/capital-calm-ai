@@ -41,6 +41,7 @@ import { toast } from "sonner";
 import { Brain } from "lucide-react";
 import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
 import type { Alert, Regime } from "@/lib/domain-types";
+import { DOCTRINE } from "@/lib/doctrine-constants";
 
 function FreshnessDot({ timestamp }: { timestamp: number | null }) {
   const label = useRelativeTime(timestamp);
@@ -107,6 +108,29 @@ export default function Overview() {
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
   const floorDistance = account ? ((account.equity - account.balanceFloor) / account.equity) * 100 : 0;
   const lossVsCap = account ? (Math.abs(lossToday) / account.startOfDayEquity) * 100 : 0;
+
+  // Cumulative equity trail across the most recent N closed trades.
+  // Mirrors the EquityDrilldown computation so the spark line and the
+  // drilldown chart agree.
+  const equitySeries = useMemo(() => {
+    if (!account) return [] as number[];
+    const sorted = [...closed]
+      .filter((t) => t.closedAt)
+      .sort((a, b) => new Date(a.closedAt!).getTime() - new Date(b.closedAt!).getTime());
+    const startEquity = account.equity - sorted.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    const out: number[] = [startEquity];
+    let running = startEquity;
+    for (const t of sorted) {
+      running += t.pnl ?? 0;
+      out.push(running);
+    }
+    return out;
+  }, [account, closed]);
+
+  const tradesTodayCount = closedToday.length + open.length;
+  const tradesCap = DOCTRINE.MAX_TRADES_PER_DAY;
+  const winsToday = closedToday.filter((t) => (t.pnl ?? 0) > 0).length;
+  const lossesToday = closedToday.filter((t) => (t.pnl ?? 0) < 0).length;
 
   // Adaptive precision: when amounts are small (typical for tiny paper accounts
   // or fractional crypto sizing), 2 decimals hides all the action. Show 4
