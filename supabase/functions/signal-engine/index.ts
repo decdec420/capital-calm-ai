@@ -65,6 +65,7 @@ const SYMBOLS = SYMBOL_WHITELIST;
 // Technical Analyst stays on Flash — runs on every tick (288×/day).
 const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
 // Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
+const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
 
 // ─── Coach: per-(symbol, side) historical loss penalty ─────────
 // Looks at recent closed trades for this symbol+side. If win-rate is poor
