@@ -628,7 +628,71 @@ async function runTickForUser(
     };
   }
 
-  // Persisted approved strategy (if any) so signals & trades carry identity.
+  // ── Re-entry cooldown + anti-tilt lock ─────────────────────────
+  // Pulls operator-tunable knobs from doctrine_settings (with safe
+  // fallbacks if the row is missing).
+  const reentryCooldownMin = Number(doctrineRow?.loss_cooldown_minutes ?? 30);
+  const consecutiveLossLimit = Number(doctrineRow?.consecutive_loss_limit ?? 2);
+  const closedTrades = (recentClosedTrades ?? []) as Array<{
+    symbol: string;
+    pnl: number | null;
+    closed_at: string | null;
+  }>;
+
+  // Anti-tilt: count consecutive losses from most-recent backwards until a
+  // winner (or no more rows). If we hit the configured limit, halt all
+  // symbols this tick. The streak naturally breaks when a winner closes.
+  let consecutiveLosses = 0;
+  for (const t of closedTrades) {
+    if (t.pnl != null && Number(t.pnl) < 0) consecutiveLosses += 1;
+    else break;
+  }
+  if (consecutiveLossLimit > 0 && consecutiveLosses >= consecutiveLossLimit) {
+    const tiltGate = gate(
+      GATE_CODES.ANTI_TILT_LOCK,
+      "halt",
+      `Anti-tilt lock: ${consecutiveLosses} consecutive losing trades. Stop trading and review the journal.`,
+      { consecutiveLosses, limit: consecutiveLossLimit },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [tiltGate],
+      perSymbol: [],
+      chosenSymbol: null,
+    });
+    return {
+      userId,
+      tick: "anti_tilt",
+      gateReasons: [tiltGate],
+      expiredCount,
+      perSymbol: [],
+    };
+  }
+
+  // Per-symbol re-entry cooldown: if the most recent CLOSED trade for a
+  // given symbol was a loss within the cooldown window, that symbol is
+  // locked this tick. Wins clear the lock instantly. This prevents the
+  // bot from "revenge re-entering" the same coin after a stop-out.
+  const reentryLockedSymbols = new Map<string, { closedAt: string; minutesAgo: number }>();
+  if (reentryCooldownMin > 0) {
+    const seen = new Set<string>();
+    for (const t of closedTrades) {
+      if (!t.closed_at || seen.has(t.symbol)) continue;
+      seen.add(t.symbol);
+      const minutesAgo =
+        (Date.now() - new Date(t.closed_at).getTime()) / 60_000;
+      if (
+        minutesAgo <= reentryCooldownMin &&
+        t.pnl != null &&
+        Number(t.pnl) < 0
+      ) {
+        reentryLockedSymbols.set(t.symbol, {
+          closedAt: t.closed_at,
+          minutesAgo,
+        });
+      }
+    }
+  }
+
   // CRITICAL: we now load `params` too so the live engine actually uses
   // ema_fast / ema_slow / rsi_period / stop_atr_mult / tp_r_mult from the
   // approved strategy. Previously the engine only loaded id/version, which
