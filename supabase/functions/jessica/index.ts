@@ -317,6 +317,43 @@ async function runJessicaForUser(
     return { skipped: true, reason: "equity_critical_near_floor" };
   }
 
+  // ── Health check pass — inspect each agent and write to agent_health ──
+  const agentHealth = await checkAgentHealth(admin, userId, context);
+  (context as Record<string, unknown>).agent_health = agentHealth.map((h) => ({
+    agent: h.agent,
+    status: h.status,
+    stale_minutes: h.lastSuccessMinutesAgo,
+    error: h.lastError,
+  }));
+
+  // Auto-recovery: if Brain Trust is failed/degraded, refresh it BEFORE reasoning.
+  // Stale macro context is the single biggest risk to bad decisions.
+  const brainTrustHealth = agentHealth.find((h) => h.agent === "brain_trust");
+  if (brainTrustHealth &&
+      (brainTrustHealth.status === "failed" || brainTrustHealth.status === "degraded")) {
+    console.log(
+      `[jessica] Brain Trust ${brainTrustHealth.status} (${brainTrustHealth.lastSuccessMinutesAgo}m stale) — auto-refreshing before tick`,
+    );
+    try {
+      await executeTool(
+        "run_brain_trust",
+        {
+          reason: `Auto-recovery: Brain Trust ${brainTrustHealth.status} (${brainTrustHealth.lastSuccessMinutesAgo}m stale)`,
+        },
+        {
+          userId,
+          token: userToken,
+          supabaseUrl,
+          supabaseAnonKey: Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+          serviceRoleKey,
+          actor: "jessica_autonomous",
+        },
+      );
+    } catch (e) {
+      console.error("[jessica] Brain Trust auto-refresh failed", e);
+    }
+  }
+
   const contextBlock = JSON.stringify(context, null, 2);
   const messages: Array<Record<string, unknown>> = [
     {
