@@ -42,6 +42,11 @@ import {
 } from "../_shared/risk.ts";
 import { clampSize, notionalFromRiskPct } from "../_shared/sizing.ts";
 import {
+  resolveDoctrine,
+  type DoctrineSettingsRow,
+  type ResolvedDoctrine,
+} from "../_shared/doctrine-resolver.ts";
+import {
   appendTransition,
   transitionSignal,
   transitionTrade,
@@ -236,6 +241,8 @@ async function decideForSymbol(opts: {
   };
   /** Active trading profile — controls per-order cap shown in the prompt. */
   profile: TradingProfile;
+  /** Per-user resolved per-order USD cap. Overrides profile when present. */
+  maxOrderUsdOverride?: number;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -251,8 +258,8 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile } = opts;
-  const MAX_ORDER_USD = profile.maxOrderUsdHardCap;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride } = opts;
+  const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
   const liveStopAtrMult = stratParams.stopAtrMult;
   const liveTpMult = stratParams.tpRMult;
@@ -646,7 +653,7 @@ async function runTickForUser(
       .eq("user_id", userId),
     admin
       .from("doctrine_settings")
-      .select("loss_cooldown_minutes,consecutive_loss_limit")
+      .select("*")
       .eq("user_id", userId)
       .maybeSingle(),
     admin
@@ -696,8 +703,13 @@ async function runTickForUser(
   const activeProfile: TradingProfile = getProfile(
     typeof sys.active_profile === "string" ? sys.active_profile : null,
   );
-  const MAX_CORRELATED_POSITIONS = activeProfile.maxCorrelatedPositions;
-  const RISK_PER_TRADE_PCT = activeProfile.riskPerTradePct;
+  // Per-user resolved doctrine — overrides profile presets when settings exist.
+  // Equity comes a bit later, so resolve once below where we have it.
+  const settingsRow = (doctrineRow ?? null) as DoctrineSettingsRow | null;
+  const MAX_CORRELATED_POSITIONS =
+    settingsRow?.max_correlated_positions ?? activeProfile.maxCorrelatedPositions;
+  const RISK_PER_TRADE_PCT =
+    settingsRow?.risk_per_trade_pct ?? activeProfile.riskPerTradePct;
 
   // Event mode / manual pause check — halts all symbols this tick.
   const tradingPausedUntil = sys.trading_paused_until;
@@ -853,6 +865,9 @@ async function runTickForUser(
 
   // Equity & daily counters for the risk gate.
   const equity = acct ? Number(acct.equity) : 0;
+  // Resolve per-user effective doctrine caps from settings + live equity.
+  // Authoritative source for max-order USD, daily-loss USD, kill-switch floor.
+  const resolvedDoctrine: ResolvedDoctrine = resolveDoctrine(settingsRow, equity);
   // Daily realized PnL is computed on read via a SQL function — there is no
   // realized_pnl_today column on account_state. Falling back to 0 here would
   // silently disable the daily loss cap.
@@ -933,6 +948,7 @@ async function runTickForUser(
         utilization: Number(g.utilization ?? 0),
       })),
       profile: activeProfile,
+      resolved: resolvedDoctrine,
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
@@ -1294,6 +1310,7 @@ async function runTickForUser(
     LOVABLE_API_KEY,
     stratParams: liveParams,
     profile: activeProfile,
+    maxOrderUsdOverride: resolvedDoctrine.maxOrderUsd,
   });
 
   if ("error" in aiResult) {
@@ -1417,6 +1434,7 @@ async function runTickForUser(
     symbolPrice: entry,
     symbol: winner.symbol,
     profile: activeProfile,
+    resolved: resolvedDoctrine,
   });
 
   if (clamp.blocked) {

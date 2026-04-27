@@ -12,13 +12,13 @@
 // ============================================================
 
 import {
-  KILL_SWITCH_FLOOR_USD,
   MAX_SPREAD_BPS,
   STALE_DATA_SECONDS,
   getProfile,
   isWhitelistedSymbol,
   type TradingProfile,
 } from "./doctrine.ts";
+import type { ResolvedDoctrine } from "./doctrine-resolver.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
 export interface RiskContext {
@@ -48,6 +48,12 @@ export interface RiskContext {
   guardrails?: Array<{ label: string; level: string; utilization: number }>;
   /** Active trading profile id (sentinel | active | aggressive). Sentinel default. */
   profile?: string | TradingProfile;
+  /**
+   * Per-user resolved doctrine (overrides profile hardcaps when present).
+   * When supplied, this is the authoritative source for daily-trade cap,
+   * daily-loss USD cap, and the kill-switch floor.
+   */
+  resolved?: ResolvedDoctrine;
 }
 
 export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
@@ -55,8 +61,9 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
     typeof ctx.profile === "object" && ctx.profile
       ? ctx.profile
       : getProfile(typeof ctx.profile === "string" ? ctx.profile : undefined);
-  const MAX_TRADES_PER_DAY = profile.maxDailyTradesHardCap;
-  const MAX_DAILY_LOSS_USD = profile.maxDailyLossUsdHardCap;
+  const MAX_TRADES_PER_DAY = ctx.resolved?.maxTradesPerDay ?? profile.maxDailyTradesHardCap;
+  const MAX_DAILY_LOSS_USD = ctx.resolved?.dailyLossUsd ?? profile.maxDailyLossUsdHardCap;
+  const KILL_SWITCH_FLOOR = ctx.resolved?.killSwitchFloorUsd ?? 8;
   const reasons: GateReason[] = [];
   const now = ctx.nowIso ? new Date(ctx.nowIso) : new Date();
 
@@ -90,14 +97,14 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
     reasons.push(gate(GATE_CODES.BOT_PAUSED, "halt", "Bot is paused."));
   }
 
-  // Kill-switch floor (hard)
-  if (ctx.equityUsd < KILL_SWITCH_FLOOR_USD) {
+  // Kill-switch floor (hard) — uses per-user resolved floor when present.
+  if (ctx.equityUsd < KILL_SWITCH_FLOOR) {
     reasons.push(
       gate(
         GATE_CODES.BALANCE_FLOOR,
         "halt",
-        `Equity $${ctx.equityUsd.toFixed(2)} below kill-switch floor $${KILL_SWITCH_FLOOR_USD}.`,
-        { equityUsd: ctx.equityUsd, floor: KILL_SWITCH_FLOOR_USD },
+        `Equity $${ctx.equityUsd.toFixed(2)} below kill-switch floor $${KILL_SWITCH_FLOOR.toFixed(2)}.`,
+        { equityUsd: ctx.equityUsd, floor: KILL_SWITCH_FLOOR },
       ),
     );
   }

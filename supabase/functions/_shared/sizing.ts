@@ -10,12 +10,12 @@
 
 import {
   KILL_SWITCH_FLOOR_USD,
-  MAX_ORDER_USD,
   RISK_PER_TRADE_PCT,
   getProfile,
   isWhitelistedSymbol,
   type TradingProfile,
 } from "./doctrine.ts";
+import type { ResolvedDoctrine } from "./doctrine-resolver.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
 /**
@@ -71,6 +71,11 @@ export interface ClampSizeInput {
   minOrderUsd?: number;
   /** Active trading profile id or object. Sentinel default. */
   profile?: string | TradingProfile;
+  /**
+   * Per-user resolved doctrine (overrides profile.maxOrderUsdHardCap and
+   * the kill-switch floor when present). Always prefer this for live engines.
+   */
+  resolved?: ResolvedDoctrine;
 }
 
 export interface ClampSizeResult {
@@ -92,13 +97,16 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
     symbol,
     minOrderUsd = 0.25,
     profile: profileInput,
+    resolved,
   } = input;
 
   const activeProfile: TradingProfile =
     typeof profileInput === "object" && profileInput
       ? profileInput
       : getProfile(typeof profileInput === "string" ? profileInput : undefined);
-  const orderCap = activeProfile.maxOrderUsdHardCap;
+  // Per-user resolved cap takes precedence over the profile preset.
+  const orderCap = resolved?.maxOrderUsd ?? activeProfile.maxOrderUsdHardCap;
+  const floorUsd = resolved?.killSwitchFloorUsd ?? KILL_SWITCH_FLOOR_USD;
 
   const reasons: GateReason[] = [];
 
@@ -152,8 +160,8 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
   }
 
   // 3. Kill-switch floor: equity minus this order must stay above the floor.
-  //    If it wouldn't, block outright.
-  if (equityUsd - proposedQuoteUsd < KILL_SWITCH_FLOOR_USD) {
+  //    If it wouldn't, block outright. Uses per-user resolved floor when present.
+  if (equityUsd - proposedQuoteUsd < floorUsd) {
     return {
       sizeUsd: 0,
       qty: 0,
@@ -162,8 +170,8 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
         gate(
           GATE_CODES.DOCTRINE_KILL_SWITCH_FLOOR,
           "block",
-          `Order would drop equity below the $${KILL_SWITCH_FLOOR_USD} kill-switch floor.`,
-          { equityUsd, proposedQuoteUsd, floor: KILL_SWITCH_FLOOR_USD },
+          `Order would drop equity below the $${floorUsd.toFixed(2)} kill-switch floor.`,
+          { equityUsd, proposedQuoteUsd, floor: floorUsd },
         ),
       ],
     };
