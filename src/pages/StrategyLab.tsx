@@ -1100,7 +1100,3 @@ function StrategyDialog({
   );
 }
 
-// Reference unused 'candidates' export to avoid dead-binding warnings if the
-// hook ever re-adds related views; harmless.
-void (null as unknown as typeof candidatesUnused);
-const candidatesUnused: unknown = null;
