@@ -10,6 +10,7 @@
 // top-of-book on a quiet tape.
 
 import type { Candle, StrategyParam, StrategyMetrics } from "./domain-types";
+import { ema, rsi } from "./indicators";
 
 export interface BacktestTrade {
   side: "long" | "short";
@@ -61,40 +62,7 @@ function paramNum(params: StrategyParam[], key: string, fallback: number): numbe
   return Number.isFinite(n) ? n : fallback;
 }
 
-function ema(values: number[], period: number): number[] {
-  const k = 2 / (period + 1);
-  const out: number[] = [];
-  let prev = values[0];
-  for (let i = 0; i < values.length; i++) {
-    prev = i === 0 ? values[0] : values[i] * k + prev * (1 - k);
-    out.push(prev);
-  }
-  return out;
-}
-
-function rsi(values: number[], period: number): number[] {
-  const out: number[] = new Array(values.length).fill(50);
-  if (values.length < period + 1) return out;
-  let gains = 0;
-  let losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = values[i] - values[i - 1];
-    if (d >= 0) gains += d;
-    else losses -= d;
-  }
-  let avgG = gains / period;
-  let avgL = losses / period;
-  out[period] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
-  for (let i = period + 1; i < values.length; i++) {
-    const d = values[i] - values[i - 1];
-    const g = d > 0 ? d : 0;
-    const l = d < 0 ? -d : 0;
-    avgG = (avgG * (period - 1) + g) / period;
-    avgL = (avgL * (period - 1) + l) / period;
-    out[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
-  }
-  return out;
-}
+// ema/rsi now imported from ./indicators (P4-D dedupe).
 
 function atr(candles: Candle[], period: number): number[] {
   const tr: number[] = [];

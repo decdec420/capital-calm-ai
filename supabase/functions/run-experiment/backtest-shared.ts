@@ -2,6 +2,11 @@
 // Lives here so the run-experiment edge function and the client can share
 // EXACTLY the same numbers. No DOM, no Node, no Deno imports.
 
+// P4-D: `ema` is canonical in ../_shared/regime.ts (same array signature).
+// `rsi` stays local because regime.ts's `rsi` returns a single scalar
+// (last-value), while the backtester needs an array aligned to `values`.
+import { ema } from "../_shared/regime.ts";
+
 export interface SharedCandle { t: number; o: number; h: number; l: number; c: number; v: number }
 export interface SharedParam { key: string; value: number | string | boolean; unit?: string }
 export interface SharedMetrics {
@@ -42,16 +47,7 @@ function paramNum(params: SharedParam[], key: string, fallback: number): number 
   return Number.isFinite(n) ? n : fallback;
 }
 
-function ema(values: number[], period: number): number[] {
-  const k = 2 / (period + 1);
-  const out: number[] = [];
-  let prev = values[0];
-  for (let i = 0; i < values.length; i++) {
-    prev = i === 0 ? values[0] : values[i] * k + prev * (1 - k);
-    out.push(prev);
-  }
-  return out;
-}
+// ema now imported from ../_shared/regime.ts (P4-D dedupe).
 
 function rsi(values: number[], period: number): number[] {
   const out: number[] = new Array(values.length).fill(50);
