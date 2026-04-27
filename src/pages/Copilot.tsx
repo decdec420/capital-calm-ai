@@ -469,23 +469,26 @@ export default function Copilot() {
                     </div>
                   )}
                   {messages.map((m) => (
-                    <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                    <div key={m.id} className={cn("flex flex-col gap-0.5", m.role === "user" ? "items-end" : "items-start")}>
                       <div
                         className={cn(
-                          "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
+                          "max-w-[85%] rounded-lg px-3 py-2 text-xs",
                           m.role === "user"
                             ? "bg-primary/15 border border-primary/25 text-foreground"
                             : "bg-secondary border border-border text-foreground",
                         )}
                       >
                         {m.role === "assistant" ? (
-                          <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
+                          <div className="prose prose-xs prose-invert max-w-none prose-p:my-1 prose-li:my-0 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary leading-relaxed">
                             <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
                           </div>
                         ) : (
                           <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
                         )}
                       </div>
+                      <span className="text-[10px] text-muted-foreground px-1 tabular">
+                        {new Date(m.createdAt ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
                     </div>
                   ))}
                 </div>
