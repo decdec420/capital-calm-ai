@@ -1016,6 +1016,15 @@ function StrategyDialog({
           <DialogDescription>Params and metrics are JSON. The bot consumes them as-is.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Display name (optional)</Label>
+            <Input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g. Steady Trender"
+            />
+            <p className="text-[10px] text-muted-foreground">Friendly nickname shown in the UI. Leave blank to use the default.</p>
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Name</Label>
