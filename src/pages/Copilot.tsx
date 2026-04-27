@@ -394,6 +394,8 @@ export default function Copilot() {
               <GateReasonList reasons={lastGateReasons} max={4} />
             )}
           </div>
+
+          <MarketIntelligencePanel />
         </div>
 
         {/* CENTER COLUMN — chat / history / calibration tabs */}
