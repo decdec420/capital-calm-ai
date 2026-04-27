@@ -63,6 +63,60 @@ async function fetchFundingRate(symbol: Symbol): Promise<number | null> {
   }
 }
 
+// ─── CryptoPanic news fetcher (free public feed, best-effort) ────
+
+interface NewsItem {
+  title: string;
+  source: string;
+  url?: string;
+  published_at: string;
+  currencies?: Array<{ code: string; title?: string }>;
+  votes?: { positive?: number; negative?: number; important?: number };
+}
+
+async function fetchCryptoNews(symbol: Symbol): Promise<NewsItem[]> {
+  const currencyMap: Record<string, string> = {
+    "BTC-USD": "BTC",
+    "ETH-USD": "ETH",
+    "SOL-USD": "SOL",
+  };
+  const currency = currencyMap[symbol] ?? "BTC";
+  try {
+    const url =
+      `https://cryptopanic.com/api/free/v1/posts/?auth_token=free&currencies=${currency}&kind=news&public=true`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return [];
+    const data = await r.json();
+    const results = (data?.results ?? []) as Array<{
+      title?: string;
+      published_at?: string;
+      source?: { title?: string; domain?: string };
+      url?: string;
+      currencies?: Array<{ code: string; title?: string }>;
+      votes?: Record<string, number>;
+    }>;
+    return results
+      .filter((it) => it.title && it.published_at)
+      .slice(0, 8)
+      .sort((a, b) => (b.votes?.important ?? 0) - (a.votes?.important ?? 0))
+      .slice(0, 5)
+      .map((it) => ({
+        title: it.title!,
+        source: it.source?.title ?? it.source?.domain ?? "unknown",
+        url: it.url,
+        published_at: it.published_at!,
+        currencies: it.currencies,
+        votes: {
+          positive: it.votes?.positive ?? 0,
+          negative: it.votes?.negative ?? 0,
+          important: it.votes?.important ?? 0,
+        },
+      }));
+  } catch {
+    return [];
+  }
+}
+
 // ─── AI Call Helper (structured tool calling) ────────────────────
 
 async function callExpert(
@@ -175,6 +229,7 @@ async function runMacroStrategist(
   symbol: string,
   candles4h: number[][],
   candles1d: number[][],
+  previousNarrative: string | null,
 ): Promise<Record<string, unknown> | null> {
   const recent4h = candles4h.slice(-30).map((c) => ({
     time: new Date(c[0] * 1000).toISOString().slice(0, 16),
@@ -193,8 +248,17 @@ async function runMacroStrategist(
   }));
 
   const lastClose = candles4h[candles4h.length - 1]?.[4];
+  const prevNarr = previousNarrative ?? "No prior narrative — this is the first run.";
   const userMsg = `
 Analyze ${symbol} and produce your strategic brief.
+
+PREVIOUS NARRATIVE (~4h ago):
+${prevNarr}
+
+Your job: read the above, then update it based on what you see now.
+Has the outlook changed? Has a thesis been confirmed or broken?
+Return a fresh "updated_narrative" (2-3 sentences max) capturing the running story
+that will be passed to the next run in ~4 hours.
 
 DAILY CANDLES (last 14 days):
 ${JSON.stringify(recent1d, null, 2)}
@@ -217,6 +281,7 @@ Analysis time: ${new Date().toISOString()}
       "nearest_resistance",
       "key_level_notes",
       "macro_summary",
+      "updated_narrative",
     ],
     additionalProperties: false,
     properties: {
@@ -255,6 +320,11 @@ Analysis time: ${new Date().toISOString()}
         type: "string",
         description:
           "2-3 sentences. Most important thing a trader needs to know about this asset right now. Specific, actionable, no fluff. Trading desk language.",
+      },
+      updated_narrative: {
+        type: "string",
+        description:
+          "2-3 sentences. The evolving running narrative for this symbol — what is the multi-day story unfolding, and what changed (if anything) since the previous narrative? Reads like a continuous thread, not a snapshot.",
       },
     },
   });
@@ -300,9 +370,26 @@ async function runCryptoIntelAnalyst(
   symbol: string,
   fundingRate: number | null,
   fearGreed: { score: number; label: string } | null,
+  newsItems: NewsItem[],
+  previousNarrative: string | null,
 ): Promise<Record<string, unknown> | null> {
+  const newsContext = newsItems.length > 0
+    ? newsItems.map((n) =>
+      `• ${n.title} (${n.source}, ${new Date(n.published_at).toUTCString()})` +
+      ((n.votes?.important ?? 0) > 0
+        ? ` [⚠️ marked important by ${n.votes!.important} users]`
+        : "")
+    ).join("\n")
+    : "No significant news in the last 12 hours.";
+
+  const narrCtx = previousNarrative
+    ? `Current running narrative: ${previousNarrative}`
+    : "First run — no prior narrative context.";
+
   const userMsg = `
 Analyze the crypto-specific environment for ${symbol}.
+
+${narrCtx}
 
 DERIVATIVES DATA:
 - Funding Rate (latest, per 8h): ${fundingRate != null ? (fundingRate * 100).toFixed(4) + "%" : "unavailable"}
@@ -311,15 +398,23 @@ DERIVATIVES DATA:
 MARKET SENTIMENT:
 - Fear & Greed Index: ${fearGreed ? `${fearGreed.score}/100 — ${fearGreed.label}` : "unavailable"}
 
+RECENT NEWS HEADLINES (last 12h):
+${newsContext}
+
 Analysis time: ${new Date().toISOString()}
 
 Produce your crypto intelligence brief. If data is unavailable, reason about
 what's typical for current conditions and clearly note the data gap.
+
+For news_flags: include ONLY material headlines that should cause the Risk Manager
+to raise its bar this session (protocol exploit, ETF news, regulatory action, major
+liquidation cascade, exchange outage, key opinion-leader crisis). Skip routine price
+commentary, generic market recaps, and clickbait. Empty array is acceptable and common.
 `.trim();
 
   return callExpert(apiKey, CRYPTO_INTEL_SYSTEM, userMsg, "submit_crypto_intel", {
     type: "object",
-    required: ["funding_rate_signal", "environment_rating", "sentiment_summary"],
+    required: ["funding_rate_signal", "environment_rating", "sentiment_summary", "news_flags"],
     additionalProperties: false,
     properties: {
       funding_rate_signal: {
@@ -340,6 +435,28 @@ what's typical for current conditions and clearly note the data gap.
         type: "string",
         description:
           "2-3 sentences. What do derivatives + sentiment say about this market? What does it mean for long vs short trades right now? Be specific.",
+      },
+      news_flags: {
+        type: "array",
+        description:
+          "Material news items. Empty array if nothing material. Each item: 1-line summary + impact direction.",
+        items: {
+          type: "object",
+          required: ["headline", "severity", "impact"],
+          additionalProperties: false,
+          properties: {
+            headline: { type: "string", description: "Short summary, ≤100 chars." },
+            severity: {
+              type: "string",
+              enum: ["info", "elevated", "high", "critical"],
+              description: "How seriously the Risk Manager should weight this.",
+            },
+            impact: {
+              type: "string",
+              enum: ["bullish", "bearish", "uncertain"],
+            },
+          },
+        },
       },
     },
   });
@@ -380,6 +497,7 @@ async function runPatternSpecialist(
   candles1h: number[][],
   nearestSupport: number | null,
   nearestResistance: number | null,
+  previousNarrative: string | null,
 ): Promise<Record<string, unknown> | null> {
   const recent1h = candles1h.slice(-48).map((c) => ({
     t: new Date(c[0] * 1000).toISOString().slice(0, 16),
@@ -390,8 +508,13 @@ async function runPatternSpecialist(
   }));
 
   const lastClose = candles1h[candles1h.length - 1]?.[4];
+  const narrCtx = previousNarrative
+    ? `Current running narrative: ${previousNarrative}`
+    : "First run — no prior narrative context.";
   const userMsg = `
 Analyze chart patterns and entry quality context for ${symbol}.
+
+${narrCtx}
 
 Current price: $${lastClose != null ? lastClose.toFixed(2) : "unknown"}
 Nearest support (from macro analyst): $${nearestSupport != null ? nearestSupport.toFixed(2) : "unknown"}
@@ -449,13 +572,24 @@ async function runIntelligenceForSymbol(
   symbol: Symbol,
   apiKey: string,
 ): Promise<void> {
-  // Fetch candles + free external data in parallel.
-  const [c1hRes, c4hRes, c1dRes, fundingRes, fgRes] = await Promise.allSettled([
+  // Load previous Brain Trust output for narrative continuity.
+  const { data: prevRow } = await admin
+    .from("market_intelligence")
+    .select("running_narrative")
+    .eq("user_id", userId)
+    .eq("symbol", symbol)
+    .maybeSingle();
+  const previousNarrative =
+    (prevRow as { running_narrative?: string | null } | null)?.running_narrative ?? null;
+
+  // Fetch candles + free external data + news in parallel.
+  const [c1hRes, c4hRes, c1dRes, fundingRes, fgRes, newsRes] = await Promise.allSettled([
     fetchCoinbaseCandles(symbol, 3600),
     fetchCoinbaseCandles(symbol, 14400),
     fetchCoinbaseCandles(symbol, 86400),
     fetchFundingRate(symbol),
     fetchFearGreed(),
+    fetchCryptoNews(symbol),
   ]);
 
   const candles1h = c1hRes.status === "fulfilled" ? c1hRes.value : [];
@@ -463,6 +597,7 @@ async function runIntelligenceForSymbol(
   const candles1d = c1dRes.status === "fulfilled" ? c1dRes.value : [];
   const funding = fundingRes.status === "fulfilled" ? fundingRes.value : null;
   const fg = fgRes.status === "fulfilled" ? fgRes.value : null;
+  const news = newsRes.status === "fulfilled" ? newsRes.value : [];
 
   if (candles4h.length === 0 || candles1d.length === 0) {
     console.error(`No candles for ${symbol}; skipping AI experts.`);
@@ -471,8 +606,8 @@ async function runIntelligenceForSymbol(
 
   // Macro + Crypto experts run in parallel; Pattern needs S/R from Macro.
   const [macroResult, cryptoResult] = await Promise.all([
-    runMacroStrategist(apiKey, symbol, candles4h, candles1d),
-    runCryptoIntelAnalyst(apiKey, symbol, funding, fg),
+    runMacroStrategist(apiKey, symbol, candles4h, candles1d, previousNarrative),
+    runCryptoIntelAnalyst(apiKey, symbol, funding, fg, news, previousNarrative),
   ]);
 
   const patternResult = await runPatternSpecialist(
@@ -481,12 +616,22 @@ async function runIntelligenceForSymbol(
     candles1h,
     (macroResult?.nearest_support as number | undefined) ?? null,
     (macroResult?.nearest_resistance as number | undefined) ?? null,
+    previousNarrative,
   );
 
   if (!macroResult && !cryptoResult && !patternResult) {
     console.error(`All experts failed for ${symbol}`);
     return;
   }
+
+  const updatedNarrative =
+    (macroResult?.updated_narrative as string | undefined)?.trim() ||
+    previousNarrative ||
+    null;
+
+  const newsFlags = Array.isArray(cryptoResult?.news_flags)
+    ? cryptoResult!.news_flags
+    : [];
 
   const { error } = await admin.from("market_intelligence").upsert(
     {
@@ -508,6 +653,8 @@ async function runIntelligenceForSymbol(
       environment_rating: cryptoResult?.environment_rating ?? "neutral",
       pattern_context: patternResult?.pattern_context ?? "",
       entry_quality_context: patternResult?.entry_quality_context ?? "",
+      running_narrative: updatedNarrative,
+      news_flags: newsFlags,
       generated_at: new Date().toISOString(),
       candle_count_1h: candles1h.length,
       candle_count_4h: candles4h.length,
