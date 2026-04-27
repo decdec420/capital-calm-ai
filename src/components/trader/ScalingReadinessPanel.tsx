@@ -93,31 +93,37 @@ export function ScalingReadinessPanel() {
           pass: expectancyPass,
           label: "Positive expectancy over ≥50 paper trades",
           detail: `${tradeCount} trades · ${expR >= 0 ? "+" : ""}$${expR.toFixed(2)} avg`,
+          source: "All your closed paper trades, across every strategy.",
         },
         {
           pass: ddPass,
           label: "Max drawdown under 25% on real paper trades",
           detail: tradeCount === 0 ? "no trades yet" : `${ddPct.toFixed(1)}%`,
+          source: "Peak-to-trough on the cumulative paper-trade equity curve.",
         },
         {
           pass: netPass,
           label: "Net profitable over last 30 days",
           detail: `${netRecent >= 0 ? "+" : ""}$${netRecent.toFixed(2)}`,
+          source: "Sum of paper-trade pnl over the trailing 30 days.",
         },
         {
           pass: cycleDone,
           label: "At least one full learning cycle completed",
           detail: cycleDone ? "propose → backtest → promote → paper" : "no promoted descendant strategy yet",
+          source: "Any strategy descended from another that ended up approved or archived.",
         },
         {
           pass: paramsWired,
           label: "Strategy params wired into live engine",
           detail: paramsWired ? "engine reads strategy params" : "engine using hardcoded defaults",
+          source: "system_state.params_wired_live",
         },
         {
           pass: brokerLive,
           label: "Broker connected (real, not paper)",
           detail: brokerLive ? "live broker linked" : "paper mode — no real broker",
+          source: "broker_credentials + system_state.broker_connection",
         },
       ];
 
