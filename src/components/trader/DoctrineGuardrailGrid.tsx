@@ -21,7 +21,7 @@ import {
 import { useAccountState } from "@/hooks/useAccountState";
 import { useTrades } from "@/hooks/useTrades";
 import { useSystemState } from "@/hooks/useSystemState";
-import { DOCTRINE } from "@/lib/doctrine-constants";
+import { DOCTRINE, getProfile } from "@/lib/doctrine-constants";
 import { formatUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
@@ -58,40 +58,40 @@ export function DoctrineGuardrailGrid() {
 
   const rows = useMemo<DerivedRow[]>(() => {
     const equity = account?.equity ?? 0;
+    const profile = getProfile(system?.activeProfile);
+    const PROFILE_MAX_ORDER = profile.maxOrderUsdHardCap;
+    const PROFILE_MAX_TRADES = profile.maxDailyTradesHardCap;
+    const PROFILE_MAX_DAILY_LOSS = profile.maxDailyLossUsdHardCap;
+    const PROFILE_MAX_DAILY_LOSS_PCT = profile.maxDailyLossPct;
+    const PROFILE_MAX_CORR = profile.maxCorrelatedPositions;
 
-    // 1. Per-order cap (hard $1).
-    // We have no in-flight order to compare against, so utilization
-    // shows the cap itself relative to equity — it's a contextual ratio.
-    const orderUtil = equity > 0 ? Math.min(1, DOCTRINE.MAX_ORDER_USD / equity) : 0;
+    // 1. Per-order cap.
+    const orderUtil = equity > 0 ? Math.min(1, PROFILE_MAX_ORDER / equity) : 0;
 
-    // 2. Daily realized loss (today, UTC). Sum of negative pnl from
-    // trades closed since UTC midnight.
+    // 2. Daily realized loss (today, UTC).
     const utcMidnight = new Date();
     utcMidnight.setUTCHours(0, 0, 0, 0);
     const realizedLossToday = closed
       .filter((t) => t.closedAt && new Date(t.closedAt) >= utcMidnight)
-      .reduce((acc, t) => acc + Math.min(0, t.pnl ?? 0), 0); // negative number
+      .reduce((acc, t) => acc + Math.min(0, t.pnl ?? 0), 0);
     const lossUsdAbs = Math.abs(realizedLossToday);
-    const lossPctOfEquity = equity > 0 ? lossUsdAbs / equity : 0;
-    // Engine blocks at min($1, 3% of equity) — whichever bites first.
-    const lossLimitUsd = Math.min(DOCTRINE.MAX_DAILY_LOSS_USD, equity * DOCTRINE.MAX_DAILY_LOSS_PCT);
+    const lossLimitUsd = Math.min(PROFILE_MAX_DAILY_LOSS, equity * PROFILE_MAX_DAILY_LOSS_PCT);
     const lossUtil = lossLimitUsd > 0 ? Math.min(1, lossUsdAbs / lossLimitUsd) : 0;
 
     // 3. Daily trade count.
     const tradesToday =
       closed.filter((t) => t.openedAt && new Date(t.openedAt) >= utcMidnight).length +
       open.filter((t) => t.openedAt && new Date(t.openedAt) >= utcMidnight).length;
-    const tradeUtil = Math.min(1, tradesToday / DOCTRINE.MAX_TRADES_PER_DAY);
+    const tradeUtil = Math.min(1, tradesToday / PROFILE_MAX_TRADES);
 
-    // 4. Kill-switch floor.
+    // 4. Kill-switch floor (global, never per-profile).
     const headroomToFloor = Math.max(0, equity - DOCTRINE.KILL_SWITCH_FLOOR_USD);
-    // Show as utilization of the loss buffer: 0 = full buffer, 1 = at floor.
     const floorUtil = equity > 0
       ? Math.min(1, Math.max(0, 1 - headroomToFloor / Math.max(equity, DOCTRINE.KILL_SWITCH_FLOOR_USD)))
       : 1;
 
     // 5. Correlated positions cap.
-    const corrUtil = Math.min(1, open.length / DOCTRINE.MAX_CORRELATED_POSITIONS);
+    const corrUtil = Math.min(1, open.length / PROFILE_MAX_CORR);
 
     // 6. Stale-data check from system state (informational — engine handles
     // the real check during a tick, this is the dashboard mirror).
@@ -101,17 +101,17 @@ export function DoctrineGuardrailGrid() {
       {
         key: "max-order",
         label: "Max order size",
-        description: `Single order capped at ${formatUsd(DOCTRINE.MAX_ORDER_USD)} regardless of confidence.`,
+        description: `Single order capped at ${formatUsd(PROFILE_MAX_ORDER)} regardless of confidence (${profile.label} profile).`,
         icon: Gauge,
-        current: formatUsd(DOCTRINE.MAX_ORDER_USD),
-        limit: formatUsd(DOCTRINE.MAX_ORDER_USD),
+        current: formatUsd(PROFILE_MAX_ORDER),
+        limit: formatUsd(PROFILE_MAX_ORDER),
         utilization: orderUtil,
-        tone: "safe", // hard cap, never "caution" by itself
+        tone: "safe",
       },
       {
         key: "daily-loss",
         label: "Daily loss cap",
-        description: `Halts new entries at ${formatUsd(lossLimitUsd)} losses today (min of ${formatUsd(DOCTRINE.MAX_DAILY_LOSS_USD)} or ${(DOCTRINE.MAX_DAILY_LOSS_PCT * 100).toFixed(0)}% of equity).`,
+        description: `Halts new entries at ${formatUsd(lossLimitUsd)} losses today (min of ${formatUsd(PROFILE_MAX_DAILY_LOSS)} or ${(PROFILE_MAX_DAILY_LOSS_PCT * 100).toFixed(0)}% of equity).`,
         icon: TrendingDown,
         current: formatUsd(lossUsdAbs),
         limit: formatUsd(lossLimitUsd),
@@ -121,10 +121,10 @@ export function DoctrineGuardrailGrid() {
       {
         key: "trade-count",
         label: "Daily trade cap",
-        description: `Hard ceiling of ${DOCTRINE.MAX_TRADES_PER_DAY} trades per UTC day. Overtrading is failure.`,
+        description: `Hard ceiling of ${PROFILE_MAX_TRADES} trades per UTC day (${profile.label} profile). Overtrading is failure.`,
         icon: Hand,
         current: `${tradesToday}`,
-        limit: `${DOCTRINE.MAX_TRADES_PER_DAY}`,
+        limit: `${PROFILE_MAX_TRADES}`,
         utilization: tradeUtil,
         tone: toneFor(tradeUtil),
       },
@@ -141,10 +141,10 @@ export function DoctrineGuardrailGrid() {
       {
         key: "correlation",
         label: "Correlated positions",
-        description: `Up to ${DOCTRINE.MAX_CORRELATED_POSITIONS} open crypto positions at a time — BTC/ETH/SOL move together.`,
+        description: `Up to ${PROFILE_MAX_CORR} open crypto positions at a time — BTC/ETH/SOL move together.`,
         icon: Layers,
         current: `${open.length}`,
-        limit: `${DOCTRINE.MAX_CORRELATED_POSITIONS}`,
+        limit: `${PROFILE_MAX_CORR}`,
         utilization: corrUtil,
         tone: corrUtil >= 1 ? "blocked" : "safe",
       },
