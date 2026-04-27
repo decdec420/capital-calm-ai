@@ -31,7 +31,7 @@ Deno.test("risk — kill switch halts", () => {
 });
 
 Deno.test("risk — daily trade count cap halts", () => {
-  const r = evaluateRiskGates({ ...baseCtx, dailyTradeCount: 2 });
+  const r = evaluateRiskGates({ ...baseCtx, dailyTradeCount: 5 });
   assertEquals(r.some((x) => x.code === "TRADE_COUNT_CAP"), true);
 });
 

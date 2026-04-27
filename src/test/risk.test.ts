@@ -40,7 +40,7 @@ describe("risk gate stack", () => {
   });
 
   it("halts at the daily trade cap", () => {
-    const reasons = evaluateRiskGates(baseCtx({ dailyTradeCount: 2 }));
+    const reasons = evaluateRiskGates(baseCtx({ dailyTradeCount: 5 }));
     expect(reasons.some((r) => r.code === "TRADE_COUNT_CAP")).toBe(true);
   });
 
