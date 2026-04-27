@@ -240,6 +240,10 @@ Deno.serve(async (req: Request) => {
       const { data: userData, error: userErr } = await userClient.auth.getUser(token);
       if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
       userIds = [userData.user.id];
+
+      // Rate limit user-triggered runs only.
+      const rl = await checkRateLimit(admin, userData.user.id, "propose-experiment", 10);
+      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
     }
 
     const results = await Promise.all(userIds.map((uid) => proposeForUser(admin, uid, LOVABLE_API_KEY).catch((e) => ({ userId: uid, error: String(e) }))));
