@@ -10,12 +10,12 @@
 
 import {
   KILL_SWITCH_FLOOR_USD,
-  MAX_ORDER_USD,
   RISK_PER_TRADE_PCT,
   getProfile,
   isWhitelistedSymbol,
   type TradingProfile,
 } from "./doctrine.ts";
+import type { ResolvedDoctrine } from "./doctrine-resolver.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
 /**
