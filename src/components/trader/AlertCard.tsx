@@ -438,13 +438,3 @@ function JessicaTriage() {
   );
 }
 
-function Section({ label, body }: { label: string; body: string }) {
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-0.5">
-        {label}
-      </p>
-      <p className="text-xs text-foreground/90 whitespace-pre-wrap">{body}</p>
-    </div>
-  );
-}
