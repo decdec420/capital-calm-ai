@@ -1371,12 +1371,24 @@ async function runTickForUser(
       user_id: userId,
       kind: "trade",
       title: `Auto-opened ${side.toUpperCase()} ${winner.symbol} @ $${entry.toFixed(2)}`,
-      summary: `Autonomy ${autonomy}. Confidence ${(conf * 100).toFixed(0)}%. ${decision.reasoning ?? ""}`,
+      summary: [
+        `Autonomy ${autonomy}. Confidence ${(conf * 100).toFixed(0)}%.`,
+        decision.reasoning ?? "",
+        intel
+          ? `Macro: ${intel.macro_bias} (${(Number(intel.macro_confidence ?? 0) * 100).toFixed(0)}% confidence)`
+          : "",
+        intel ? `Environment: ${intel.environment_rating}` : "",
+        intel?.pattern_context
+          ? `Pattern: ${String(intel.pattern_context).slice(0, 100)}...`
+          : "",
+      ].filter(Boolean).join(" | "),
       tags: [
         "auto-execute",
         autonomy,
         winner.regime.regime,
         winner.symbol,
+        intel?.macro_bias ?? "no-intel",
+        intel?.environment_rating ?? "no-intel",
       ],
     });
 
