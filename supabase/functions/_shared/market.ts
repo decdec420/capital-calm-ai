@@ -30,6 +30,15 @@ export interface Ticker {
 
 const CB = "https://api.exchange.coinbase.com";
 
+/**
+ * Fetch 4-hour candles for multi-timeframe context.
+ * Used by the signal engine alongside the default 1h candles so the
+ * Technical Analyst AI can confirm 1h entries against the 4h structure.
+ */
+export async function fetchCandles4h(symbol: Symbol): Promise<Candle[]> {
+  return fetchCandles(symbol, 14400);
+}
+
 export async function fetchCandles(
   symbol: Symbol,
   granularitySeconds = 3600,

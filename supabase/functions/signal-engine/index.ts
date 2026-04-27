@@ -124,6 +124,8 @@ async function decideForSymbol(opts: {
   regime: RegimeResult;
   // deno-lint-ignore no-explicit-any
   contextPacket: any;
+  // deno-lint-ignore no-explicit-any
+  intel: any;
   LOVABLE_API_KEY: string;
   /** Live strategy parameters that shape the prompt. The AI is told the
    * stop band and TP-R multiple to use so changing the approved strategy
@@ -150,46 +152,95 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, LOVABLE_API_KEY, stratParams } = opts;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams } = opts;
 
-  // Translate stop_atr_mult into an approximate price-percent band so the
-  // AI has a concrete target. This is a heuristic — final stop is hard
-  // computed in Stage 4 from `regime.atrPct * stopAtrMult` — but the
-  // prompt needs *some* concrete number to anchor on.
-  const stopAtrMult = stratParams.stopAtrMult;
-  const tpRMult = stratParams.tpRMult;
-  // Rough conversion: an ATR-multiple of 1.5 on hourly BTC ≈ 1.0–1.5%.
-  const stopPctLow = Math.max(0.4, stopAtrMult * 0.7).toFixed(1);
-  const stopPctHigh = Math.max(0.6, stopAtrMult * 1.1).toFixed(1);
+  const liveStopAtrMult = stratParams.stopAtrMult;
+  const liveTpMult = stratParams.tpRMult;
 
-  const systemPrompt = `You are the Trader OS Signal Engine for ${symbol}.
-Disciplined, conservative, risk-first, compounding-focused. A SKIP is data, not failure.
+  const macroBiasStr = intel?.macro_bias ?? "unknown";
+  const envRating = intel?.environment_rating ?? "unknown";
 
-ENTRY PHILOSOPHY: "Buy low within an uptrend, sell high in pieces."
-PROPOSE_TRADE only when ALL are true:
-- setupScore >= 0.65
-- regime is trending_up, trending_down, or breakout (NEVER chop, NEVER pure range)
-- volatility is not extreme
-- no guardrail blocked or above 0.85 utilization
-- For LONGS: strongly prefer pullback==true (RSI dipped <45 then curled up while slow EMA still rising). A clean pullback is the highest-quality buy.
+  const systemPrompt = `
+You are the Technical Analyst on a professional multi-expert crypto trading desk.
+You are the execution specialist — your job is to find HIGH QUALITY entries
+when the conditions are right, and to sit on your hands when they're not.
 
-STRATEGY PARAMETERS (from the live approved strategy):
-- EMA fast: ${stratParams.emaFast} · EMA slow: ${stratParams.emaSlow} · RSI period: ${stratParams.rsiPeriod}
-- stop_atr_mult: ${stopAtrMult} → place proposed_stop ~${stopPctLow}–${stopPctHigh}% from entry
-- tp_r_mult: ${tpRMult} → proposed_target should be ${tpRMult}R from entry (TP1 = 1R)
-These are the live knobs. If the strategy widens stops, your proposed_stop must reflect that.
+You think like the best discretionary traders in the world:
+- Mark Minervini: Only take A+ setups. Stage 2 breakouts with tight bases.
+  "I am only interested in stocks or assets at the sweet spot of their moves."
+- Linda Bradford Raschke: Momentum, price patterns, and discipline.
+  "The key is not to find the best entry, it's to trade in the right direction."
+- The principle of CONFLUENCE: A trade is high quality when multiple independent
+  signals agree. One signal is noise. Three signals in agreement is edge.
 
-PATTERN MEMORY: review patternMemory in context. If a symbol or regime has been losing recently, raise your bar. If it has been winning, you may be slightly more aggressive on size (still capped by doctrine at $${MAX_ORDER_USD}/order).
+DECISION HIERARCHY (work through all of these before deciding):
 
-SIZING (compounding-friendly, survival-first):
-- size_pct: 0.10–0.25 of equity, scaled by confidence and pullback quality
-- proposed_stop: ~${stopPctLow}–${stopPctHigh}% from entry (per stop_atr_mult above)
-- proposed_tp1: 1R from entry — half closes here, stop moves to breakeven
-- proposed_target (TP2): ${tpRMult}R from entry — runner exits here
+1. MACRO FILTER (from the Brain Trust — this is non-negotiable):
+   Macro bias: ${macroBiasStr} | Environment: ${envRating}
+   - If macro_bias is strong_long → ONLY consider long trades. Short setups need exceptional quality.
+   - If macro_bias is lean_long → Prefer longs. Short trades require extra confirmation.
+   - If macro_bias is neutral → Both directions acceptable. Raise the bar for all entries.
+   - If macro_bias is lean_short → Prefer shorts. Long trades require extra confirmation.
+   - If macro_bias is strong_short → ONLY consider short trades.
+   Never fight a strong macro bias. The trend is set by forces bigger than a 1h candle.
 
-Your numbers will be hard-clamped by the doctrine ($${MAX_ORDER_USD} max notional per order). Propose honestly.
+2. ENVIRONMENT FILTER:
+   - highly_favorable: Can trade at standard confidence thresholds
+   - favorable: Standard thresholds apply
+   - neutral: Raise confidence threshold by 0.1
+   - unfavorable: Raise confidence threshold by 0.2. Reduce size.
+   - highly_unfavorable: Do NOT trade unless the setup is exceptional (confidence > 0.85)
 
-You MUST call submit_decision. No plain text.`;
+3. MULTI-TIMEFRAME CONFIRMATION:
+   You receive both 1h and 4h candle data.
+   The 4h tells you the intermediate structure — is the 1h entry happening
+   WITH or AGAINST the 4h trend?
+   - 4h trending up + 1h pullback entry = high quality long (trend alignment)
+   - 4h trending down + 1h counter-trend long = low quality (fighting 4h trend)
+   Only take trades where the 1h entry aligns with the 4h structure.
+   This single filter eliminates the majority of false signals.
+
+4. PULLBACK PREFERENCE:
+   The BEST entries are pullbacks to the fast EMA in an established trend.
+   Price rises, pulls back to the moving average, RSI cools off below 50,
+   then curls back up. This is "buy low within an uptrend."
+   - pullback == true: +0.2 to confidence. This is a high-quality entry.
+   - Breakout entries (buying new highs): Only take if volume is expanding
+     and the breakout is from a tight consolidation.
+     Breakouts from wide, loose patterns fail most of the time.
+
+5. KEY LEVEL QUALITY:
+   From the Pattern Recognition Specialist:
+   "${intel?.entry_quality_context ?? "No pattern context available — be conservative."}"
+   Use this to assess entry quality. A long at key support = tight, defined risk.
+   A long in open space = wide stops, undefined risk. Prefer the former strongly.
+
+6. SKIP CRITERIA (these override everything — skip if ANY are true):
+   - No clear trend on 4h timeframe
+   - 4h and 1h trends are opposed (fighting the intermediate trend)
+   - setupScore < 0.55 (not enough quality signals aligning)
+   - Volatility is extreme (crypto flash crashes happen fast)
+   - Outside of prime liquidity: only trade 07:00-23:00 UTC
+
+SIZING PHILOSOPHY:
+- High confidence (>0.80) + pullback + key level support: 20-25% of equity (max $${MAX_ORDER_USD})
+- Standard confidence (0.65-0.80): 15-20% of equity
+- Lower confidence (0.55-0.65): 10-15% of equity
+- Never exceed $${MAX_ORDER_USD} per order (doctrine hard cap)
+
+STOPS AND TARGETS:
+- Stop: ${liveStopAtrMult}× ATR from entry (current strategy parameter)
+- TP1: 1R from entry. Close half the position. Move stop to breakeven.
+- TP2: ${liveTpMult}R from entry. Exit the runner.
+- If the natural stop placement puts you more than 2.5% from entry, the
+  setup is too extended. Skip it.
+
+A SKIP IS NOT FAILURE. Most ticks should be skips.
+The edge is in the quality of trades taken, not the quantity.
+"The money is made in the waiting." — Jesse Livermore
+
+You MUST call submit_decision. No plain text responses.
+`.trim();
 
   const aiResp = await fetch(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
@@ -244,7 +295,7 @@ You MUST call submit_decision. No plain text.`;
                   reasoning: {
                     type: "string",
                     description:
-                      "2-4 sentences. Mention pullback quality + pattern memory if relevant. Witty but precise. No emojis.",
+                      "2-4 sentences. Mention macro alignment, 4h/1h confluence, pullback quality. Witty but precise. No emojis.",
                   },
                 },
                 required: ["decision", "confidence", "reasoning"],
@@ -277,12 +328,159 @@ You MUST call submit_decision. No plain text.`;
   }
 }
 
+// ─── Risk Manager — second AI call, only when a trade is proposed ──
+async function runRiskManager(opts: {
+  symbol: string;
+  side: "long" | "short";
+  entry: number;
+  stop: number;
+  target: number;
+  sizeUsd: number;
+  confidence: number;
+  equity: number;
+  // deno-lint-ignore no-explicit-any
+  openTrades: any[];
+  // deno-lint-ignore no-explicit-any
+  intel: any;
+  LOVABLE_API_KEY: string;
+}): Promise<{ verdict: "approve" | "reduce_size" | "veto"; sizeMultiplier?: number; reason: string }> {
+  const { symbol, side, entry, stop, target, sizeUsd, confidence, equity, openTrades, intel, LOVABLE_API_KEY } = opts;
+  const riskR = Math.abs(entry - stop);
+  const rewardR = Math.abs(target - entry);
+  const rrRatio = riskR > 0 ? rewardR / riskR : 0;
+  const riskPct = equity > 0 ? (sizeUsd / equity) * 100 : 0;
+
+  const systemPrompt = `
+You are the Risk Manager on a professional trading desk.
+A trade has been proposed. Your ONLY job is to evaluate risk.
+You are not here to be enthusiastic. You are here to be right.
+
+The greatest risk managers think like this:
+- Ray Dalio: "The biggest mistake investors make is to believe that what happened
+  in the recent past is likely to persist."
+- Paul Tudor Jones: "I'm always thinking about losing money rather than making money."
+  Don't focus on the upside. Obsess over the downside.
+- Ed Seykota: "The elements of good trading are: cutting losses, cutting losses,
+  and cutting losses." Your job is to make sure the bot cuts when it should.
+
+YOUR EVALUATION FRAMEWORK:
+
+1. RISK/REWARD MATH (non-negotiable):
+   The proposed trade must offer at least 1.5:1 reward to risk.
+   At 2:1, a 35% win rate breaks even. Below 1.5:1, the math doesn't support trading.
+   Current R/R: ${rrRatio.toFixed(2)}:1
+   - If R/R < 1.5: VETO. No exceptions.
+   - If R/R 1.5-2.0: APPROVE but note the thin edge.
+   - If R/R > 2.0: Solid foundation.
+
+2. MACRO ALIGNMENT:
+   Macro bias: ${intel?.macro_bias ?? "unknown"}
+   - Trading WITH a strong macro bias: approve as proposed.
+   - Trading AGAINST a strong macro bias: VETO unless confidence > 0.85.
+   - Neutral macro: apply standard criteria.
+
+3. ENVIRONMENT SUITABILITY:
+   Environment: ${intel?.environment_rating ?? "unknown"}
+   Funding signal: ${intel?.funding_rate_signal ?? "unknown"}
+   - highly_unfavorable + crowded_long + proposing long: VETO.
+     You're buying into a crowded trade with no new buyers left.
+   - highly_favorable + crowded_short + proposing long: APPROVE with confidence.
+     You have sentiment as a tailwind.
+
+4. PORTFOLIO HEAT:
+   Open positions: ${openTrades.length}
+   Current proposed size: $${sizeUsd.toFixed(2)} (${riskPct.toFixed(1)}% of equity)
+   - 0 open positions: Standard sizing acceptable.
+   - 1 open position, different symbol: Slightly reduce size (correlation risk).
+   - 1 open position, same direction: Significant correlation. REDUCE_SIZE by 50%.
+   - 2+ open positions: VETO until one closes. Max portfolio heat exceeded.
+
+5. STOP PLACEMENT SANITY:
+   Entry: $${entry.toFixed(2)} | Stop: $${stop.toFixed(2)} | Distance: ${((Math.abs(entry - stop) / entry) * 100).toFixed(2)}%
+   - If stop is more than 3% from entry: VETO.
+     This is too wide for $1 orders — the R is too large vs the actual dollar risk.
+   - If stop is less than 0.5% from entry: VETO.
+     This is too tight. Noise will stop you out constantly.
+   - 0.8-2.0%: Ideal stop placement for crypto on 1h chart.
+
+OUTPUT: approve (trade is good as proposed) / reduce_size with multiplier 0.25-0.75 /
+veto with specific reason. Be decisive. No maybes.
+`.trim();
+
+  const userMsg = `
+Proposed trade:
+- Symbol: ${symbol}
+- Direction: ${side.toUpperCase()}
+- Entry: $${entry.toFixed(2)}
+- Stop: $${stop.toFixed(2)} (${((Math.abs(entry - stop) / entry) * 100).toFixed(2)}% away)
+- Target: $${target.toFixed(2)}
+- Size: $${sizeUsd.toFixed(2)}
+- Risk/Reward: ${rrRatio.toFixed(2)}:1
+- Confidence: ${(confidence * 100).toFixed(0)}%
+- Current equity: $${equity.toFixed(2)}
+- Open positions: ${openTrades.length} (${openTrades.map((t: { side: string; symbol: string }) => `${t.side} ${t.symbol}`).join(", ") || "none"})
+
+What is your verdict?
+`.trim();
+
+  try {
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMsg },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "submit_risk_verdict",
+            parameters: {
+              type: "object",
+              required: ["verdict", "reason"],
+              additionalProperties: false,
+              properties: {
+                verdict: { type: "string", enum: ["approve", "reduce_size", "veto"] },
+                size_multiplier: {
+                  type: "number",
+                  description: "Only if verdict is reduce_size. 0.25-0.75 multiplier on the proposed size.",
+                },
+                reason: {
+                  type: "string",
+                  description: "1-2 sentences. Specific reason for this verdict. Reference the actual numbers.",
+                },
+              },
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "submit_risk_verdict" } },
+      }),
+    });
+
+    if (!resp.ok) return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
+    const d = await resp.json();
+    const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+    if (!args) return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
+    const parsed = JSON.parse(args);
+    return {
+      verdict: parsed.verdict,
+      sizeMultiplier: parsed.size_multiplier,
+      reason: parsed.reason,
+    };
+  } catch {
+    return { verdict: "approve", reason: "Risk manager exception — approving by default." };
+  }
+}
+
 // ─── Per-user tick ────────────────────────────────────────────────
 async function runTickForUser(
   // deno-lint-ignore no-explicit-any
   admin: any,
   userId: string,
   candlesBySymbol: Record<Symbol, Candle[]>,
+  candlesBySymbol4h: Record<Symbol, Candle[]>,
   LOVABLE_API_KEY: string,
 ) {
   const expiredCount = await expirePendingSignals(admin, userId);
@@ -294,6 +492,7 @@ async function runTickForUser(
     { data: openTrades },
     { data: pendingSignals },
     { data: recentSignals },
+    { data: intelligenceBriefs },
     patternMemory,
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -321,8 +520,27 @@ async function runTickForUser(
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(15),
+    admin
+      .from("market_intelligence")
+      .select("*")
+      .eq("user_id", userId),
     buildPatternMemory(admin, userId),
   ]);
+
+  // Index Brain Trust briefs by symbol; flag stale entries (>6h old).
+  // deno-lint-ignore no-explicit-any
+  const intelligenceBySymbol: Record<string, any> = {};
+  for (const brief of (intelligenceBriefs ?? []) as Array<{
+    symbol: string;
+    generated_at: string;
+    // deno-lint-ignore no-explicit-any
+    [k: string]: any;
+  }>) {
+    const ageHours =
+      (Date.now() - new Date(brief.generated_at).getTime()) / 3_600_000;
+    intelligenceBySymbol[brief.symbol] = { ...brief, _stale: ageHours > 6 };
+  }
+
 
   if (!sys) {
     return {
@@ -610,6 +828,33 @@ async function runTickForUser(
   }
 
   // ── Stage 3: context packet + AI call ──────────────────────────
+  const intel = intelligenceBySymbol[winner.symbol] ?? null;
+  const candles1h = candlesBySymbol[winner.symbol] ?? [];
+  const candles4h = candlesBySymbol4h[winner.symbol] ?? [];
+
+  const trend1h = (() => {
+    if (candles1h.length < 20) return "insufficient_data";
+    const recent = candles1h.slice(-20).map((c) => c.c);
+    const firstHalf = recent.slice(0, 10).reduce((a, b) => a + b, 0) / 10;
+    const secondHalf = recent.slice(10).reduce((a, b) => a + b, 0) / 10;
+    return secondHalf > firstHalf * 1.005
+      ? "up"
+      : secondHalf < firstHalf * 0.995
+      ? "down"
+      : "flat";
+  })();
+  const trend4h = (() => {
+    if (candles4h.length < 10) return "insufficient_data";
+    const recent = candles4h.slice(-10).map((c) => c.c);
+    const firstHalf = recent.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
+    const secondHalf = recent.slice(5).reduce((a, b) => a + b, 0) / 5;
+    return secondHalf > firstHalf * 1.01
+      ? "up"
+      : secondHalf < firstHalf * 0.99
+      ? "down"
+      : "flat";
+  })();
+
   const contextPacket = {
     doctrine: {
       maxOrderUsd: CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxOrderUsdHardCap,
@@ -670,6 +915,56 @@ async function runTickForUser(
     ),
     patternMemory,
     strategyParams: liveParams,
+    brainTrust: intel
+      ? {
+        // Macro Strategist
+        macroBias: intel.macro_bias,
+        macroConfidence: intel.macro_confidence,
+        marketPhase: intel.market_phase,
+        trendStructure: intel.trend_structure,
+        nearestSupport: intel.nearest_support,
+        nearestResistance: intel.nearest_resistance,
+        keyLevelNotes: intel.key_level_notes,
+        macroSummary: intel.macro_summary,
+        // Crypto Intelligence
+        fundingRateSignal: intel.funding_rate_signal,
+        fundingRatePct: intel.funding_rate_pct,
+        fearGreedScore: intel.fear_greed_score,
+        fearGreedLabel: intel.fear_greed_label,
+        environmentRating: intel.environment_rating,
+        sentimentSummary: intel.sentiment_summary,
+        // Pattern Recognition
+        patternContext: intel.pattern_context,
+        entryQualityContext: intel.entry_quality_context,
+        // Meta
+        briefAge: intel.generated_at
+          ? `${Math.round((Date.now() - new Date(intel.generated_at).getTime()) / 60000)}min ago`
+          : "not available",
+        isStale: intel._stale ?? false,
+      }
+      : {
+        error:
+          "No intelligence brief available — Brain Trust hasn't run yet. Be conservative.",
+      },
+    timeframes: {
+      "1h": {
+        lastPrice: candles1h[candles1h.length - 1]?.c ?? 0,
+        trend: trend1h,
+        candleCount: candles1h.length,
+      },
+      "4h": {
+        lastPrice: candles4h[candles4h.length - 1]?.c ?? 0,
+        trend: trend4h,
+        candleCount: candles4h.length,
+        recentCandles: candles4h.slice(-8).map((c) => ({
+          t: new Date(c.t * 1000).toISOString().slice(0, 13) + ":00",
+          o: c.o.toFixed(2),
+          h: c.h.toFixed(2),
+          l: c.l.toFixed(2),
+          c: c.c.toFixed(2),
+        })),
+      },
+    },
   };
 
   const aiResult = await decideForSymbol({
@@ -677,6 +972,7 @@ async function runTickForUser(
     lastPrice: winner.lastPrice,
     regime: winner.regime,
     contextPacket,
+    intel,
     LOVABLE_API_KEY,
     stratParams: liveParams,
   });
@@ -785,8 +1081,8 @@ async function runTickForUser(
     };
   }
 
-  const sizeUsd = clamp.sizeUsd;
-  const fullSize = clamp.qty;
+  let sizeUsd = clamp.sizeUsd;
+  let fullSize = clamp.qty;
 
   // Stop fallback uses the strategy's stop_atr_mult so the param actually
   // changes live trades, not just backtests. We approximate ATR as 1% of
@@ -810,6 +1106,73 @@ async function runTickForUser(
       (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
   );
   const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+
+  // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
+  // Only fires when a trade is actually proposed — keeps cost low since
+  // most ticks are skips. Veto = bail out completely. reduce_size = trim
+  // the order before persisting. approve = no-op.
+  let riskVerdict: {
+    verdict: "approve" | "reduce_size" | "veto";
+    sizeMultiplier?: number;
+    reason: string;
+  } | null = null;
+  if (decision.decision === "propose_trade") {
+    riskVerdict = await runRiskManager({
+      symbol: winner.symbol,
+      side: side as "long" | "short",
+      entry,
+      stop,
+      target,
+      sizeUsd,
+      confidence: conf,
+      equity,
+      openTrades: openTrades ?? [],
+      intel,
+      LOVABLE_API_KEY,
+    });
+
+    if (riskVerdict.verdict === "veto") {
+      await admin.from("journal_entries").insert({
+        user_id: userId,
+        kind: "skip",
+        title: `Risk Manager vetoed ${winner.symbol} ${side.toUpperCase()} @ $${entry.toFixed(2)}`,
+        summary: `Risk Manager: ${riskVerdict.reason}`,
+        tags: [winner.symbol, "risk-veto", winner.regime.regime],
+      });
+      const vetoGate = gate(
+        GATE_CODES.AI_SKIP,
+        "skip",
+        `${winner.symbol}: Risk Manager veto — ${riskVerdict.reason}`,
+        { symbol: winner.symbol, riskManagerVerdict: riskVerdict },
+      );
+      await persistSnapshot(admin, userId, {
+        gateReasons: [vetoGate],
+        perSymbol,
+        chosenSymbol: winner.symbol,
+      });
+      return {
+        userId,
+        tick: "risk_vetoed",
+        symbol: winner.symbol,
+        reason: riskVerdict.reason,
+        gateReasons: [vetoGate],
+        expiredCount,
+        perSymbol,
+      };
+    }
+
+    if (riskVerdict.verdict === "reduce_size") {
+      const originalSizeUsd = sizeUsd;
+      const mult = Math.max(0.25, Math.min(0.75, riskVerdict.sizeMultiplier ?? 0.5));
+      sizeUsd = Math.max(0.25, sizeUsd * mult);
+      fullSize = entry > 0 ? sizeUsd / entry : fullSize;
+      console.log(
+        `Risk Manager reduced size $${originalSizeUsd.toFixed(2)} → $${sizeUsd.toFixed(2)} (×${mult}): ${riskVerdict.reason}`,
+      );
+      decision.reasoning = `${decision.reasoning ?? ""} [Risk Manager: ${riskVerdict.reason}]`;
+    }
+  }
+
 
   // ── Stage 5: INSERT signal row (FSM-traced) ──────────────────
   const proposedResult = transitionSignal("proposed", "proposed", {
@@ -855,6 +1218,7 @@ async function runTickForUser(
         tp1,
         pullback: winner.regime.pullback,
         doctrineClampedBy: clamp.clampedBy,
+        riskManagerVerdict: riskVerdict ?? null,
       },
       status: "pending",
     })
@@ -1007,12 +1371,24 @@ async function runTickForUser(
       user_id: userId,
       kind: "trade",
       title: `Auto-opened ${side.toUpperCase()} ${winner.symbol} @ $${entry.toFixed(2)}`,
-      summary: `Autonomy ${autonomy}. Confidence ${(conf * 100).toFixed(0)}%. ${decision.reasoning ?? ""}`,
+      summary: [
+        `Autonomy ${autonomy}. Confidence ${(conf * 100).toFixed(0)}%.`,
+        decision.reasoning ?? "",
+        intel
+          ? `Macro: ${intel.macro_bias} (${(Number(intel.macro_confidence ?? 0) * 100).toFixed(0)}% confidence)`
+          : "",
+        intel ? `Environment: ${intel.environment_rating}` : "",
+        intel?.pattern_context
+          ? `Pattern: ${String(intel.pattern_context).slice(0, 100)}...`
+          : "",
+      ].filter(Boolean).join(" | "),
       tags: [
         "auto-execute",
         autonomy,
         winner.regime.regime,
         winner.symbol,
+        intel?.macro_bias ?? "no-intel",
+        intel?.environment_rating ?? "no-intel",
       ],
     });
 
@@ -1119,17 +1495,27 @@ Deno.serve(async (req) => {
       if (tok && tok === body.cronToken) isCronFanout = true;
     }
 
-    // Fetch ALL symbols' candles in parallel — shared across users this tick.
-    const candleResults = await Promise.allSettled(
-      SYMBOLS.map((s) => fetchCandles(s)),
-    );
+    // Fetch BOTH 1h and 4h candles for ALL symbols in parallel — shared
+    // across users this tick. The 4h provides multi-timeframe context so
+    // the Technical Analyst AI can confirm 1h entries against the 4h trend.
+    const [candleResults1h, candleResults4h] = await Promise.all([
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 14400))),
+    ]);
     const candlesBySymbol = {} as Record<Symbol, Candle[]>;
+    const candlesBySymbol4h = {} as Record<Symbol, Candle[]>;
     SYMBOLS.forEach((s, i) => {
-      const r = candleResults[i];
-      if (r.status === "fulfilled") candlesBySymbol[s] = r.value;
+      const r1h = candleResults1h[i];
+      const r4h = candleResults4h[i];
+      if (r1h.status === "fulfilled") candlesBySymbol[s] = r1h.value;
       else {
-        console.error(`Failed to fetch ${s}:`, r.reason);
+        console.error(`Failed to fetch ${s} 1h:`, r1h.reason);
         candlesBySymbol[s] = [];
+      }
+      if (r4h.status === "fulfilled") candlesBySymbol4h[s] = r4h.value;
+      else {
+        console.error(`Failed to fetch ${s} 4h:`, r4h.reason);
+        candlesBySymbol4h[s] = [];
       }
     });
 
@@ -1148,6 +1534,7 @@ Deno.serve(async (req) => {
             admin,
             u.user_id,
             candlesBySymbol,
+            candlesBySymbol4h,
             LOVABLE_API_KEY,
           );
           results.push(r);
@@ -1195,6 +1582,7 @@ Deno.serve(async (req) => {
       admin,
       userData.user.id,
       candlesBySymbol,
+      candlesBySymbol4h,
       LOVABLE_API_KEY,
     );
     const status = result.tick === "ai_error" ? 500 : 200;
