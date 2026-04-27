@@ -828,6 +828,33 @@ async function runTickForUser(
   }
 
   // ── Stage 3: context packet + AI call ──────────────────────────
+  const intel = intelligenceBySymbol[winner.symbol] ?? null;
+  const candles1h = candlesBySymbol[winner.symbol] ?? [];
+  const candles4h = candlesBySymbol4h[winner.symbol] ?? [];
+
+  const trend1h = (() => {
+    if (candles1h.length < 20) return "insufficient_data";
+    const recent = candles1h.slice(-20).map((c) => c.c);
+    const firstHalf = recent.slice(0, 10).reduce((a, b) => a + b, 0) / 10;
+    const secondHalf = recent.slice(10).reduce((a, b) => a + b, 0) / 10;
+    return secondHalf > firstHalf * 1.005
+      ? "up"
+      : secondHalf < firstHalf * 0.995
+      ? "down"
+      : "flat";
+  })();
+  const trend4h = (() => {
+    if (candles4h.length < 10) return "insufficient_data";
+    const recent = candles4h.slice(-10).map((c) => c.c);
+    const firstHalf = recent.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
+    const secondHalf = recent.slice(5).reduce((a, b) => a + b, 0) / 5;
+    return secondHalf > firstHalf * 1.01
+      ? "up"
+      : secondHalf < firstHalf * 0.99
+      ? "down"
+      : "flat";
+  })();
+
   const contextPacket = {
     doctrine: {
       maxOrderUsd: CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxOrderUsdHardCap,
@@ -888,6 +915,56 @@ async function runTickForUser(
     ),
     patternMemory,
     strategyParams: liveParams,
+    brainTrust: intel
+      ? {
+        // Macro Strategist
+        macroBias: intel.macro_bias,
+        macroConfidence: intel.macro_confidence,
+        marketPhase: intel.market_phase,
+        trendStructure: intel.trend_structure,
+        nearestSupport: intel.nearest_support,
+        nearestResistance: intel.nearest_resistance,
+        keyLevelNotes: intel.key_level_notes,
+        macroSummary: intel.macro_summary,
+        // Crypto Intelligence
+        fundingRateSignal: intel.funding_rate_signal,
+        fundingRatePct: intel.funding_rate_pct,
+        fearGreedScore: intel.fear_greed_score,
+        fearGreedLabel: intel.fear_greed_label,
+        environmentRating: intel.environment_rating,
+        sentimentSummary: intel.sentiment_summary,
+        // Pattern Recognition
+        patternContext: intel.pattern_context,
+        entryQualityContext: intel.entry_quality_context,
+        // Meta
+        briefAge: intel.generated_at
+          ? `${Math.round((Date.now() - new Date(intel.generated_at).getTime()) / 60000)}min ago`
+          : "not available",
+        isStale: intel._stale ?? false,
+      }
+      : {
+        error:
+          "No intelligence brief available — Brain Trust hasn't run yet. Be conservative.",
+      },
+    timeframes: {
+      "1h": {
+        lastPrice: candles1h[candles1h.length - 1]?.c ?? 0,
+        trend: trend1h,
+        candleCount: candles1h.length,
+      },
+      "4h": {
+        lastPrice: candles4h[candles4h.length - 1]?.c ?? 0,
+        trend: trend4h,
+        candleCount: candles4h.length,
+        recentCandles: candles4h.slice(-8).map((c) => ({
+          t: new Date(c.t * 1000).toISOString().slice(0, 13) + ":00",
+          o: c.o.toFixed(2),
+          h: c.h.toFixed(2),
+          l: c.l.toFixed(2),
+          c: c.c.toFixed(2),
+        })),
+      },
+    },
   };
 
   const aiResult = await decideForSymbol({
@@ -895,6 +972,7 @@ async function runTickForUser(
     lastPrice: winner.lastPrice,
     regime: winner.regime,
     contextPacket,
+    intel,
     LOVABLE_API_KEY,
     stratParams: liveParams,
   });
