@@ -1082,14 +1082,42 @@ async function runTickForUser(
     };
   }
 
-  // ── Stage 4: clamp size through the doctrine ──────────────────
+  // ── Stage 4: derive entry/stop, then size by % risk ──────────
   const side = decision.side ?? "long";
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
-  const sizePct = Math.max(
+
+  // Stop fallback uses the strategy's stop_atr_mult so the param actually
+  // changes live trades, not just backtests. We approximate ATR as 1% of
+  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
+  // already exposes annualizedVolPct if a future revision wants tighter.
+  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
+  const stop = Number(
+    decision.proposed_stop ??
+      (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
+  );
+
+  // % risk-based sizing — the professional way:
+  //   notional = (equity × riskPct) / stopDistancePct
+  // The AI's size_pct hint is used only as a *confidence* nudge that can
+  // shrink the trade, never grow it past the doctrine cap or the risk floor.
+  const aiSizeHint = Math.max(
     0.05,
     Math.min(0.25, Number(decision.size_pct ?? 0.15)),
   );
-  const aiProposedUsd = equity * sizePct;
+  const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
+  // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
+  const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
+  // Allow the AI to *shrink* via size_pct vs the 0.25 maximum slot.
+  const aiShrinkMult = Math.max(0.4, Math.min(1.0, aiSizeHint / 0.25));
+  const sizingMult = Math.min(confMult, aiShrinkMult);
+  // If risk-based math produces zero (degenerate stop), fall back to the
+  // legacy equity × hint behaviour so we never insert a 0-USD signal.
+  const aiProposedUsd = riskBasedUsd > 0
+    ? riskBasedUsd * sizingMult
+    : equity * aiSizeHint;
+
+  const sizePct = equity > 0 ? aiProposedUsd / equity : aiSizeHint;
 
   const clamp = clampSize({
     proposedQuoteUsd: aiProposedUsd,
@@ -1132,15 +1160,6 @@ async function runTickForUser(
   let sizeUsd = clamp.sizeUsd;
   let fullSize = clamp.qty;
 
-  // Stop fallback uses the strategy's stop_atr_mult so the param actually
-  // changes live trades, not just backtests. We approximate ATR as 1% of
-  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
-  // already exposes annualizedVolPct if a future revision wants tighter.
-  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
-  const stop = Number(
-    decision.proposed_stop ??
-      (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
-  );
   const riskPerUnit = Math.abs(entry - stop);
   // Target fallback honors the strategy's tp_r_mult.
   const target = Number(
@@ -1153,7 +1172,6 @@ async function runTickForUser(
     decision.proposed_tp1 ??
       (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
   );
-  const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
 
   // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
   // Only fires when a trade is actually proposed — keeps cost low since
