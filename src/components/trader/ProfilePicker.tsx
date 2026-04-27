@@ -39,7 +39,7 @@ export function ProfilePicker() {
           Trading Profile
         </h3>
         <p className="text-xs text-muted-foreground mt-1">
-          How aggressively Max scans the market and sizes orders. Kill-switch floor
+          How aggressively Harvey scans the market and sizes orders. Kill-switch floor
           ($8), symbol whitelist, and live-arming approval stay locked at every tier.
         </p>
       </div>
