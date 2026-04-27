@@ -307,6 +307,10 @@ Deno.serve(async (req: Request) => {
       const { data: userData, error: userErr } = await userClient.auth.getUser(bearer);
       if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
       userIds = [userData.user.id];
+
+      // Rate limit user-triggered runs only.
+      const rl = await checkRateLimit(admin, userData.user.id, "evaluate-candidate", 10);
+      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
     }
 
     if (userIds.length === 0) {
