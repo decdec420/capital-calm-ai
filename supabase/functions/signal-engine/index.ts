@@ -474,7 +474,13 @@ What is your verdict?
       }),
     });
 
-    if (!resp.ok) return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
+    if (!resp.ok) {
+      console.error(
+        `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL}, status=${resp.status})`,
+        await resp.text().catch(() => ""),
+      );
+      return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
+    }
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
@@ -484,7 +490,11 @@ What is your verdict?
       sizeMultiplier: parsed.size_multiplier,
       reason: parsed.reason,
     };
-  } catch {
+  } catch (e) {
+    console.error(
+      `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL})`,
+      e,
+    );
     return { verdict: "approve", reason: "Risk manager exception — approving by default." };
   }
 }
