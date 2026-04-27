@@ -483,6 +483,7 @@ async function runTickForUser(
   userId: string,
   candlesBySymbol: Record<Symbol, Candle[]>,
   candlesBySymbol4h: Record<Symbol, Candle[]>,
+  candlesBySymbol15m: Record<Symbol, Candle[]>,
   LOVABLE_API_KEY: string,
 ) {
   const expiredCount = await expirePendingSignals(admin, userId);
@@ -1561,18 +1562,23 @@ Deno.serve(async (req) => {
       if (tok && tok === body.cronToken) isCronFanout = true;
     }
 
-    // Fetch BOTH 1h and 4h candles for ALL symbols in parallel — shared
-    // across users this tick. The 4h provides multi-timeframe context so
-    // the Technical Analyst AI can confirm 1h entries against the 4h trend.
-    const [candleResults1h, candleResults4h] = await Promise.all([
+    // Fetch 1h, 4h AND 15m candles for ALL symbols in parallel — shared
+    // across users this tick. The 4h provides intermediate-trend context;
+    // the 15m provides entry-timing momentum so the Technical Analyst can
+    // tell the difference between "right setup, right time" and "right
+    // setup, too early."
+    const [candleResults1h, candleResults4h, candleResults15m] = await Promise.all([
       Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s))),
       Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 14400))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 900))),
     ]);
     const candlesBySymbol = {} as Record<Symbol, Candle[]>;
     const candlesBySymbol4h = {} as Record<Symbol, Candle[]>;
+    const candlesBySymbol15m = {} as Record<Symbol, Candle[]>;
     SYMBOLS.forEach((s, i) => {
       const r1h = candleResults1h[i];
       const r4h = candleResults4h[i];
+      const r15 = candleResults15m[i];
       if (r1h.status === "fulfilled") candlesBySymbol[s] = r1h.value;
       else {
         console.error(`Failed to fetch ${s} 1h:`, r1h.reason);
@@ -1582,6 +1588,11 @@ Deno.serve(async (req) => {
       else {
         console.error(`Failed to fetch ${s} 4h:`, r4h.reason);
         candlesBySymbol4h[s] = [];
+      }
+      if (r15.status === "fulfilled") candlesBySymbol15m[s] = r15.value;
+      else {
+        console.error(`Failed to fetch ${s} 15m:`, r15.reason);
+        candlesBySymbol15m[s] = [];
       }
     });
 
