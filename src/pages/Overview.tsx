@@ -556,11 +556,6 @@ export default function Overview() {
         pendingSignals={pendingSignals}
       />
 
-      <AlertDetailSheet
-        alert={activeAlert}
-        onClose={() => setActiveAlert(null)}
-        onDismiss={dismiss}
-      />
     </div>
   );
 }
