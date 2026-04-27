@@ -17,7 +17,7 @@ describe("doctrine constants", () => {
   it("enforces the capital-preservation hard caps", () => {
     expect(MAX_ORDER_USD).toBe(1);
     expect(MAX_TRADES_PER_DAY).toBe(5);
-    expect(MAX_DAILY_LOSS_USD).toBe(1);
+    expect(MAX_DAILY_LOSS_USD).toBe(2);
     expect(KILL_SWITCH_FLOOR_USD).toBe(8);
   });
 

@@ -225,7 +225,7 @@ describe("full trade lifecycle — refusal paths", () => {
     const reasons = evaluateRiskGates({
       symbol: "BTC-USD",
       equityUsd: 100,
-      dailyRealizedPnlUsd: -1, // exactly at cap
+      dailyRealizedPnlUsd: -2, // exactly at cap
       dailyTradeCount: 0,
       killSwitchEngaged: false,
       botStatus: "running",

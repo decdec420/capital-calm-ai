@@ -31,5 +31,5 @@ export const DOCTRINE = {
   /** Max cumulative daily loss as fraction of equity (3%). */
   MAX_DAILY_LOSS_PCT: 0.03,
   /** Max simultaneous correlated open positions. */
-  MAX_CORRELATED_POSITIONS: 1,
+  MAX_CORRELATED_POSITIONS: 3,
 } as const;
