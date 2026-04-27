@@ -24,8 +24,8 @@ const json = (b: unknown, s = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-// All three experts use the same fast/cheap model.
-const EXPERT_MODEL = "google/gemini-2.5-flash";
+// Brain Trust uses Pro tier — runs 6×/day max, strategic analysis benefits from deeper reasoning.
+const EXPERT_MODEL = "google/gemini-2.5-pro";
 
 // ─── Free External Data Fetchers ────────────────────────────────
 
