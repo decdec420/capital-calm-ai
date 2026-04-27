@@ -22,7 +22,7 @@ export interface CapitalPreservationDoctrine {
   hardRules: {
     maxOrderUsdHardCap: 1;
     maxDailyTradesHardCap: 5;
-    maxDailyLossUsdHardCap: 1;
+    maxDailyLossUsdHardCap: 2;
     minBalanceUsdKillSwitch: 8;
     symbolWhitelist: readonly ["BTC-USD", "ETH-USD", "SOL-USD"];
     maxSpreadBps: 30;
@@ -57,7 +57,7 @@ export const CAPITAL_PRESERVATION_DOCTRINE: CapitalPreservationDoctrine = {
   hardRules: {
     maxOrderUsdHardCap: 1,
     maxDailyTradesHardCap: 5,
-    maxDailyLossUsdHardCap: 1,
+    maxDailyLossUsdHardCap: 2,
     minBalanceUsdKillSwitch: 8,
     symbolWhitelist: ["BTC-USD", "ETH-USD", "SOL-USD"] as const,
     maxSpreadBps: 30,
