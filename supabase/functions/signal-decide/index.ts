@@ -23,6 +23,10 @@ import {
   STALE_SNAPSHOT_MAX_AGE_SECONDS,
 } from "../_shared/snapshot.ts";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
+import {
+  getBrokerCredentials,
+  placeMarketBuy,
+} from "../_shared/broker.ts";
 
 validateDoctrineInvariants();
 
@@ -175,10 +179,11 @@ Deno.serve(async (req) => {
     // always allowed (declining a signal doesn't read the gate state).
     const { data: sysRow } = await admin
       .from("system_state")
-      .select("last_engine_snapshot")
+      .select("last_engine_snapshot, live_trading_enabled")
       .eq("user_id", userId)
       .maybeSingle();
     const snap = sysRow?.last_engine_snapshot ?? null;
+    const liveEnabled = !!sysRow?.live_trading_enabled;
     if (isSnapshotStale(snap)) {
       const ageSec = Math.round(snapshotAgeSeconds(snap));
       return new Response(
@@ -213,9 +218,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    const entry = Number(sig.proposed_entry);
+    let entry = Number(sig.proposed_entry);
     const sizeUsd = Number(sig.size_usd);
-    const size = sizeUsd / entry;
+    let size = sizeUsd / entry;
     const ctx = (sig.context_snapshot ?? {}) as {
       tp1?: number;
       pullback?: boolean;
@@ -225,6 +230,44 @@ Deno.serve(async (req) => {
 
     const tags = ["ai-signal", sig.regime];
     if (wasPullback) tags.push("pullback");
+
+    // ── LIVE MODE: place broker order BEFORE writing DB ────────────────
+    // Fail-safe: if the broker call throws, we return 502 and write nothing
+    // to the DB. This prevents ghost trades (DB says "open", no real position).
+    let brokerOrderId: string | null = null;
+    if (liveEnabled) {
+      try {
+        const creds = await getBrokerCredentials(admin);
+        const fill = await placeMarketBuy(
+          creds,
+          sig.symbol,
+          sizeUsd.toFixed(2), // spend exactly sizeUsd dollars
+          crypto.randomUUID(),
+        );
+        // Use actual fill price and size (may differ slightly from proposed)
+        entry = fill.fillPrice;
+        size = fill.filledBaseSize;
+        brokerOrderId = fill.orderId;
+        console.log(
+          `[signal-decide] LIVE BUY filled: ${sig.symbol} @ $${entry} ` +
+            `size=${size} orderId=${brokerOrderId}`,
+        );
+      } catch (brokerErr) {
+        const msg = brokerErr instanceof Error ? brokerErr.message : String(brokerErr);
+        console.error("[signal-decide] Broker order failed:", msg);
+        return new Response(
+          JSON.stringify({
+            error: "Broker order failed — trade NOT opened. Check Coinbase dashboard.",
+            code: "BROKER_ORDER_FAILED",
+            detail: msg,
+          }),
+          {
+            status: 502,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+    }
 
     // Trade FSM seed: always "entered"
     const tradeEnteredResult = transitionTrade("entered", "entered", {
@@ -262,7 +305,8 @@ Deno.serve(async (req) => {
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
-        notes: `Operator-approved. AI confidence ${(Number(sig.confidence) * 100).toFixed(0)}%.${wasPullback ? " Pullback entry." : ""}`,
+        notes: `${liveEnabled ? "LIVE " : ""}Operator-approved. AI confidence ${(Number(sig.confidence) * 100).toFixed(0)}%.${wasPullback ? " Pullback entry." : ""}${brokerOrderId ? ` Coinbase orderId: ${brokerOrderId}.` : ""}`,
+        broker_order_id: brokerOrderId,
         status: "open",
         outcome: "open",
       })

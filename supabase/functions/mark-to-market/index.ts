@@ -37,6 +37,11 @@ import {
   type TradeLifecyclePhase,
 } from "../_shared/lifecycle.ts";
 import { GATE_CODES, gate } from "../_shared/reasons.ts";
+import {
+  getBrokerCredentials,
+  placeMarketSell,
+  type BrokerCredentials,
+} from "../_shared/broker.ts";
 
 validateDoctrineInvariants();
 
@@ -117,6 +122,32 @@ async function runMarkToMarket(
   );
   const tickers = await fetchTickers(uniqueSymbols);
 
+  // 2b. Determine which users have live_trading_enabled.
+  //     Broker credentials are loaded once if any live user has open trades.
+  const uniqueUserIds = Array.from(new Set(trades.map((t) => t.user_id)));
+  const { data: sysRows } = await admin
+    .from("system_state")
+    .select("user_id, live_trading_enabled")
+    .in("user_id", uniqueUserIds);
+  const liveUserIds = new Set<string>(
+    (sysRows ?? [])
+      .filter((r: { user_id: string; live_trading_enabled: boolean }) => !!r.live_trading_enabled)
+      .map((r: { user_id: string }) => r.user_id),
+  );
+  let brokerCreds: BrokerCredentials | null = null;
+  if (liveUserIds.size > 0) {
+    try {
+      brokerCreds = await getBrokerCredentials(admin);
+    } catch (e) {
+      // Fail-safe: log but don't block MTM from running in paper mode.
+      // Live users' automated exits will be skipped until credentials are fixed.
+      console.error(
+        "[mark-to-market] Cannot load broker credentials — live-mode exits blocked:",
+        e,
+      );
+    }
+  }
+
   // 3. Process each trade. Group per-user so we can roll equity after.
   const perUserChanges = new Map<
     string,
@@ -183,7 +214,47 @@ async function runMarkToMarket(
     if (action.type === "tp1_fill") {
       tp1Fills += 1;
       const closedQty = action.closedQty;
-      const fillPx = action.fillPrice;
+      let fillPx = action.fillPrice; // may be updated by broker fill in live mode
+      let tp1BrokerOrderId: string | null = null;
+
+      // LIVE MODE: sell the TP1 half via broker before updating DB.
+      // Optimistic lock (status='closing') prevents a concurrent cron run from
+      // double-executing the same partial close.
+      if (liveUserIds.has(t.user_id) && brokerCreds) {
+        const { data: locked } = await admin
+          .from("trades")
+          .update({ status: "closing" })
+          .eq("id", t.id)
+          .eq("status", "open")
+          .select("id");
+        if (!locked || locked.length === 0) {
+          // Another process already grabbed this trade — skip.
+          perUserChanges.set(t.user_id, bucket);
+          continue;
+        }
+        try {
+          const fill = await placeMarketSell(
+            brokerCreds,
+            t.symbol,
+            closedQty.toFixed(8),
+            crypto.randomUUID(),
+          );
+          fillPx = fill.fillPrice;
+          tp1BrokerOrderId = fill.orderId;
+          console.log(
+            `[MTM] LIVE TP1 SELL filled ${t.symbol} qty=${closedQty} @ $${fillPx} ` +
+              `orderId=${tp1BrokerOrderId}`,
+          );
+        } catch (brokerErr) {
+          // Revert lock — leave trade open so the next tick can retry.
+          await admin.from("trades").update({ status: "open" }).eq("id", t.id);
+          console.error(`[MTM] TP1 broker sell failed for trade ${t.id}:`, brokerErr);
+          tp1Fills -= 1;
+          perUserChanges.set(t.user_id, bucket);
+          continue;
+        }
+      }
+
       const realizedHalf =
         (fillPx - Number(t.entry_price)) * closedQty * sideMult;
       const runnerSize = Number(t.size) - closedQty;
@@ -213,6 +284,8 @@ async function runMarkToMarket(
       await admin
         .from("trades")
         .update({
+          // Reset from 'closing' (live lock) back to 'open' — runner is still active.
+          status: "open",
           size: runnerSize,
           tp1_filled: true,
           stop_loss: action.newStop, // breakeven (= entry)
@@ -223,8 +296,9 @@ async function runMarkToMarket(
           lifecycle_phase: "tp1_hit",
           lifecycle_transitions: nextTransitions,
           notes:
-            `${t.notes ?? ""}\nTP1 @ $${fillPx.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked, runner active, stop→BE.`
+            `${t.notes ?? ""}${tp1BrokerOrderId ? "\nLIVE " : "\n"}TP1 @ $${fillPx.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked, runner active, stop→BE.${tp1BrokerOrderId ? ` Coinbase orderId: ${tp1BrokerOrderId}.` : ""}`
               .trim(),
+          ...(tp1BrokerOrderId ? { broker_order_id: tp1BrokerOrderId } : {}),
         })
         .eq("id", t.id);
       updates += 1;
@@ -251,7 +325,50 @@ async function runMarkToMarket(
     if (action.type === "stop_hit" || action.type === "tp2_hit") {
       closed += 1;
       const closedQty = action.closedQty;
-      const fillPx = action.fillPrice;
+      let fillPx = action.fillPrice; // may be updated by broker fill in live mode
+      let closeBrokerOrderId: string | null = null;
+
+      // LIVE MODE: sell remaining position via broker before closing DB record.
+      // Optimistic lock (status='closing') prevents double-close on concurrent runs.
+      if (liveUserIds.has(t.user_id) && brokerCreds) {
+        const { data: locked } = await admin
+          .from("trades")
+          .update({ status: "closing" })
+          .eq("id", t.id)
+          .eq("status", "open")
+          .select("id");
+        if (!locked || locked.length === 0) {
+          // Another process already grabbed this trade — skip.
+          closed -= 1;
+          perUserChanges.set(t.user_id, bucket);
+          continue;
+        }
+        try {
+          const fill = await placeMarketSell(
+            brokerCreds,
+            t.symbol,
+            closedQty.toFixed(8),
+            crypto.randomUUID(),
+          );
+          fillPx = fill.fillPrice;
+          closeBrokerOrderId = fill.orderId;
+          console.log(
+            `[MTM] LIVE ${action.type.toUpperCase()} SELL filled ${t.symbol} ` +
+              `qty=${closedQty} @ $${fillPx} orderId=${closeBrokerOrderId}`,
+          );
+        } catch (brokerErr) {
+          // Revert lock — trade stays open so the next tick can retry.
+          await admin.from("trades").update({ status: "open" }).eq("id", t.id);
+          console.error(
+            `[MTM] ${action.type} broker sell failed for trade ${t.id}:`,
+            brokerErr,
+          );
+          closed -= 1;
+          perUserChanges.set(t.user_id, bucket);
+          continue;
+        }
+      }
+
       const realizedClose =
         (fillPx - Number(t.entry_price)) * closedQty * sideMult;
       const cumulativePnl = Number(t.pnl ?? 0) + realizedClose;
@@ -262,8 +379,8 @@ async function runMarkToMarket(
       const outcome = cumulativePnl >= 0 ? "win" : "loss";
       const reason =
         action.type === "stop_hit"
-          ? `Stop hit @ $${fillPx.toFixed(2)}`
-          : `TP2 hit @ $${fillPx.toFixed(2)} — runner booked`;
+          ? `${closeBrokerOrderId ? "LIVE " : ""}Stop hit @ $${fillPx.toFixed(2)}`
+          : `${closeBrokerOrderId ? "LIVE " : ""}TP2 hit @ $${fillPx.toFixed(2)} — runner booked`;
 
       const fsm = transitionTrade(
         t.lifecycle_phase ?? (t.tp1_filled ? "tp1_hit" : "entered"),
@@ -293,8 +410,9 @@ async function runMarkToMarket(
           outcome,
           lifecycle_phase: "exited",
           lifecycle_transitions: nextTransitions,
-          notes: `${t.notes ?? ""}\n${reason} · realized $${realizedClose.toFixed(2)} · total $${cumulativePnl.toFixed(2)}`
+          notes: `${t.notes ?? ""}\n${reason} · realized $${realizedClose.toFixed(2)} · total $${cumulativePnl.toFixed(2)}${closeBrokerOrderId ? ` · Coinbase orderId: ${closeBrokerOrderId}` : ""}`
             .trim(),
+          ...(closeBrokerOrderId ? { broker_close_order_id: closeBrokerOrderId } : {}),
         })
         .eq("id", t.id);
       updates += 1;

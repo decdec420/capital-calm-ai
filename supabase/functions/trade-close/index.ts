@@ -18,6 +18,10 @@
 import { fetchTicker } from "../_shared/market.ts";
 import { isWhitelistedSymbol, validateDoctrineInvariants } from "../_shared/doctrine.ts";
 import {
+  getBrokerCredentials,
+  placeMarketSell,
+} from "../_shared/broker.ts";
+import {
   appendTransition,
   transitionTrade,
   type LifecycleTransition,
@@ -117,17 +121,64 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Live fill price from Coinbase spot.
-    const ticker = await fetchTicker(trade.symbol);
-    const fillPx = Number(ticker.price);
-    if (!Number.isFinite(fillPx) || fillPx <= 0) {
-      return new Response(
-        JSON.stringify({ error: "Could not fetch live price" }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+    // ── Check live mode ───────────────────────────────────────────────
+    const { data: sysRow } = await admin
+      .from("system_state")
+      .select("live_trading_enabled")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const liveEnabled = !!sysRow?.live_trading_enabled;
+
+    // Fill price — either from real broker (live) or Coinbase spot ticker (paper).
+    // LIVE: place SELL order first. Fail-safe: if broker throws, return 502 and
+    // write nothing to DB. The position stays open in both the broker and DB.
+    let fillPx: number;
+    let brokerOrderId: string | null = null;
+
+    if (liveEnabled) {
+      try {
+        const creds = await getBrokerCredentials(admin);
+        const remainingForSell = Number(trade.size);
+        const fill = await placeMarketSell(
+          creds,
+          trade.symbol,
+          remainingForSell.toFixed(8),
+          crypto.randomUUID(),
+        );
+        fillPx = fill.fillPrice;
+        brokerOrderId = fill.orderId;
+        console.log(
+          `[trade-close] LIVE SELL filled: ${trade.symbol} @ $${fillPx} ` +
+            `size=${remainingForSell} orderId=${brokerOrderId}`,
+        );
+      } catch (brokerErr) {
+        const msg = brokerErr instanceof Error ? brokerErr.message : String(brokerErr);
+        console.error("[trade-close] Broker order failed:", msg);
+        return new Response(
+          JSON.stringify({
+            error: "Broker SELL failed — trade NOT closed. Check Coinbase dashboard.",
+            code: "BROKER_ORDER_FAILED",
+            detail: msg,
+          }),
+          {
+            status: 502,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+    } else {
+      // Paper mode: use Coinbase spot price as the fill price.
+      const ticker = await fetchTicker(trade.symbol);
+      fillPx = Number(ticker.price);
+      if (!Number.isFinite(fillPx) || fillPx <= 0) {
+        return new Response(
+          JSON.stringify({ error: "Could not fetch live price" }),
+          {
+            status: 502,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
     }
 
     const sideMult = trade.side === "long" ? 1 : -1;
@@ -179,8 +230,9 @@ Deno.serve(async (req) => {
         outcome,
         lifecycle_phase: "exited",
         lifecycle_transitions: nextTransitions,
-        notes: `${trade.notes ?? ""}\nClosed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)}`
+        notes: `${trade.notes ?? ""}\n${liveEnabled ? "LIVE " : ""}Closed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)}${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`
           .trim(),
+        ...(brokerOrderId ? { broker_close_order_id: brokerOrderId } : {}),
       })
       .eq("id", trade.id);
 

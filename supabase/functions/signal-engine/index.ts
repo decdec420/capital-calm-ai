@@ -57,6 +57,10 @@ import {
   persistSnapshot,
   type PerSymbolSnapshot,
 } from "../_shared/snapshot.ts";
+import {
+  getBrokerCredentials,
+  placeMarketBuy,
+} from "../_shared/broker.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -1778,6 +1782,57 @@ async function runTickForUser(
     const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
     if (winner.regime.pullback) tags.push("pullback");
 
+    // ── LIVE MODE: place broker BUY before writing DB ──────────────────
+    // Fail-safe: if broker throws, skip this auto-execute entirely.
+    // The signal stays proposed so the operator can approve manually.
+    let liveEntry = entry;
+    let liveSize = fullSize;
+    let brokerOrderId: string | null = null;
+
+    if (liveEnabled && !liveBlockedByAck) {
+      try {
+        const creds = await getBrokerCredentials(admin);
+        const fill = await placeMarketBuy(
+          creds,
+          winner.symbol,
+          sizeUsd.toFixed(2),
+          crypto.randomUUID(),
+        );
+        liveEntry = fill.fillPrice;
+        liveSize = fill.filledBaseSize;
+        brokerOrderId = fill.orderId;
+        console.log(
+          `[signal-engine] LIVE BUY auto-executed ${winner.symbol} ` +
+            `@ $${liveEntry} size=${liveSize} orderId=${brokerOrderId}`,
+        );
+      } catch (brokerErr) {
+        console.error(
+          `[signal-engine] LIVE auto-execute broker failed for ${winner.symbol} — ` +
+            `signal left as 'proposed' for manual approval:`,
+          brokerErr,
+        );
+        // Skip auto-execute — don't insert a phantom trade
+        return {
+          userId,
+          tick: "proposed",
+          symbol: winner.symbol,
+          signalId: signalRow.id,
+          autonomy,
+          confidence: conf,
+          sizeUsd,
+          clampedBy: clamp.clampedBy,
+          gateReasons: [{
+            code: GATE_CODES.BROKER_ORDER_FAILED,
+            severity: "block" as const,
+            message: `Live auto-execute blocked: broker BUY failed for ${winner.symbol}.`,
+            meta: { error: String(brokerErr) },
+          }],
+          expiredCount,
+          perSymbol,
+        };
+      }
+    }
+
     // Trade lifecycle: initial phase always "entered"
     const tradeEnteredResult = transitionTrade("entered", "entered", {
       actor: "auto",
@@ -1799,9 +1854,9 @@ async function runTickForUser(
         user_id: userId,
         symbol: winner.symbol,
         side,
-        size: fullSize,
-        original_size: fullSize,
-        entry_price: entry,
+        size: liveSize,
+        original_size: liveSize,
+        entry_price: liveEntry,
         stop_loss: stop,
         take_profit: target,
         tp1_price: tp1,
@@ -1811,7 +1866,8 @@ async function runTickForUser(
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
-        notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}`,
+        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`,
+        broker_order_id: brokerOrderId,
         status: "open",
         outcome: "open",
       })
@@ -1850,7 +1906,7 @@ async function runTickForUser(
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "trade",
-      title: `Auto-opened ${side.toUpperCase()} ${winner.symbol} @ $${entry.toFixed(2)}`,
+      title: `${liveEnabled ? "LIVE " : ""}Auto-opened ${side.toUpperCase()} ${winner.symbol} @ $${liveEntry.toFixed(2)}`,
       summary: [
         `Autonomy ${autonomy}. Confidence ${(conf * 100).toFixed(0)}%.`,
         decision.reasoning ?? "",

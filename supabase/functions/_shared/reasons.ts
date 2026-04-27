@@ -64,6 +64,9 @@ export const GATE_CODES = {
 
   // News / event gating
   NEWS_FLAG_CRITICAL: "NEWS_FLAG_CRITICAL",
+
+  // Live broker execution
+  BROKER_ORDER_FAILED: "BROKER_ORDER_FAILED",
 } as const;
 
 export type GateCode = (typeof GATE_CODES)[keyof typeof GATE_CODES];
