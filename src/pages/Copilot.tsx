@@ -521,8 +521,10 @@ export default function Copilot() {
         <div className="flex items-center gap-1.5">
           <span className={cn(
             "w-1.5 h-1.5 rounded-full",
-            lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
-              ? "bg-status-safe" : "bg-muted-foreground/40"
+            healthDot("brain_trust") ?? (
+              lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
+                ? "bg-status-safe" : "bg-muted-foreground/40"
+            )
           )} />
           <span>Brain Trust</span>
           <span className="text-muted-foreground/50">·</span>
@@ -535,10 +537,12 @@ export default function Copilot() {
         <div className="flex items-center gap-1.5">
           <span className={cn(
             "w-1.5 h-1.5 rounded-full",
-            lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
-              ? "bg-status-safe animate-pulse"
-              : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
-                ? "bg-status-safe" : "bg-muted-foreground/40"
+            healthDot("signal_engine") ?? (
+              lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
+                ? "bg-status-safe animate-pulse"
+                : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
+                  ? "bg-status-safe" : "bg-muted-foreground/40"
+            )
           )} />
           <span>Donna</span>
           <span className="text-muted-foreground/50">·</span>
@@ -557,7 +561,7 @@ export default function Copilot() {
 
         <span className="text-border">|</span>
 
-        {/* Jessica — autonomous orchestrator */}
+        {/* Jessica — autonomous orchestrator. Dot uses worst of (jessica, jessica_heartbeat). */}
         <div className="flex items-center gap-1.5">
           {(() => {
             const decision = system?.lastJessicaDecision ?? null;
@@ -565,21 +569,24 @@ export default function Copilot() {
             const ageSec = ranAt
               ? Math.floor((Date.now() - new Date(ranAt).getTime()) / 1000)
               : null;
-            const healthy = ageSec !== null && ageSec < 90;
             const ageLabel =
               ageSec === null
                 ? "never"
                 : ageSec < 60
                   ? `${ageSec}s ago`
                   : `${Math.floor(ageSec / 60)}m ago`;
+            // Pick the worse of Jessica's self-report and Postgres' heartbeat view.
+            const severity = (s?: string) =>
+              s === "failed" ? 3 : s === "degraded" ? 2 : s === "stale" ? 1 : 0;
+            const self = agentHealth["jessica"]?.status;
+            const hb = agentHealth["jessica_heartbeat"]?.status;
+            const worstStatus = severity(self) >= severity(hb) ? self : hb;
+            const dotClass = worstStatus
+              ? (healthDot(severity(self) >= severity(hb) ? "jessica" : "jessica_heartbeat") ?? "bg-muted-foreground/40")
+              : (ageSec !== null && ageSec < 90 ? "bg-status-safe" : "bg-muted-foreground/40");
             return (
               <>
-                <span
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    healthy ? "bg-status-safe" : "bg-muted-foreground/40",
-                  )}
-                />
+                <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
                 <span>Jessica</span>
                 <span className="text-muted-foreground/50">·</span>
                 <span className="tabular">{ageLabel}</span>
