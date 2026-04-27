@@ -38,6 +38,16 @@ export interface Ticker {
 const CB = "https://api.exchange.coinbase.com";
 const COINBASE_VALID_GRANULARITIES = new Set([60, 300, 900, 3600, 21600, 86400]);
 
+/**
+ * Exponential backoff sleep. Deno-compatible.
+ * Waits `ms` milliseconds, with up to ±20% jitter so concurrent callers
+ * don't all retry at exactly the same moment.
+ */
+function sleep(ms: number): Promise<void> {
+  const jitter = ms * 0.2 * (Math.random() * 2 - 1); // ±20%
+  return new Promise((resolve) => setTimeout(resolve, ms + jitter));
+}
+
 // ─── Health-tracking context ───────────────────────────────────────
 // _shared/market.ts stays caller-agnostic. Callers that want failures
 // reflected in agent_health pass a tracker; callers that don't (tests,
