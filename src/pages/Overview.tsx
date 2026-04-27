@@ -538,10 +538,10 @@ export default function Overview() {
                 ))}
                 {alerts.length > 4 && (
                   <Link
-                    to="/journals"
+                    to="/alerts"
                     className="block text-xs text-primary hover:underline pt-1 text-center"
                   >
-                    View all {alerts.length} alerts in Journals →
+                    View all {alerts.length} alerts →
                   </Link>
                 )}
               </div>

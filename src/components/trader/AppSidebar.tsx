@@ -1,4 +1,4 @@
-import { Activity, BarChart2, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
+import { Activity, BarChart2, Bell, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ const sections = [
       { title: "Market Intel", url: "/market", icon: LineChart },
       { title: "Trades", url: "/trades", icon: Activity },
       { title: "Performance", url: "/performance", icon: BarChart2 },
+      { title: "Alerts", url: "/alerts", icon: Bell },
       { title: "Journals", url: "/journals", icon: BookOpen },
     ],
   },
@@ -73,7 +74,7 @@ export function AppSidebar() {
   const blockedCount = guardrails.filter((g) => g.level === "blocked").length;
 
   const badgeFor: Record<string, { count: number; bg: string }> = {
-    "/": { count: alertCount, bg: "hsl(var(--status-blocked))" },
+    "/alerts": { count: alertCount, bg: "hsl(var(--status-blocked))" },
     "/copilot": { count: signalCount, bg: "hsl(var(--primary))" },
     "/risk": { count: blockedCount, bg: "hsl(var(--status-caution))" },
     "/learning": { count: reviewCount, bg: "hsl(var(--status-caution))" },
