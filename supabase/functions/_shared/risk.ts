@@ -61,8 +61,9 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
     typeof ctx.profile === "object" && ctx.profile
       ? ctx.profile
       : getProfile(typeof ctx.profile === "string" ? ctx.profile : undefined);
-  const MAX_TRADES_PER_DAY = profile.maxDailyTradesHardCap;
-  const MAX_DAILY_LOSS_USD = profile.maxDailyLossUsdHardCap;
+  const MAX_TRADES_PER_DAY = ctx.resolved?.maxTradesPerDay ?? profile.maxDailyTradesHardCap;
+  const MAX_DAILY_LOSS_USD = ctx.resolved?.dailyLossUsd ?? profile.maxDailyLossUsdHardCap;
+  const KILL_SWITCH_FLOOR = ctx.resolved?.killSwitchFloorUsd ?? 8;
   const reasons: GateReason[] = [];
   const now = ctx.nowIso ? new Date(ctx.nowIso) : new Date();
 
