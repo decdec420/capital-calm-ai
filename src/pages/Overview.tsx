@@ -4,6 +4,7 @@ import { MetricCard } from "@/components/trader/MetricCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
+import { DailyBriefPanel } from "@/components/trader/DailyBriefPanel";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
 import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
@@ -381,6 +382,8 @@ export default function Overview() {
       {/* Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
+          <DailyBriefPanel />
+
           <AIInsightPanel
             title="Today's market brief"
             body={brief || (briefLoading ? "Cooking up a brief…" : "No brief yet. Tap Request brief.")}
