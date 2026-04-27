@@ -682,7 +682,10 @@ export default function Copilot() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setExplainSignal(activeSignal)}
+              onClick={() => {
+                if (activeSignal?.id) setExplainSignal(activeSignal);
+                else toast.error("Signal not ready — wait a moment and try again.");
+              }}
               className="gap-1.5"
             >
               <Telescope className="h-3.5 w-3.5" /> Explain this decision
@@ -885,7 +888,10 @@ export default function Copilot() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => setExplainSignal(s)}
+                          onClick={() => {
+                            if (s?.id) setExplainSignal(s);
+                            else toast.error("Signal not ready — wait a moment and try again.");
+                          }}
                           className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
                           title="Explain this decision"
                         >
