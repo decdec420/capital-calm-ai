@@ -44,6 +44,28 @@ export default function Copilot() {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const [intelTimestamps, setIntelTimestamps] = useState<Record<string, string>>({});
+  const [katrinaReview, setKatrinaReview] = useState<{
+    reviewed_at: string;
+    brief_text: string;
+    win_rate_trend: string | null;
+    promote_ids: string[] | null;
+    kill_ids: string[] | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("strategy_reviews")
+      .select("reviewed_at, brief_text, win_rate_trend, promote_ids, kill_ids")
+      .order("reviewed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data) setKatrinaReview(data as typeof katrinaReview);
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [pipelineStep, setPipelineStep] = useState<
     null | "braintrust" | "engine" | "briefing" | "done" | "error"
   >(null);
