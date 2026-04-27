@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.run-experiment]
 verify_jwt = false
+
+[functions.activate-doctrine-changes]
+verify_jwt = false

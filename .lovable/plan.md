@@ -1,114 +1,233 @@
+# Per-User Scaling Doctrine + Editable Guardrails (with 24h Tilt Protection)
 
-# Watchdog: Two-Layer Health Monitoring
+## What you're getting
 
-Your instinct is right. Claude's prompt is **Option A done well** — Jessica becomes a thoughtful watchdog of the other agents and Harvey reports issues proactively. But it has the gap you spotted: **nobody watches Jessica**. If her cron silently dies, the whole health system goes blind without any alarm.
-
-Adding **Option C (a Postgres heartbeat)** alongside it costs almost nothing and closes that gap. Postgres is the most reliable component you have, it can't be killed by a Deno runtime crash, and it already powers your existing alert triggers.
-
-## What we're building
-
-```text
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Layer 1: Jessica (every 60s)                               │
-  │  Watches: brain_trust, signal_engine, herself               │
-  │  Writes: agent_health rows                                  │
-  │  Recovers: auto-fires run_brain_trust if stale              │
-  └────────────────────────┬────────────────────────────────────┘
-                           │ writes to
-                           ▼
-                    agent_health table
-                           ▲
-                           │ reads from
-  ┌────────────────────────┴────────────────────────────────────┐
-  │  Layer 2: Postgres heartbeat (every 3 min, pg_cron)         │
-  │  Watches: ONLY Jessica's last_jessica_decision freshness    │
-  │  Writes: alerts row + agent_health row for jessica          │
-  │  Cannot recover — its job is to scream loudly               │
-  └─────────────────────────────────────────────────────────────┘
-                           ▲
-                           │ reads
-                           │
-  ┌────────────────────────┴────────────────────────────────────┐
-  │  Layer 3: Harvey (when you open Copilot)                    │
-  │  Reads: agent_health + recent alerts                        │
-  │  Surfaces: any degraded/failed agent in his next response   │
-  └─────────────────────────────────────────────────────────────┘
-```
-
-The key insight: **Jessica + Postgres watch each other.** If Jessica dies, Postgres notices in <5 minutes. If Postgres pg_cron dies, Jessica notices her own missing heartbeat on the next tick. Both have to fail simultaneously for you to be blind, which is vastly less likely than either failing alone.
+1. **Doctrine scales to your money.** A $10 funder, a $1,000 funder, and a $100k funder all get the same *percentage* protection (e.g. 0.5% per order, 80% floor) — not the same hardcoded $1/$8 numbers. Caps grow as equity grows.
+2. **Three profiles become ratio presets**, not fixed dollars. Sentinel/Active/Aggressive load percentages into your settings; you can then tune them.
+3. **Editable doctrine.** A new "Edit doctrine" sheet on Risk Center lets you adjust max-order %, daily-loss %, daily-trade count, kill-switch floor %, and the tilt-protection knobs.
+4. **Tilt protection.** Tightening risk applies instantly. **Loosening** risk creates a *pending change* that activates after **24 hours**, with a visible countdown. Cancellable anytime before activation. Every request and every activation is written to `system_audit_log` so Katrina/Rachel can call it out.
+5. **Kill-switch floor is per-user.** Default `floor_pct = 0.80` × `starting_equity_usd`. The hardcoded $8 disappears as a per-user rule but stays as an absolute emergency wall (no user floor below $5).
+6. **Caps grow with equity (compounding).** Max order = `current_equity × max_order_pct`, then bounded by an absolute hard cap so a fat-fingered equity update can't unleash a $10k order.
 
 ---
 
-## Plan
+## Section 1 — Database
 
-### Step 1 — Adopt Claude's prompt as written, with two corrections
+### 1A. Extend `doctrine_settings` (already exists, has the right columns)
 
-Implement everything in Claude's prompt (steps 1–4). It's well-designed. Two small fixes:
+Add columns the engine doesn't yet have:
 
-- **The `agent_health` migration uses `REFERENCES auth.users(id)`.** Per your project rules, app tables shouldn't FK into `auth.users`. Drop the `REFERENCES auth.users(id) ON DELETE CASCADE` clause — the RLS policy `auth.uid() = user_id` is the actual safety net.
-- **Add an `INSERT/UPDATE` RLS policy for the service role.** The current policy is SELECT-only for users, which is correct, but Jessica's upserts run via service role so they bypass RLS — that's fine. Just confirming no policy needs to allow user-side writes (it doesn't).
-
-### Step 2 — Add a fourth agent: `jessica_heartbeat` (Option C)
-
-Create one more migration that adds a Postgres function and pg_cron job:
-
-**`check_jessica_heartbeat()`** — runs every 3 minutes:
-1. For each row in `system_state`, look at `last_jessica_decision->>'ran_at'`.
-2. If null or older than 4 minutes:
-   - Upsert `agent_health` with `agent_name='jessica_heartbeat'`, `status='failed'`, `last_error='Jessica has not ticked in N minutes — cron may be down'`.
-   - Insert an `alerts` row (severity `critical`, title `Jessica heartbeat lost`) — but only if no identical alert exists from the last 30 min (dedupe).
-3. If fresh: upsert `agent_health` row to `status='healthy'`.
-
-Schedule it with pg_cron at `*/3 * * * *`. No edge function, no token, no LLM. Pure SQL.
-
-**Why a separate `jessica_heartbeat` agent name (not just `jessica`)?**
-The row `agent_name='jessica'` is what Jessica writes about herself. The row `agent_name='jessica_heartbeat'` is what Postgres writes about Jessica. If the two ever disagree — Jessica says she's fine but Postgres says she hasn't ticked — that itself is a useful signal that something weird is happening (maybe she's writing rows but not actually reasoning).
-
-### Step 3 — Surface heartbeat in Harvey + the pipeline strip
-
-Tiny additions on top of Claude's prompt:
-
-- **Harvey:** the `agent_health` query in `copilot-chat` already picks up `jessica_heartbeat` for free (it selects all rows). His instruction to lead with degraded/failed agents covers it automatically.
-- **Pipeline strip in `Copilot.tsx`:** Claude's `healthDot()` helper already keys on `agent_name`. Add one more dot or merge `jessica_heartbeat` into the existing Jessica dot — we'll use the *worst* of `jessica` and `jessica_heartbeat` so the dot turns red the moment either source flags trouble.
-
-### Step 4 — Verify
-
-1. `bunx vitest run` — all 88 tests still pass.
-2. Manually invoke Jessica → confirm `agent_health` rows appear for `brain_trust`, `signal_engine`, `jessica`.
-3. Wait 3+ minutes → confirm a `jessica_heartbeat` row appears (status `healthy`) from the pg_cron job.
-4. Manually update `last_jessica_decision` to a 10-minute-old timestamp → within 3 min, `jessica_heartbeat` should flip to `failed` and an alert should appear.
-5. Open Copilot → Harvey should lead with the heartbeat warning.
-6. Restore the timestamp → Harvey goes quiet again.
-
----
-
-## What NOT to change
-
-- Don't touch doctrine, signal-engine, market-intelligence, or any other edge function logic.
-- Don't add a third persona ("Norma" or similar) — Postgres + Jessica is enough. Defer until the watchdog logic genuinely needs LLM reasoning.
-- Don't try to fix the Coinbase 4h `400` errors in this prompt — that's a separate fire (likely a granularity/limit param issue). The watchdog will at least make sure you *see* it next time.
-
----
-
-## Technical details
-
-**New migration files:**
-- `YYYYMMDDHHMMSS_agent_health.sql` — table from Claude's prompt, minus the `auth.users` FK.
-- `YYYYMMDDHHMMSS_jessica_heartbeat.sql` — defines `check_jessica_heartbeat()` SECURITY DEFINER function and schedules it via `cron.schedule('jessica-heartbeat', '*/3 * * * *', ...)`.
-
-**Heartbeat dedupe:** the alert insert uses
 ```sql
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.alerts
-  WHERE user_id = v_user_id
-    AND title = 'Jessica heartbeat lost'
-    AND created_at > now() - interval '30 minutes'
-)
+ALTER TABLE public.doctrine_settings
+  ADD COLUMN max_order_abs_floor numeric NOT NULL DEFAULT 0.25,   -- never below $0.25/order
+  ADD COLUMN floor_abs_min       numeric NOT NULL DEFAULT 5,      -- emergency floor wall
+  ADD COLUMN scan_interval_seconds integer NOT NULL DEFAULT 300,
+  ADD COLUMN risk_per_trade_pct numeric NOT NULL DEFAULT 0.01,
+  ADD COLUMN max_correlated_positions integer NOT NULL DEFAULT 3,
+  ADD COLUMN updated_via text NOT NULL DEFAULT 'system';          -- 'user' | 'profile-preset' | 'system' | 'cooldown-activation'
 ```
-so a sustained outage doesn't spam alerts every 3 minutes.
 
-**Edge function changes:** exactly as in Claude's prompt — `jessica/index.ts` gets `checkAgentHealth()` + the pre-tick recovery block, `copilot-chat/index.ts` loads `agent_health` and gets the proactive-reporting instruction.
+Add a CHECK trigger (not constraint) validating: pcts in `[0, 0.5]`, `floor_pct in [0.5, 0.95]`, `max_trades_per_day in [1, 100]`, `consecutive_loss_limit in [1, 10]`.
 
-**Frontend changes:** `Copilot.tsx` gets the `agentHealth` state + `healthDot()` helper from Claude's prompt, with one tweak: the Jessica dot uses `Math.min(jessica.severity, jessica_heartbeat.severity)` (in terms of color tier) so either source can turn it red.
+### 1B. New table — `pending_doctrine_changes`
 
-**RLS:** `agent_health` is read-only for users via `auth.uid() = user_id`. All writes go through service role from Jessica or the heartbeat function (which is SECURITY DEFINER). No user-side writes needed.
+```sql
+CREATE TABLE public.pending_doctrine_changes (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      uuid NOT NULL,
+  field        text NOT NULL,           -- e.g. 'max_order_pct'
+  from_value   numeric,
+  to_value     numeric NOT NULL,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  effective_at timestamptz NOT NULL,    -- now() + 24h
+  status       text NOT NULL DEFAULT 'pending',  -- pending | activated | cancelled | superseded
+  cancelled_at timestamptz,
+  activated_at timestamptz,
+  reason       text                     -- optional user note
+);
+```
+
+RLS: own-row CRUD by `auth.uid() = user_id`. INSERT/UPDATE allowed (cancellation), DELETE blocked.
+
+### 1C. Cron + edge function for activation
+
+`activate-doctrine-changes` edge function (token-protected like Jessica/Katrina). Runs every 5 minutes:
+- Find rows where `status = 'pending'` and `effective_at <= now()`.
+- Apply `to_value` to `doctrine_settings`.
+- Mark row `activated`, write `system_audit_log` entry `action='doctrine.loosen.activated'`.
+- If a newer pending change for the same field exists, mark older ones `superseded`.
+
+Vault token: `activate_doctrine_changes_cron_token` + RPC `get_activate_doctrine_changes_cron_token()`.
+
+### 1D. `handle_new_user` updates
+
+Already inserts `doctrine_settings` with `starting_equity_usd = 10`. Change default `starting_equity_usd` to **NULL** and force the user to enter it during onboarding (see §3). Until set, the engine uses the hardcoded Sentinel-equivalent ratios with `starting_equity_usd = max(current_equity, 10)` as a safe fallback.
+
+---
+
+## Section 2 — Engine refactor (the core)
+
+### 2A. New `_shared/doctrine-resolver.ts`
+
+Single source of truth for "what are this user's effective caps right now?" Used by every edge function and mirrored in `src/lib/doctrine-resolver.ts` for the browser.
+
+```ts
+resolveDoctrine({ settings, currentEquityUsd }) → {
+  maxOrderUsd:        clamp(currentEquityUsd × settings.max_order_pct, settings.max_order_abs_floor, settings.max_order_abs_cap),
+  killSwitchFloorUsd: max(settings.starting_equity_usd × settings.floor_pct, settings.floor_abs_min),
+  dailyLossUsd:       currentEquityUsd × settings.daily_loss_pct,
+  maxTradesPerDay:    settings.max_trades_per_day,
+  riskPerTradePct:    settings.risk_per_trade_pct,
+  ...
+}
+```
+
+This is the new home of every number that used to come from `TRADING_PROFILES`.
+
+### 2B. Rewire callers (no behaviour change for existing users)
+
+Replace direct profile reads in:
+- `supabase/functions/_shared/risk.ts` (`evaluateRiskGates`) — accept `resolvedDoctrine` instead of `profile`.
+- `supabase/functions/_shared/sizing.ts` (`clampSize`, `notionalFromRiskPct`) — same.
+- `supabase/functions/signal-engine/index.ts` — fetch `doctrine_settings` per tick, call resolver, pass downstream. Update the AI prompt to inject the *resolved* numbers (no more hardcoded `$${MAX_ORDER_USD}`).
+- `supabase/functions/jessica/index.ts` — read resolved doctrine for postmortems.
+
+### 2C. Profiles become presets, not enforcement
+
+`active_profile` stays in `system_state` but is informational/UX-only. Selecting a profile in `ProfilePicker` writes the preset *ratios* into `doctrine_settings` (one shot) and shows a toast: "Loaded Sentinel preset — tune in Edit doctrine."
+
+```ts
+SENTINEL_PRESET   = { max_order_pct: 0.001, daily_loss_pct: 0.003, floor_pct: 0.80, max_trades_per_day: 5,  risk_per_trade_pct: 0.01,  scan_interval_seconds: 300 }
+ACTIVE_PRESET     = { max_order_pct: 0.005, daily_loss_pct: 0.01,  floor_pct: 0.75, max_trades_per_day: 15, risk_per_trade_pct: 0.015, scan_interval_seconds: 120 }
+AGGRESSIVE_PRESET = { max_order_pct: 0.025, daily_loss_pct: 0.03,  floor_pct: 0.60, max_trades_per_day: 30, risk_per_trade_pct: 0.02,  scan_interval_seconds: 60 }
+```
+
+Loading a preset uses the same tighten-instant / loosen-cooldown path as a manual edit.
+
+### 2D. Tighten vs loosen classifier
+
+A small helper in `doctrine-resolver.ts`:
+```ts
+isLoosening(field, fromValue, toValue) → boolean
+```
+- `max_order_pct` ↑ loosens
+- `daily_loss_pct` ↑ loosens
+- `max_trades_per_day` ↑ loosens
+- `floor_pct` ↓ loosens
+- `risk_per_trade_pct` ↑ loosens
+- `consecutive_loss_limit` ↑ loosens
+- `loss_cooldown_minutes` ↓ loosens
+
+Edge function `update-doctrine`:
+- For each field changed, if tightening → write directly to `doctrine_settings` + audit log (`doctrine.tighten`).
+- If loosening → insert into `pending_doctrine_changes` with `effective_at = now() + 24h` + audit log (`doctrine.loosen.requested`).
+- Reject if user is in a paused-by-risk / kill-switch state? **No** — per your spec, tightening still works in those states; loosening is just delayed as normal (the 24h wait is the protection).
+
+---
+
+## Section 3 — Onboarding: capture starting equity
+
+When a new user lands, if `doctrine_settings.starting_equity_usd IS NULL`, show a one-time modal on first visit to Risk Center / Overview:
+
+- Single field: "How much capital are you funding this account with?" ($1 minimum, no max)
+- Default profile preset: Sentinel
+- On submit: write `starting_equity_usd`, apply Sentinel preset ratios, derive caps.
+- Helper text shows the resulting numbers live: *"At $1,000 funding: $1.00 max order, $3 daily loss cap, $800 kill-switch floor."*
+
+---
+
+## Section 4 — UI: Risk Center
+
+### 4A. `DoctrineGuardrailGrid` becomes editable
+
+- Replace the static `DOCTRINE` reads with a new `useDoctrineSettings()` hook (reads `doctrine_settings` + computes resolved caps via the shared resolver).
+- Each tile gets a small pencil icon → opens the Edit Doctrine sheet focused on that field.
+- Show **two numbers** for `max_order_pct`-type rows: percent (e.g. `0.50%`) and dollar derivation (e.g. `$5.00 of $1,000 equity`).
+- Show **both percent and dollar** for the kill-switch floor tile.
+
+### 4B. New "Edit doctrine" sheet (`DoctrineEditSheet.tsx`)
+
+Right-side sheet with grouped sliders/steppers:
+- **Per-order risk**: `max_order_pct` (0–5%), absolute hard cap ($)
+- **Daily limits**: `daily_loss_pct` (0–10%), `max_trades_per_day` (1–50)
+- **Floor**: `floor_pct` (50–95%), live-derived dollar value below
+- **Per-trade**: `risk_per_trade_pct` (0–3%)
+- **Tilt protection**: `consecutive_loss_limit`, `loss_cooldown_minutes`
+
+Each row shows: current value, draft value, and an inline tag — **"Applies instantly"** (green) for tightening, **"Activates in 24h"** (amber) for loosening. A footer summary lists all pending changes before save.
+
+### 4C. New "Pending changes" panel
+
+Sits above `DoctrineGuardrailGrid` if any pending rows exist:
+- For each row: field name, from→to, "Activates in 23h 14m" countdown, **Cancel** button.
+- Cancelling marks the row `cancelled` + writes `doctrine.loosen.cancelled` to audit log.
+
+### 4D. Profile picker
+
+Keep the three-card picker but relabel:
+- Title: "Profile presets"
+- On click: confirmation dialog showing every field that will tighten (instant) or loosen (24h delay), then dispatches to `update-doctrine` per field.
+
+---
+
+## Section 5 — Wiring up the rest
+
+- **Copilot (Harvey)** + **Jessica** + **Katrina** + **Rachel**: their context builders already pull `system_state` + (some) doctrine numbers. Update them to pull from the resolver so they reference the user's *actual* caps, not Sentinel defaults. Katrina should mention pending loosenings in her weekly review ("you raised max-order from 0.5% to 1% on Tue — N trades since, win rate Δ X%").
+- **AI agents cannot bypass cooldown.** The `update-doctrine` edge function only accepts `actor='user'`. Copilot tool calls that try to mutate doctrine route through the same function and follow the same rules.
+- **Custom annotations** (existing `guardrails` table): unchanged. Already editable. Clarify the description: "Display-only — engine reads Doctrine guardrails above."
+
+---
+
+## Section 6 — Tests + safety
+
+- New unit tests in `_shared/doctrine.test.ts`:
+  - resolver math at $10, $1k, $100k equity
+  - tighten classifier
+  - absolute caps still bound a runaway equity number
+  - kill-switch floor never below `floor_abs_min`
+- New integration test for the cooldown flow: request → 24h passes → cron activates → settings updated → audit log entries present.
+- Keep the existing 88-test suite green.
+
+---
+
+## Files touched
+
+**New**
+- `supabase/migrations/<ts>_doctrine_per_user_scaling.sql`
+- `supabase/functions/_shared/doctrine-resolver.ts`
+- `supabase/functions/update-doctrine/index.ts`
+- `supabase/functions/activate-doctrine-changes/index.ts`
+- `src/lib/doctrine-resolver.ts` (browser mirror)
+- `src/hooks/useDoctrineSettings.ts`
+- `src/hooks/usePendingDoctrineChanges.ts`
+- `src/components/trader/DoctrineEditSheet.tsx`
+- `src/components/trader/PendingDoctrineChangesPanel.tsx`
+- `src/components/onboarding/StartingEquityModal.tsx`
+
+**Edited**
+- `supabase/functions/_shared/risk.ts`
+- `supabase/functions/_shared/sizing.ts`
+- `supabase/functions/_shared/doctrine.ts` (deprecate hardcoded numbers, keep types)
+- `supabase/functions/signal-engine/index.ts`
+- `supabase/functions/jessica/index.ts`
+- `supabase/functions/katrina/index.ts`
+- `supabase/functions/copilot-chat/index.ts`
+- `src/lib/doctrine-constants.ts` (presets only; runtime caps come from resolver)
+- `src/components/trader/DoctrineGuardrailGrid.tsx`
+- `src/components/trader/ProfilePicker.tsx`
+- `src/pages/RiskCenter.tsx`
+- Tests: `_shared/doctrine.test.ts`, `src/test/doctrine.test.ts`, `src/test/lifecycle-integration.test.ts`
+
+---
+
+## Acceptance checks
+
+1. New $1,000 user sees max order $5, kill-switch floor $800 — not $1/$8.
+2. Lowering `floor_pct` from 0.80 → 0.70 in the sheet shows "Activates in 24h", appears in pending panel, can be cancelled.
+3. Raising `floor_pct` from 0.80 → 0.85 saves instantly with a "Applied" toast.
+4. After 24h, cron activates the pending change; `system_audit_log` shows request + activation rows.
+5. Switching to Aggressive preset on a $1k account fans out to per-field tighten/loosen routing (most fields loosen → 24h delay).
+6. Engine logs show the *resolved* numbers (`maxOrderUsd: 5.00`) per tick, not hardcoded constants.
+7. All 88 existing tests still pass; new resolver/cooldown tests pass.
+
+Approve and I'll build it end-to-end.
