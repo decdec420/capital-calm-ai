@@ -294,7 +294,7 @@ function JessicaTriage() {
   if (!system) return null;
 
   const decision = system.lastJessicaDecision;
-  const ranAt = decision?.ranAt ?? (decision as any)?.ran_at ?? null;
+  const ranAt = decision?.ran_at ?? null;
   const ageSec = ranAt
     ? Math.floor((Date.now() - new Date(ranAt).getTime()) / 1000)
     : null;
