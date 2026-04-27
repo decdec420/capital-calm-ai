@@ -31,7 +31,7 @@ function presetFields(id: ProfileId): Partial<Record<DoctrineField, number>> {
 
 export function ProfilePicker() {
   const { data: system, update } = useSystemState();
-  const { data: settings } = useDoctrineSettings();
+  const { settings } = useDoctrineSettings();
   const [pending, setPending] = useState<ProfileId | null>(null);
   const active: ProfileId = system?.activeProfile ?? "sentinel";
 
