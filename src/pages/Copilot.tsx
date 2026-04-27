@@ -118,6 +118,43 @@ export default function Copilot() {
     load();
   }, []);
 
+  // Agent health — refreshed every 30s. Drives pipeline-strip dot colors.
+  const [agentHealth, setAgentHealth] = useState<
+    Record<string, { status: string; staleMinutes: number | null }>
+  >({});
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from("agent_health")
+        .select("agent_name, status, last_success, checked_at");
+      if (data) {
+        const map: Record<string, { status: string; staleMinutes: number | null }> = {};
+        for (const row of data) {
+          const staleMinutes = row.last_success
+            ? Math.floor((Date.now() - new Date(row.last_success).getTime()) / 60000)
+            : null;
+          map[row.agent_name] = { status: row.status, staleMinutes };
+        }
+        setAgentHealth(map);
+      }
+    };
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Map an agent's health.status → tailwind dot class.
+  // 'healthy' → green · 'stale' → amber · 'degraded' → amber pulse · 'failed' → red pulse.
+  // Returns null if no health row exists yet so callers can fall back to timestamp-based logic.
+  const healthDot = (agentKey: string): string | null => {
+    const h = agentHealth[agentKey];
+    if (!h) return null;
+    if (h.status === "healthy") return "bg-status-safe";
+    if (h.status === "stale") return "bg-status-caution";
+    if (h.status === "degraded") return "bg-status-caution animate-pulse";
+    return "bg-status-blocked animate-pulse";
+  };
+
   // Render a single structured gate reason as a sonner toast.
   const toastForGate = (g: GateReason) => {
     const Icon = gateIconFor(g.code);
