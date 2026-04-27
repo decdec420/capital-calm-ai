@@ -23,6 +23,7 @@ import {
   type LifecycleTransition,
   type TradeLifecyclePhase,
 } from "../_shared/lifecycle.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 validateDoctrineInvariants();
 
