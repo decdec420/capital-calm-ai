@@ -13,11 +13,10 @@
 
 import {
   CAPITAL_PRESERVATION_DOCTRINE,
-  MAX_CORRELATED_POSITIONS,
-  MAX_ORDER_USD,
-  RISK_PER_TRADE_PCT,
   SYMBOL_WHITELIST,
+  getProfile,
   validateDoctrineInvariants,
+  type TradingProfile,
 } from "../_shared/doctrine.ts";
 import {
   GATE_CODES,
