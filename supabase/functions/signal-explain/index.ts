@@ -48,6 +48,11 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Rate limit: 10 req / 60s per user
+    const rl = await checkRateLimit(admin, userId, "signal-explain", 10);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     const { data: signal, error: sigErr } = await admin
       .from("trade_signals")
       .select("*")
