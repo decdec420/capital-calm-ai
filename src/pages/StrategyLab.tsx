@@ -773,8 +773,8 @@ function ArchiveRow({
   return (
     <div className="flex items-center justify-between gap-3 py-2 px-3 text-sm rounded-md hover:bg-secondary/40">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <span className="text-muted-foreground truncate">{s.name}</span>
-        <span className="text-muted-foreground text-xs">{s.version}</span>
+        <span className="text-muted-foreground truncate">{displayNameFor(s)}</span>
+        <span className="text-muted-foreground text-xs font-mono">{s.name} {s.version}</span>
         {promotionTitle && (
           <span className="text-[11px] text-muted-foreground italic truncate">
             · {promotionTitle}
