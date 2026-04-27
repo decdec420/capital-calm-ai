@@ -918,11 +918,27 @@ async function runTickForUser(
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
-    // The first refusal is the "lock" reason we show per-row. Re-entry
-    // cooldown takes precedence so the operator sees WHY this symbol is
-    // skipped rather than a generic "no setup" message.
+    // The first refusal is the "lock" reason we show per-row. Order of
+    // precedence (most-actionable first):
+    //   1. Critical news flag on this symbol (FOMC/CPI/etc. in window)
+    //   2. Re-entry cooldown after a recent loss
+    //   3. First halt/block from the standard risk gate
+    const symbolIntel = intelligenceBySymbol[symbol] ?? null;
+    const newsSummary = summarizeNewsFlags(symbolIntel?.news_flags);
     const reentryHit = reentryLockedSymbols.get(symbol);
-    const lockGate = reentryHit
+    const lockGate = newsSummary.hasCritical
+      ? gate(
+          GATE_CODES.NEWS_FLAG_CRITICAL,
+          "block",
+          `${symbol}: critical news flag active — ${
+            newsSummary.active
+              .filter((f) => f.severity === "critical")
+              .map((f) => f.label)
+              .join(", ")
+          }.`,
+          { symbol, activeNewsFlags: newsSummary.active },
+        )
+      : reentryHit
       ? gate(
           GATE_CODES.REENTRY_COOLDOWN,
           "block",
