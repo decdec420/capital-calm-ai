@@ -150,7 +150,7 @@ export function AlertCard({
       {/* Expanded body */}
       {expanded && (
         <div className="border-t border-border px-3 py-3 space-y-3">
-          {cls.category === "cron_health" && <JessicaTriage />}
+          {cls.category === "cron_health" && <JessicaTriage alert={alert} />}
 
           <Section label="What" body={cls.what} />
           <Section label="Why it matters" body={cls.why} />
