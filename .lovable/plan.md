@@ -1,71 +1,68 @@
-## What you're seeing
+# Make alerts useful, not just notifications
 
-Two separate bugs, both real:
+Right now every alert card on `/alerts` is a flat strip: severity dot, title, the raw `message` string, a timestamp, and a hover-only dismiss. That works as a *notification*, but it doesn't tell you what to do. The data behind it is richer than the card shows — most alerts come from typed events (heartbeat, guardrail, signal proposed, trade closed, experiment-needs-call) and each type has an obvious "next step."
 
-### 1. "View all 20 alerts in Journals" link is a dead end
-The Overview page links overflow alerts to `/journals`, but the Journals page never renders alerts — it only shows journal entries. So you click and see nothing alert-related. There is no dedicated alerts viewer in the app today.
+This plan makes the card pull its weight: explain the situation, show why it matters, and give one clear action.
 
-### 2. The "Jessica heartbeat lost" alerts are false alarms
-I checked the cron jobs and the database:
+## What changes (user-visible)
 
-- `jessica-tick` cron is firing **every minute, succeeding every time** (last 10 runs all `succeeded`, most recent at 22:02 UTC).
-- But `system_state.last_jessica_decision.ran_at` is **24 minutes stale**.
-- The Postgres heartbeat checker (`check_jessica_heartbeat`, runs every 3 min) reads `ran_at`, sees it's >4 min old, and raises a "critical" alert — deduped to once per 30 min, which matches exactly what you're seeing (02:48, 02:18, 01:45, 01:12 …).
+Each alert card grows from a one-liner into a small "incident card" with three parts:
 
-**Root cause**: in `supabase/functions/jessica/index.ts` (lines 342–355), Jessica returns early with `{ skipped: true, reason: "kill_switch_engaged" | "bot_paused" | "paused until …" | "equity_critical_near_floor" }` **before** writing `last_jessica_decision`. Your bot is currently paused, so every tick exits early, `ran_at` never updates, and the watchdog screams. Cron is fine. Jessica is fine. The heartbeat signal is broken.
-
----
-
-## Plan
-
-### Fix 1 — Make alerts a first-class page
-
-- Add `/alerts` route and `src/pages/Alerts.tsx`:
-  - Full list of alerts (paginated/scrollable), filter chips for `critical / warning / info`, search box.
-  - Each row opens the existing `AlertDetailSheet` (already supports deep-links and dismiss).
-  - "Dismiss" and "Dismiss all read" actions wired through `useAlerts`.
-- Add `/alerts` to `AppSidebar` nav.
-- Update `src/pages/Overview.tsx` line 541: change `to="/journals"` → `to="/alerts"` and the label to "View all N alerts →".
-- (Optional but cheap) Add a "Mark all dismissed" bulk action on the Alerts page.
-
-### Fix 2 — Stop the false Jessica heartbeat alarms
-
-Two-part fix so the watchdog stays useful but stops crying wolf:
-
-**a) Always update `ran_at`, even on skipped ticks** (`supabase/functions/jessica/index.ts`)
-Refactor the four early-return branches (lines 342–355) so they write a minimal decision summary first:
-```ts
-{ ran_at, skipped: true, reason: "bot_paused", actions: 0 }
+```text
+┌────────────────────────────────────────────────────────────┐
+│ ● CRITICAL · Cron health      02:48 PM · 4 min ago    [×]  │
+│ Jessica heartbeat lost                                     │
+│                                                            │
+│ What: Jessica hasn't ticked in 9 minutes (cron may be      │
+│       down). Bot is currently: paused.                     │
+│ Why : New signals stop being generated. Open positions     │
+│       still mark-to-market, but no entries/exits fire.     │
+│ Fix : 1. Check cron health on the Health page              │
+│       2. If bot is intentionally paused, this clears on    │
+│          its own when you resume                           │
+│       3. Re-run Jessica manually to reset heartbeat        │
+│                                                            │
+│ [ Open Health → ] [ Run Jessica now ] [ Dismiss ]          │
+└────────────────────────────────────────────────────────────┘
 ```
-This is the correct heartbeat semantics: "the function ran" is what we want to track, not "the function took an action."
 
-**b) Make the heartbeat checker tolerant** (`check_jessica_heartbeat` SQL function, via migration)
-- Bump the staleness threshold from 4 min → 8 min (cron runs every 1 min, watchdog every 3 min — 8 min covers two missed ticks plus jitter).
-- When `system_state.bot = 'paused'` or `kill_switch_engaged = true`, mark health as `degraded` instead of `failed` and **do not raise an alert** — these are operator-intended states, not outages.
-- Keep the existing 30-min alert dedupe.
+The card stays compact by default (collapsed: title + one-line summary + primary action) and **expands on click** to reveal what/why/fix + secondary actions. So the page still scans fast, but every alert is one click away from being actionable.
 
-### Cleanup
-- Delete the existing 16 stale "Jessica heartbeat lost" critical alerts so the count drops to the real 3 info alerts. (One-shot SQL via migration.)
+A small **category chip** ("Cron health", "Guardrail", "Signal", "Trade", "Experiment", "System") sits next to severity so you can eyeball a stack of alerts and group them mentally.
 
----
+## How alerts get classified
 
-## Files touched
+We don't change the database. Alerts are classified at render time by matching `title` + `message` against the patterns the app already produces (we wrote those triggers, so we know them):
 
-- `src/App.tsx` — add `/alerts` route
-- `src/pages/Alerts.tsx` — new
-- `src/components/trader/AppSidebar.tsx` — add nav entry
-- `src/pages/Overview.tsx` — repoint "View all" link to `/alerts`
-- `supabase/functions/jessica/index.ts` — write `ran_at` on skip paths
-- `supabase/migrations/<new>.sql` — update `check_jessica_heartbeat()` thresholds + paused-state handling, and delete stale heartbeat alerts
+| Pattern in title                          | Category         | Primary action            |
+|-------------------------------------------|------------------|---------------------------|
+| `Jessica heartbeat lost`                  | Cron health      | Open Health · Run Jessica |
+| `Kill-switch ENGAGED`                     | System           | Open Risk Center          |
+| `Guardrail caution` / `Guardrail BLOCKED` | Guardrail        | Open Risk Center          |
+| `Signal proposed`                         | Signal           | Open Copilot (signal)     |
+| `Trade closed`                            | Trade            | Open Trades               |
+| `Experiment needs your call`              | Experiment       | Open Copilot (experiments)|
+| anything else                             | System           | (no primary)              |
 
-No schema changes, no new tables, no impact on tools/Harvey/cron wiring.
+For each category we hard-code a short **what / why / fix** template. The raw `message` is still shown verbatim under "What" — we never hide the original text, we just frame it.
 
----
+## Bulk noise reduction (small bonus)
 
-## Verification after build
+While we're in here: the page currently shows every "Experiment needs your call · stop_atr_mult" alert as a separate row (there are ~12 stacked right now). Group consecutive alerts with the same `title` into a single card with a count badge — "Experiment needs your call · stop_atr_mult **×12**" — expandable to see each occurrence with its individual message. Critical and warning alerts are *never* grouped; only `info` collapses, so we don't hide anything urgent.
 
-1. Click "View all alerts" on Overview → lands on `/alerts` showing all 20.
-2. Confirm filter + dismiss work; sheet opens on row click.
-3. Within ~3 min of deploy: `system_state.last_jessica_decision.ran_at` updates every minute even though bot is paused.
-4. No new "Jessica heartbeat lost" alert appears within the next 30 min while paused.
-5. Manually flip cron off (or simulate by stopping ran_at writes) → confirm watchdog still fires after 8 min — i.e. it's tolerant, not blind.
+## Technical notes
+
+Files touched:
+
+- `src/lib/alert-classification.ts` (new) — pure function `classifyAlert(alert) → { category, what, why, fixes: string[], primaryAction?: { label, to } }`. All pattern matching + templates live here, fully unit-testable.
+- `src/components/trader/AlertCard.tsx` (new) — replaces the current inline `AlertBanner` usage on the Alerts page. Collapsed/expanded state, category chip, what/why/fix block, primary + dismiss buttons. Keyboard-accessible (Enter/Space toggles, Esc collapses).
+- `src/pages/Alerts.tsx` — swap the `AlertBanner` map for `AlertCard`; add the info-only grouping pass before render; keep the existing severity filter / search / "Dismiss visible" controls.
+- `src/components/trader/AlertDetailSheet.tsx` — keep for backward compatibility (Overview's recent-alerts list still uses it), but the Alerts page no longer opens the sheet on click; expansion happens inline on the card itself.
+- `src/lib/__tests__/alert-classification.test.ts` (new) — cover one fixture per category + the fallback.
+
+No DB migration, no edge-function changes, no schema changes. The `alerts` table stays exactly as-is.
+
+## Out of scope (call out so we don't sneak it in)
+
+- Adding a `category` / `action_url` column to the `alerts` table. We can do that later if the heuristic gets noisy, but right now patterns are stable and a column would just duplicate what producers already encode in the title.
+- Auto-running fixes (e.g. "Run Jessica now" actually triggering the edge function). The button in the mock above is aspirational — for this pass it links to the Health page and the user clicks the existing manual-run control there. Happy to wire one-click remediation in a follow-up if you want it.
