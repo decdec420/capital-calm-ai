@@ -338,7 +338,12 @@ export async function fetchTicker(
     timeframe: "ticker",
   };
   try {
-    const r = await fetch(`${CB}/products/${symbol}/ticker`);
+    let r = await fetch(`${CB}/products/${symbol}/ticker`);
+    if (r.status === 429) {
+      console.warn(`[market] Coinbase rate-limited on ${symbol} ticker — retrying in ~1s`);
+      await sleep(1000);
+      r = await fetch(`${CB}/products/${symbol}/ticker`);
+    }
     if (!r.ok) {
       ctx.tracker?.recordFailure(key, `HTTP ${r.status}`);
       throw new Error(`Coinbase ${symbol} ticker ${r.status}`);
