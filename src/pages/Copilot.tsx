@@ -44,6 +44,28 @@ export default function Copilot() {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const [intelTimestamps, setIntelTimestamps] = useState<Record<string, string>>({});
+  const [katrinaReview, setKatrinaReview] = useState<{
+    reviewed_at: string;
+    brief_text: string;
+    win_rate_trend: string | null;
+    promote_ids: string[] | null;
+    kill_ids: string[] | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("strategy_reviews")
+      .select("reviewed_at, brief_text, win_rate_trend, promote_ids, kill_ids")
+      .order("reviewed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data) setKatrinaReview(data as typeof katrinaReview);
+      });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [pipelineStep, setPipelineStep] = useState<
     null | "braintrust" | "engine" | "briefing" | "done" | "error"
   >(null);
@@ -394,6 +416,13 @@ export default function Copilot() {
       pendingReview: expNeedsReview.slice(0, 3).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta, hypothesis: e.hypothesis })),
       recentlyAccepted: expRecent.filter((e) => e.status === "accepted").slice(0, 5).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta })),
     },
+    katrinaLatestReview: katrinaReview ? {
+      date: katrinaReview.reviewed_at,
+      brief: katrinaReview.brief_text,
+      trend: katrinaReview.win_rate_trend,
+      promote_count: (katrinaReview.promote_ids ?? []).length,
+      kill_count: (katrinaReview.kill_ids ?? []).length,
+    } : null,
   });
 
   const send = async (text: string) => {

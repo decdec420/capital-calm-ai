@@ -765,6 +765,57 @@ export type Database = {
           },
         ]
       }
+      strategy_reviews: {
+        Row: {
+          ai_model: string | null
+          brief_text: string
+          continue_ids: string[]
+          id: string
+          kill_ids: string[]
+          promote_ids: string[]
+          raw_analysis: Json
+          reviewed_at: string
+          top_regime: string | null
+          trades_analyzed: number
+          trigger_type: string
+          user_id: string
+          win_rate_trend: string | null
+          worst_regime: string | null
+        }
+        Insert: {
+          ai_model?: string | null
+          brief_text: string
+          continue_ids?: string[]
+          id?: string
+          kill_ids?: string[]
+          promote_ids?: string[]
+          raw_analysis?: Json
+          reviewed_at?: string
+          top_regime?: string | null
+          trades_analyzed?: number
+          trigger_type: string
+          user_id: string
+          win_rate_trend?: string | null
+          worst_regime?: string | null
+        }
+        Update: {
+          ai_model?: string | null
+          brief_text?: string
+          continue_ids?: string[]
+          id?: string
+          kill_ids?: string[]
+          promote_ids?: string[]
+          raw_analysis?: Json
+          reviewed_at?: string
+          top_regime?: string | null
+          trades_analyzed?: number
+          trigger_type?: string
+          user_id?: string
+          win_rate_trend?: string | null
+          worst_regime?: string | null
+        }
+        Relationships: []
+      }
       system_audit_log: {
         Row: {
           action: string
@@ -1255,6 +1306,7 @@ export type Database = {
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
       get_journal_digest_cron_token: { Args: never; Returns: string }
+      get_katrina_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
       get_post_trade_learn_token: { Args: never; Returns: string }
       get_rollover_day_cron_token: { Args: never; Returns: string }

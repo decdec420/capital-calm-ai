@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,20 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useExperiments, type NewExperimentInput } from "@/hooks/useExperiments";
 import type { Experiment, CopilotMemoryRow, StrategyMetrics, ExperimentBacktestResult } from "@/lib/domain-types";
-import { Brain, Check, ChevronDown, FlaskConical, GraduationCap, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { Brain, Check, ChevronDown, FlaskConical, GraduationCap, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle, Scale, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+type KatrinaReview = {
+  brief_text: string;
+  reviewed_at: string;
+  win_rate_trend: "improving" | "stable" | "declining" | null;
+  trades_analyzed: number;
+  promote_ids: string[] | null;
+  kill_ids: string[] | null;
+  continue_ids: string[] | null;
+};
 
 const statusTone: Record<Experiment["status"], "neutral" | "candidate" | "safe" | "blocked" | "caution"> = {
   queued: "neutral",
@@ -38,6 +49,51 @@ export default function Learning() {
   const [showResolved, setShowResolved] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showPromoted, setShowPromoted] = useState(false);
+  const [katrinaReview, setKatrinaReview] = useState<KatrinaReview | null>(null);
+  const [katrinaRunning, setKatrinaRunning] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("strategy_reviews")
+      .select("brief_text, reviewed_at, win_rate_trend, trades_analyzed, promote_ids, kill_ids, continue_ids")
+      .order("reviewed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data) setKatrinaReview(data as KatrinaReview);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const runKatrinaNow = async () => {
+    if (katrinaRunning) return;
+    setKatrinaRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("katrina", {
+        body: { trigger: "manual" },
+      });
+      if (error) throw error;
+      if (data?.skipped) {
+        toast.info(data.reason ?? "Not enough trades yet for a review.");
+      } else if (data?.error) {
+        toast.error(data.error);
+      } else {
+        toast.success("Katrina updated her review.");
+        const { data: fresh } = await supabase
+          .from("strategy_reviews")
+          .select("brief_text, reviewed_at, win_rate_trend, trades_analyzed, promote_ids, kill_ids, continue_ids")
+          .order("reviewed_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (fresh) setKatrinaReview(fresh as KatrinaReview);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not run Katrina.");
+    } finally {
+      setKatrinaRunning(false);
+    }
+  };
 
   const heroLine = (() => {
     const bits: string[] = [];
@@ -97,6 +153,9 @@ export default function Learning() {
           </div>
         </div>
       </div>
+
+      {/* KATRINA — Strategy Review */}
+      <KatrinaPanel review={katrinaReview} onRun={runKatrinaNow} running={katrinaRunning} />
 
       {/* NEEDS REVIEW */}
       {needsReview.length > 0 && (
@@ -573,6 +632,80 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1.5">
       <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function KatrinaPanel({
+  review,
+  onRun,
+  running,
+}: {
+  review: KatrinaReview | null;
+  onRun: () => void;
+  running: boolean;
+}) {
+  const trend = review?.win_rate_trend ?? "stable";
+  const trendIcon = trend === "improving"
+    ? <TrendingUp className="h-3 w-3" />
+    : trend === "declining"
+      ? <TrendingDown className="h-3 w-3" />
+      : <Minus className="h-3 w-3" />;
+  const trendTone: "safe" | "blocked" | "neutral" =
+    trend === "improving" ? "safe" : trend === "declining" ? "blocked" : "neutral";
+
+  const promoteCount = review?.promote_ids?.length ?? 0;
+  const killCount = review?.kill_ids?.length ?? 0;
+  const continueCount = review?.continue_ids?.length ?? 0;
+
+  return (
+    <div className="panel p-5 bg-gradient-to-br from-accent/10 via-card to-card border-accent/20">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="h-10 w-10 rounded-md bg-accent/20 text-foreground flex items-center justify-center shrink-0">
+            <Scale className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-foreground">Katrina's Review</span>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Strategy Lab</span>
+            </div>
+            {review ? (
+              <>
+                <p className="text-sm text-foreground/90 mt-2 leading-relaxed">
+                  {review.brief_text}
+                </p>
+                <div className="flex items-center gap-3 mt-3 flex-wrap text-xs">
+                  <StatusBadge tone={trendTone} size="sm">
+                    {trendIcon} {trend}
+                  </StatusBadge>
+                  <span className="text-muted-foreground tabular">
+                    {new Date(review.reviewed_at).toLocaleDateString("default", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {" · "}
+                    {review.trades_analyzed} trade{review.trades_analyzed === 1 ? "" : "s"} analyzed
+                  </span>
+                  {promoteCount > 0 && (
+                    <span className="text-status-safe">↑ {promoteCount} ready to promote</span>
+                  )}
+                  {killCount > 0 && (
+                    <span className="text-status-blocked">✗ {killCount} recommended to close</span>
+                  )}
+                  {continueCount > 0 && (
+                    <span className="text-muted-foreground">→ {continueCount} keep running</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed max-w-xl">
+                Katrina's first review runs Sunday at 08:00 UTC, or after your 10th closed trade — whichever comes first. You can also run her now if you have at least 3 closed trades in the last 30 days.
+              </p>
+            )}
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={onRun} disabled={running} className="shrink-0">
+          {running ? "Reviewing…" : review ? "Run new review" : "Run now"}
+        </Button>
+      </div>
     </div>
   );
 }
