@@ -30,8 +30,15 @@ export function StatusFooter() {
         feed <span className={s.dataFeed === "connected" ? "text-status-safe" : "text-status-blocked"}>{s.dataFeed}</span>
       </span>
       <span className="h-3 w-px bg-border" />
-      <span>
-        broker <span className={s.brokerConnection === "connected" ? "text-status-safe" : "text-status-blocked"}>{s.brokerConnection}</span>
+      <span title={s.mode === "paper" ? "Paper mode — no live broker is wired in" : undefined}>
+        broker{" "}
+        {s.mode === "paper" ? (
+          <span className="text-muted-foreground">paper · none</span>
+        ) : (
+          <span className={s.brokerConnection === "connected" ? "text-status-safe" : "text-status-blocked"}>
+            {s.brokerConnection}
+          </span>
+        )}
       </span>
       <span className="h-3 w-px bg-border" />
       <span>
