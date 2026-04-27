@@ -266,31 +266,54 @@ function Section({ label, body }: { label: string; body: string }) {
  * (bot, kill-switch, last Jessica decision) and the heartbeat agent_health
  * row, then offers the three actions that actually clear this class of
  * alert: resume bot, disarm kill-switch, run Jessica now.
+ *
+ * "Run Jessica now" closes the loop:
+ *  - if heartbeat goes healthy + tick is fresh → auto-dismiss the alert.
+ *  - if invoke succeeds but heartbeat still bad → escalate inline.
+ *  - if invoke itself fails → show system-outage state inline.
  */
-function JessicaTriage() {
+function JessicaTriage({ alert }: { alert: Alert }) {
   const { user } = useAuth();
   const { data: system, update, refetch } = useSystemState();
+  const { dismiss } = useAlerts();
   const [hbStatus, setHbStatus] = useState<string | null>(null);
   const [hbError, setHbError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | "resume" | "disarm" | "kick">(null);
+  /**
+   * Escalation state surfaced after a manual kick:
+   *  - null            → no escalation, normal triage display
+   *  - 'still_failing' → invoke worked but heartbeat is still bad
+   *  - 'unreachable'   → invoke itself errored — Jessica is offline
+   */
+  const [escalation, setEscalation] = useState<null | "still_failing" | "unreachable">(null);
+  const [escalationDetail, setEscalationDetail] = useState<string | null>(null);
+
+  const refreshHeartbeat = async () => {
+    if (!user) return null;
+    const { data } = await supabase
+      .from("agent_health")
+      .select("status,last_error,last_success,last_failure,checked_at")
+      .eq("user_id", user.id)
+      .eq("agent_name", "jessica_heartbeat")
+      .maybeSingle();
+    setHbStatus(data?.status ?? null);
+    setHbError(data?.last_error ?? null);
+    return data;
+  };
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("agent_health")
-        .select("status,last_error")
-        .eq("user_id", user.id)
-        .eq("agent_name", "jessica_heartbeat")
-        .maybeSingle();
+      const data = await refreshHeartbeat();
       if (cancelled) return;
-      setHbStatus(data?.status ?? null);
-      setHbError(data?.last_error ?? null);
+      // (state already set inside refreshHeartbeat)
+      void data;
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   if (!system) return null;
@@ -308,7 +331,7 @@ function JessicaTriage() {
         : ageSec < 3600
           ? `${Math.floor(ageSec / 60)}m ago`
           : `${Math.floor(ageSec / 3600)}h ago`;
-  const actions = (decision as any)?.actions ?? 0;
+  const actions = (decision as { actions?: number } | null)?.actions ?? 0;
 
   const intentionallyIdle = system.bot !== "running" || system.killSwitchEngaged;
   const dotClass =
@@ -346,28 +369,88 @@ function JessicaTriage() {
 
   const onKick = async () => {
     setBusy("kick");
+    setEscalation(null);
+    setEscalationDetail(null);
     try {
       const { data, error } = await supabase.functions.invoke("jessica");
       if (error) throw error;
-      toast.success(
-        `Jessica ticked${data?.actions != null ? ` · ${data.actions} action${data.actions === 1 ? "" : "s"}` : ""}.`,
-      );
+
+      // Refresh system state + heartbeat row to see if the watchdog cleared.
       await refetch();
-      // refresh heartbeat row
-      if (user) {
-        const { data: hb } = await supabase
-          .from("agent_health")
-          .select("status,last_error")
-          .eq("user_id", user.id)
-          .eq("agent_name", "jessica_heartbeat")
-          .maybeSingle();
-        setHbStatus(hb?.status ?? null);
-        setHbError(hb?.last_error ?? null);
+      const hb = await refreshHeartbeat();
+
+      // Re-read the freshly updated decision from the *just-updated* system row.
+      // useSystemState's refetch already triggered a re-render, but for the
+      // immediate decision check we read straight from the upstream we have.
+      const { data: sysRow } = user
+        ? await supabase
+            .from("system_state")
+            .select("last_jessica_decision")
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : { data: null };
+      const freshDecision = sysRow?.last_jessica_decision as
+        | { ran_at?: string; actions?: number }
+        | null
+        | undefined;
+      const freshRanAt = freshDecision?.ran_at ?? null;
+      const freshAgeSec = freshRanAt
+        ? Math.floor((Date.now() - new Date(freshRanAt).getTime()) / 1000)
+        : null;
+
+      const heartbeatHealthy =
+        hb?.status === "healthy" && freshAgeSec !== null && freshAgeSec < 90;
+
+      if (heartbeatHealthy) {
+        // Success path: dismiss this alert and notify.
+        try {
+          await dismiss(alert.id);
+        } catch {
+          // Non-fatal — alert pipeline will catch up via realtime.
+        }
+        toast.success("Heartbeat restored — alert cleared.");
+        return;
       }
-    } catch (e: any) {
-      toast.error(`Run failed: ${e?.message ?? "edge function unreachable"}`);
+
+      // Invoke worked, but the watchdog still doesn't see Jessica.
+      setEscalation("still_failing");
+      setEscalationDetail(
+        hb?.last_error ??
+          `Manual tick logged ${data?.actions ?? 0} action(s), but heartbeat status is still "${hb?.status ?? "unknown"}".`,
+      );
+      toast.error("Heartbeat still failing — see escalation below.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setEscalation("unreachable");
+      setEscalationDetail(msg);
+      toast.error(`Run failed: ${msg || "edge function unreachable"}`);
     } finally {
       setBusy(null);
+    }
+  };
+
+  const onCopyDiagnostic = async () => {
+    const lines = [
+      `Jessica heartbeat diagnostic — ${new Date().toISOString()}`,
+      `User id: ${user?.id ?? "(not signed in)"}`,
+      `Alert id: ${alert.id}`,
+      `Alert title: ${alert.title}`,
+      `Alert created: ${alert.timestamp}`,
+      `Bot status: ${system.bot}`,
+      `Kill-switch engaged: ${system.killSwitchEngaged}`,
+      `Last Jessica tick: ${ranAt ?? "never"} (${ageLabel})`,
+      `Last decision actions: ${actions}`,
+      `Heartbeat agent status: ${hbStatus ?? "unknown"}`,
+      `Heartbeat last error: ${hbError ?? "none"}`,
+      `Escalation state: ${escalation ?? "none"}`,
+      `Escalation detail: ${escalationDetail ?? "none"}`,
+    ];
+    const text = lines.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Diagnostic copied to clipboard.");
+    } catch {
+      toast.error("Couldn't copy — your browser blocked clipboard access.");
     }
   };
 
@@ -407,15 +490,37 @@ function JessicaTriage() {
         </span>
       </div>
 
-      {intentionallyIdle && (
+      {intentionallyIdle && !escalation && (
         <p className="text-[11px] text-status-caution/90 bg-status-caution/10 rounded px-2 py-1">
           Bot is intentionally idle ({system.killSwitchEngaged ? "kill-switch engaged" : `bot ${system.bot}`}).
           The heartbeat will resume once you start the bot — this alert will clear on its own.
         </p>
       )}
 
-      {hbError && !intentionallyIdle && (
+      {hbError && !intentionallyIdle && !escalation && (
         <p className="text-[11px] text-muted-foreground italic">{hbError}</p>
+      )}
+
+      {escalation === "still_failing" && (
+        <div className="rounded border border-status-blocked/40 bg-status-blocked/10 p-2 space-y-1.5">
+          <p className="text-[11px] font-medium text-status-blocked">
+            Manual kick succeeded but heartbeat is still failing — Jessica can run, but the watchdog is not seeing it.
+          </p>
+          {escalationDetail && (
+            <p className="text-[11px] text-foreground/80 italic break-words">{escalationDetail}</p>
+          )}
+        </div>
+      )}
+
+      {escalation === "unreachable" && (
+        <div className="rounded border border-status-blocked/40 bg-status-blocked/10 p-2 space-y-1.5">
+          <p className="text-[11px] font-medium text-status-blocked">
+            Edge function unreachable — Jessica is offline. This is a system-level outage, not just heartbeat lag.
+          </p>
+          {escalationDetail && (
+            <p className="text-[11px] text-foreground/80 italic break-words">{escalationDetail}</p>
+          )}
+        </div>
       )}
 
       <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -435,6 +540,20 @@ function JessicaTriage() {
           <RefreshCw className={cn("h-3.5 w-3.5 mr-1", busy === "kick" && "animate-spin")} />
           {busy === "kick" ? "Running…" : "Run Jessica now"}
         </Button>
+        {escalation && (
+          <>
+            <Button size="sm" variant="outline" onClick={onCopyDiagnostic}>
+              <ClipboardCopy className="h-3.5 w-3.5 mr-1" />
+              Copy diagnostic
+            </Button>
+            <Button size="sm" variant="ghost" asChild>
+              <Link to="/copilot">
+                Open Copilot logs
+                <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Link>
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );
