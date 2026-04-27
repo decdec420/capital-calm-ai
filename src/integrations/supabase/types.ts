@@ -659,6 +659,7 @@ export type Database = {
           kill_switch_engaged: boolean
           last_auto_promoted_at: string | null
           last_engine_snapshot: Json
+          last_evaluated_at: string | null
           last_heartbeat: string
           last_mark_to_market_at: string | null
           latency_ms: number
@@ -681,6 +682,7 @@ export type Database = {
           kill_switch_engaged?: boolean
           last_auto_promoted_at?: string | null
           last_engine_snapshot?: Json
+          last_evaluated_at?: string | null
           last_heartbeat?: string
           last_mark_to_market_at?: string | null
           latency_ms?: number
@@ -703,6 +705,7 @@ export type Database = {
           kill_switch_engaged?: boolean
           last_auto_promoted_at?: string | null
           last_engine_snapshot?: Json
+          last_evaluated_at?: string | null
           last_heartbeat?: string
           last_mark_to_market_at?: string | null
           latency_ms?: number
