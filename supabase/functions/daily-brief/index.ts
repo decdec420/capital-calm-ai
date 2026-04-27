@@ -19,6 +19,7 @@
 //   - caution_flags: dedup'd active news flag labels
 
 import { SYMBOL_WHITELIST } from "../_shared/doctrine.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
