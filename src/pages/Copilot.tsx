@@ -72,6 +72,7 @@ export default function Copilot() {
     null;
   const lastGateReasons: GateReason[] = snapshot?.gateReasons ?? [];
   const activeSignal = pending[0];
+  const activeProfile = getProfile(system?.activeProfile);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -648,8 +649,8 @@ export default function Copilot() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Corr. cap</span>
                 <span className="text-foreground tabular">
-                  {open.length}/{DOCTRINE.MAX_CORRELATED_POSITIONS}{" "}
-                  {open.length >= DOCTRINE.MAX_CORRELATED_POSITIONS ? (
+                  {open.length}/{activeProfile.maxCorrelatedPositions}{" "}
+                  {open.length >= activeProfile.maxCorrelatedPositions ? (
                     <span className="text-status-caution">active</span>
                   ) : (
                     <span className="text-status-safe">clear</span>
