@@ -71,6 +71,11 @@ export interface ClampSizeInput {
   minOrderUsd?: number;
   /** Active trading profile id or object. Sentinel default. */
   profile?: string | TradingProfile;
+  /**
+   * Per-user resolved doctrine (overrides profile.maxOrderUsdHardCap and
+   * the kill-switch floor when present). Always prefer this for live engines.
+   */
+  resolved?: ResolvedDoctrine;
 }
 
 export interface ClampSizeResult {
