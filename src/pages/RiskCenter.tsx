@@ -184,7 +184,7 @@ export default function RiskCenter() {
                 Custom annotations · {filtered.length}
               </h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Display-only guardrails for ops awareness. The engine does <span className="text-foreground/80">not</span> read these — see Doctrine guardrails above for what's actually enforced.
+                Personal notes and reminders about your setup. The engine doesn't read these — they're just for you. See Doctrine guardrails above for what's actually enforced.
               </p>
             </div>
             <div className="flex items-center gap-3">
