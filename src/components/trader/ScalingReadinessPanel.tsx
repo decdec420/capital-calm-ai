@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, CheckCircle2, XCircle } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { StatusBadge } from "@/components/trader/StatusBadge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ interface ChecklistItem {
   pass: boolean;
   label: string;
   detail: string;
+  source: string;
 }
 
 export function ScalingReadinessPanel() {
@@ -92,31 +94,37 @@ export function ScalingReadinessPanel() {
           pass: expectancyPass,
           label: "Positive expectancy over ≥50 paper trades",
           detail: `${tradeCount} trades · ${expR >= 0 ? "+" : ""}$${expR.toFixed(2)} avg`,
+          source: "All your closed paper trades, across every strategy.",
         },
         {
           pass: ddPass,
           label: "Max drawdown under 25% on real paper trades",
           detail: tradeCount === 0 ? "no trades yet" : `${ddPct.toFixed(1)}%`,
+          source: "Peak-to-trough on the cumulative paper-trade equity curve.",
         },
         {
           pass: netPass,
           label: "Net profitable over last 30 days",
           detail: `${netRecent >= 0 ? "+" : ""}$${netRecent.toFixed(2)}`,
+          source: "Sum of paper-trade pnl over the trailing 30 days.",
         },
         {
           pass: cycleDone,
           label: "At least one full learning cycle completed",
           detail: cycleDone ? "propose → backtest → promote → paper" : "no promoted descendant strategy yet",
+          source: "Any strategy descended from another that ended up approved or archived.",
         },
         {
           pass: paramsWired,
           label: "Strategy params wired into live engine",
           detail: paramsWired ? "engine reads strategy params" : "engine using hardcoded defaults",
+          source: "system_state.params_wired_live",
         },
         {
           pass: brokerLive,
           label: "Broker connected (real, not paper)",
           detail: brokerLive ? "live broker linked" : "paper mode — no real broker",
+          source: "broker_credentials + system_state.broker_connection",
         },
       ];
 
@@ -137,9 +145,9 @@ export function ScalingReadinessPanel() {
       <div className="panel">
         <CollapsibleTrigger asChild>
           <button className="w-full px-4 py-3 border-b border-border flex items-center justify-between hover:bg-accent/30 transition-colors">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 text-left">
               <span className="text-[11px] uppercase tracking-wider text-foreground font-semibold">
-                🔒 Scaling readiness
+                🔒 Account-wide scaling readiness
               </span>
               <StatusBadge tone={allGreen ? "safe" : "neutral"} size="sm">
                 {passing}/{total}
@@ -153,28 +161,38 @@ export function ScalingReadinessPanel() {
         <CollapsibleContent>
           <div className="px-4 py-3 space-y-3">
             <p className="text-xs text-muted-foreground">
-              All of these must be green before raising doctrine caps beyond $1/trade.
+              Measured across <span className="text-foreground">all</span> your paper trades and strategies — not tied to any one test.
+              All green before raising real-money caps beyond $1/trade.
             </p>
             {loading ? (
               <p className="text-xs text-muted-foreground italic">Loading…</p>
             ) : (
-              <ul className="space-y-2">
-                {items.map((item, idx) => (
-                  <li key={idx} className="flex items-start gap-3 text-xs">
-                    {item.pass ? (
-                      <CheckCircle2 className="h-4 w-4 text-status-safe shrink-0 mt-0.5" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    )}
-                    <div className="flex-1">
-                      <div className={cn("font-medium", item.pass ? "text-foreground" : "text-muted-foreground")}>
-                        {item.label}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground tabular">{item.detail}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <TooltipProvider delayDuration={300}>
+                <ul className="space-y-2">
+                  {items.map((item, idx) => (
+                    <li key={idx} className="flex items-start gap-3 text-xs">
+                      {item.pass ? (
+                        <CheckCircle2 className="h-4 w-4 text-status-safe shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      )}
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex-1 cursor-help">
+                            <div className={cn("font-medium", item.pass ? "text-foreground" : "text-muted-foreground")}>
+                              {item.label}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground tabular">{item.detail}</div>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[260px] text-xs">
+                          {item.source}
+                        </TooltipContent>
+                      </Tooltip>
+                    </li>
+                  ))}
+                </ul>
+              </TooltipProvider>
             )}
             <div className="text-[11px] text-muted-foreground border-t border-border pt-3">
               When all green: edit <code className="font-mono text-foreground">doctrine.ts</code> to raise{" "}

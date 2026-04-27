@@ -110,30 +110,25 @@ export function useStrategies() {
   };
 
   // ─── Pipeline derivations ──────────────────────────────────────────────
-  // The Strategy Lab is a single-lane pipeline: one Live, one In-Testing,
-  // everything else queued. We surface those views here so the UI doesn't
-  // have to re-derive them ad hoc.
+  // The Strategy Lab is a multi-test pipeline: one Live, N candidates
+  // paper-testing in parallel. The auto-pilot evaluates every candidate
+  // independently. There's no "queue" — every candidate is actively being
+  // tested; we just sort the list by trade progress.
   const approved = useMemo(() => strategies.find((s) => s.status === "approved") ?? null, [strategies]);
   const candidates = useMemo(() => strategies.filter((s) => s.status === "candidate"), [strategies]);
   const archived = useMemo(() => strategies.filter((s) => s.status === "archived"), [strategies]);
 
-  /** The candidate currently "in testing" — most paper trades wins.
-   * Ties broken by most-recently updated (i.e. most recent activity). */
-  const inTesting = useMemo<StrategyVersion | null>(() => {
-    if (candidates.length === 0) return null;
+  /** All candidates currently paper-testing, sorted by trade progress
+   * (most trades first → closest to evaluation). */
+  const inTestingList = useMemo<StrategyVersion[]>(() => {
     return [...candidates].sort((a, b) => {
       const dt = (b.metrics.trades ?? 0) - (a.metrics.trades ?? 0);
       if (dt !== 0) return dt;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    })[0];
+    });
   }, [candidates]);
 
-  const queued = useMemo(
-    () => candidates.filter((c) => c.id !== inTesting?.id),
-    [candidates, inTesting?.id],
-  );
-
-  /** Group queued candidates by identical param signature so the UI can flag
+  /** Group candidates by identical param signature so the UI can flag
    * duplicates (the "4 identical stop_atr_mult=2 candidates" mess). */
   const duplicateIds = useMemo(() => {
     const groups = new Map<string, StrategyVersion[]>();
@@ -146,7 +141,6 @@ export function useStrategies() {
     const dupes = new Set<string>();
     for (const arr of groups.values()) {
       if (arr.length < 2) continue;
-      // Keep the one with the most trades (and newest as tie-breaker); mark the rest.
       const sorted = [...arr].sort((a, b) => {
         const dt = (b.metrics.trades ?? 0) - (a.metrics.trades ?? 0);
         if (dt !== 0) return dt;
@@ -156,33 +150,6 @@ export function useStrategies() {
     }
     return dupes;
   }, [candidates]);
-
-  /** Move a queued candidate into the testing slot. We don't need to mutate
-   * status (everything stays "candidate") — `inTesting` is derived from
-   * `metrics.trades`, so we bump the target's `updated_at` so it wins the
-   * tie-break. To reliably take the slot we also "park" the current
-   * in-testing candidate's trade count behind the new one. To keep it
-   * simple and non-destructive, we just bump the new candidate's metric
-   * trade count above the current one (only if needed). */
-  const moveTesting = async (id: string) => {
-    if (!user) return;
-    const target = candidates.find((c) => c.id === id);
-    if (!target) return;
-    const currentTrades = inTesting?.metrics.trades ?? 0;
-    const targetTrades = target.metrics.trades ?? 0;
-    // If the target already has more trades, just touching updated_at is enough.
-    const newMetrics: StrategyMetrics = { ...target.metrics };
-    if (targetTrades <= currentTrades) {
-      newMetrics.trades = currentTrades + 1;
-    }
-    const { error } = await supabase
-      .from("strategies")
-      .update({ metrics: newMetrics as any, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("user_id", user.id);
-    if (error) throw error;
-    await refetch();
-  };
 
   /** Archive every duplicate candidate, leaving the "winner" of each group. */
   const removeDuplicates = async () => {
@@ -208,11 +175,9 @@ export function useStrategies() {
     // pipeline views
     approved,
     candidates,
-    inTesting,
-    queued,
+    inTestingList,
     archived,
     duplicateIds,
-    moveTesting,
     removeDuplicates,
   };
 }

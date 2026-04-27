@@ -40,7 +40,6 @@ import {
   Pencil,
   Plus,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -62,15 +61,12 @@ export default function StrategyLab() {
     remove,
     refetch,
     approved,
-    candidates,
-    inTesting,
-    queued,
+    inTestingList,
     archived,
     duplicateIds,
-    moveTesting,
     removeDuplicates,
   } = useStrategies();
-  const { session } = useAuth();
+  const { user, session } = useAuth();
 
   const [newOpen, setNewOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -78,8 +74,7 @@ export default function StrategyLab() {
   const [evaluating, setEvaluating] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
 
-  /** Map of strategyId → experiment title that promoted it (for the
-   * "Promoted from experiment" line in the In Testing panel). */
+  /** Map of strategyId → experiment title that promoted it. */
   const [promotionMap, setPromotionMap] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +99,28 @@ export default function StrategyLab() {
       cancelled = true;
     };
   }, [strategies]);
+
+  /** Auto-pilot heartbeat — when did the cron last run for this user. */
+  const [lastEvaluatedAt, setLastEvaluatedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const load = async () => {
+      const { data } = await supabase
+        .from("system_state")
+        .select("last_evaluated_at")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setLastEvaluatedAt((data as { last_evaluated_at: string | null } | null)?.last_evaluated_at ?? null);
+    };
+    load();
+    const t = setInterval(load, 60_000); // refresh every minute so the "N min ago" stays fresh
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [user?.id]);
 
   const editingStrategy = editingId ? strategies.find((s) => s.id === editingId) ?? null : null;
 
@@ -156,12 +173,10 @@ export default function StrategyLab() {
     }
   };
 
-  /** Manual trigger for the auto-promotion check. Calls the same edge
-   * function the cron hits, but with the user's JWT so it only evaluates
-   * this user. Refetches afterwards so the UI reflects any promotion. */
+  /** Manual trigger for the auto-pilot. Now summarizes a multi-candidate response. */
   const triggerEvaluate = async () => {
     setEvaluating(true);
-    const t = toast.loading("Evaluating in-testing candidate…");
+    const t = toast.loading(`Checking ${inTestingList.length} paper test${inTestingList.length === 1 ? "" : "s"}…`);
     try {
       const { data, error } = await supabase.functions.invoke("evaluate-candidate", {
         body: { source: "manual" },
@@ -170,15 +185,32 @@ export default function StrategyLab() {
           : undefined,
       });
       if (error) throw error;
-      const result = (data?.results?.[0] ?? {}) as Record<string, unknown>;
-      if (result.promoted) toast.success(`Promoted ${result.promoted} to live.`, { id: t });
-      else if (result.retired) toast.message(`Retired ${result.retired}. ${result.failReasons ?? ""}`, { id: t });
-      else if (result.paused) toast.warning("Paused — drawdown concern. Check alerts.", { id: t });
-      else if (result.skipped === "not_enough_trades")
-        toast.message(`Need ${TRADES_TO_PROMOTE - Number(result.trades ?? 0)} more paper trades.`, { id: t });
-      else if (result.skipped === "no_candidates") toast.message("No candidate to evaluate.", { id: t });
-      else if (result.skipped === "no_approved_baseline") toast.message("No approved baseline to compare against.", { id: t });
-      else toast.success("Check complete.", { id: t });
+      const userBlock = (data?.results?.[0] ?? {}) as {
+        results?: Array<{ outcome: string; candidate: string; trades?: number; need?: number }>;
+        skipped?: string;
+      };
+      const perCand = userBlock.results ?? [];
+      if (userBlock.skipped === "no_candidates") {
+        toast.message("No paper tests running.", { id: t });
+      } else if (userBlock.skipped === "no_approved_baseline") {
+        toast.message("No approved baseline to compare against.", { id: t });
+      } else if (perCand.length === 0) {
+        toast.success("Check complete.", { id: t });
+      } else {
+        const promoted = perCand.find((r) => r.outcome === "promoted");
+        const retired = perCand.filter((r) => r.outcome === "retired").length;
+        const paused = perCand.filter((r) => r.outcome === "paused").length;
+        const collecting = perCand.filter((r) => r.outcome === "skipped").length;
+        const parts: string[] = [];
+        if (promoted) parts.push(`Promoted ${promoted.candidate} to live`);
+        if (retired > 0) parts.push(`${retired} retired`);
+        if (paused > 0) parts.push(`${paused} need review`);
+        if (collecting > 0) parts.push(`${collecting} still collecting trades`);
+        const msg = parts.length > 0 ? parts.join(" · ") : "Check complete.";
+        if (promoted) toast.success(msg, { id: t });
+        else if (paused > 0) toast.warning(msg, { id: t });
+        else toast.message(msg, { id: t });
+      }
       await refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Evaluation failed", { id: t });
@@ -187,12 +219,14 @@ export default function StrategyLab() {
     }
   };
 
+  const dupCount = inTestingList.filter((s) => duplicateIds.has(s.id)).length;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <SectionHeader
         eyebrow="Strategy Lab"
         title="Pipeline"
-        description="One strategy is trading. One is being tested. Everything else waits its turn. The bot only swaps after a clear win."
+        description="One strategy is trading. Any number can paper-test in parallel. The bot only swaps the live one after a clear win."
         actions={
           <Button size="sm" className="gap-1.5" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New strategy
@@ -221,50 +255,35 @@ export default function StrategyLab() {
             backtestingId={backtestingId}
           />
 
-          {/* ─── Scaling readiness checklist (collapsed by default) ──── */}
+          {/* ─── Account-wide scaling readiness ─────────────────────── */}
           <ScalingReadinessPanel />
 
-          {/* ─── 2. IN TESTING ──────────────────────────────────────── */}
-          <InTestingPanel
-            inTesting={inTesting}
+          {/* ─── 2. IN TESTING (multi) ──────────────────────────────── */}
+          <InTestingListPanel
+            list={inTestingList}
             approved={approved}
-            promotionTitle={inTesting ? promotionMap[inTesting.id] : undefined}
+            promotionMap={promotionMap}
+            duplicateIds={duplicateIds}
+            dupCount={dupCount}
+            evaluating={evaluating}
+            onTriggerEvaluate={triggerEvaluate}
+            lastEvaluatedAt={lastEvaluatedAt}
             onForcePromote={(id) => setStatus(id, "approved")}
             onRetire={(id) => setStatus(id, "archived")}
             onEdit={(s) => setEditingId(s.id)}
             onBacktest={runBacktest}
             backtestingId={backtestingId}
-            onTriggerEvaluate={triggerEvaluate}
-            evaluating={evaluating}
+            onRemoveDuplicates={async () => {
+              try {
+                const n = await removeDuplicates();
+                if (n > 0) toast.success(`Archived ${n} duplicate${n === 1 ? "" : "s"}.`);
+              } catch {
+                toast.error("Couldn't archive duplicates.");
+              }
+            }}
           />
 
-          {/* ─── 3. QUEUE ────────────────────────────────────────────── */}
-          {candidates.length >= 2 && (
-            <QueuePanel
-              queued={queued}
-              duplicateIds={duplicateIds}
-              promotionMap={promotionMap}
-              onMoveToTesting={async (id) => {
-                try {
-                  await moveTesting(id);
-                  toast.success("Moved to testing. Previous candidate is back in the queue.");
-                } catch {
-                  toast.error("Couldn't move candidate.");
-                }
-              }}
-              onArchive={(id) => setStatus(id, "archived")}
-              onRemoveDuplicates={async () => {
-                try {
-                  const n = await removeDuplicates();
-                  if (n > 0) toast.success(`Archived ${n} duplicate candidate${n === 1 ? "" : "s"}.`);
-                } catch {
-                  toast.error("Couldn't archive duplicates.");
-                }
-              }}
-            />
-          )}
-
-          {/* ─── 4. ARCHIVE ──────────────────────────────────────────── */}
+          {/* ─── 3. ARCHIVE ──────────────────────────────────────────── */}
           {archived.length > 0 && (
             <Collapsible open={showArchive} onOpenChange={setShowArchive}>
               <CollapsibleTrigger asChild>
@@ -426,42 +445,50 @@ function LivePanel({
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// IN TESTING
+// IN TESTING (multi)
 // ────────────────────────────────────────────────────────────────────────
 
-function InTestingPanel({
-  inTesting,
+function InTestingListPanel({
+  list,
   approved,
-  promotionTitle,
+  promotionMap,
+  duplicateIds,
+  dupCount,
+  evaluating,
+  onTriggerEvaluate,
+  lastEvaluatedAt,
   onForcePromote,
   onRetire,
   onEdit,
   onBacktest,
   backtestingId,
-  onTriggerEvaluate,
-  evaluating,
+  onRemoveDuplicates,
 }: {
-  inTesting: StrategyVersion | null;
+  list: StrategyVersion[];
   approved: StrategyVersion | null;
-  promotionTitle?: string;
+  promotionMap: Record<string, string>;
+  duplicateIds: Set<string>;
+  dupCount: number;
+  evaluating: boolean;
+  onTriggerEvaluate: () => void;
+  lastEvaluatedAt: string | null;
   onForcePromote: (id: string) => void;
   onRetire: (id: string) => void;
   onEdit: (s: StrategyVersion) => void;
   onBacktest: (s: StrategyVersion) => void;
   backtestingId: string | null;
-  onTriggerEvaluate: () => void;
-  evaluating: boolean;
+  onRemoveDuplicates: () => void;
 }) {
-  if (!inTesting) {
+  if (list.length === 0) {
     return (
       <div className="panel p-5 space-y-3">
         <div className="flex items-center gap-2">
           <StatusBadge tone="candidate" size="sm" dot pulse>In testing</StatusBadge>
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">empty slot</span>
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">no paper tests</span>
         </div>
         <EmptyState
           icon={<Beaker className="h-5 w-5" />}
-          title="Nothing in testing"
+          title="Nothing being tested"
           description="Head to Learning to promote an experiment, or clone the live strategy from the menu above."
           action={
             <Button asChild size="sm" variant="outline">
@@ -473,90 +500,220 @@ function InTestingPanel({
     );
   }
 
-  const m = inTesting.metrics;
+  return (
+    <div className="panel p-5 space-y-4 border-status-candidate/30">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <StatusBadge tone="candidate" size="sm" dot pulse>Paper testing</StatusBadge>
+            <span className="text-xs text-muted-foreground">
+              {list.length} running in parallel
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground max-w-xl">
+            Each candidate is collecting its own paper trades. The auto-pilot evaluates every one independently and only promotes the winner.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {dupCount > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 h-8 text-xs"
+              onClick={onRemoveDuplicates}
+            >
+              <Trash2 className="h-3 w-3" /> Remove {dupCount} duplicate{dupCount === 1 ? "" : "s"}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 h-8"
+            onClick={onTriggerEvaluate}
+            disabled={evaluating}
+          >
+            {evaluating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Run check now
+          </Button>
+        </div>
+      </div>
+
+      {/* Auto-pilot banner — adapts to count and shows last-check heartbeat */}
+      <AutoPilotBanner count={list.length} lastEvaluatedAt={lastEvaluatedAt} />
+
+      {/* Per-candidate rows */}
+      <div className="divide-y divide-border">
+        {list.map((s) => (
+          <CandidateRow
+            key={s.id}
+            s={s}
+            approved={approved}
+            promotionTitle={promotionMap[s.id]}
+            isDuplicate={duplicateIds.has(s.id)}
+            backtestingId={backtestingId}
+            onForcePromote={() => onForcePromote(s.id)}
+            onRetire={() => onRetire(s.id)}
+            onEdit={() => onEdit(s)}
+            onBacktest={() => onBacktest(s)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AutoPilotBanner({
+  count,
+  lastEvaluatedAt,
+}: {
+  count: number;
+  lastEvaluatedAt: string | null;
+}) {
+  if (count === 0) return null;
+  const heartbeat = formatHeartbeat(lastEvaluatedAt);
+  const next = nextCheckLabel(lastEvaluatedAt);
+  return (
+    <div className="rounded-md bg-primary/5 border border-primary/20 p-3 text-sm text-foreground/90 leading-relaxed space-y-1">
+      <div>
+        <span className="text-base mr-1.5">🤖</span>
+        <span className="font-medium">Auto-pilot active</span> — checking{" "}
+        <span className="text-foreground font-medium">all {count} paper test{count === 1 ? "" : "s"}</span>{" "}
+        every 30 min. Promotes one to live if it clearly beats the current strategy after{" "}
+        <span className="text-foreground font-medium">{TRADES_TO_PROMOTE} trades</span>, then waits a week before swapping again.
+      </div>
+      {(heartbeat || next) && (
+        <div className="text-[11px] text-muted-foreground tabular">
+          {heartbeat && <>Last check: {heartbeat}</>}
+          {heartbeat && next && <span className="mx-1.5">·</span>}
+          {next && <>Next: {next}</>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatHeartbeat(iso: string | null): string | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const min = Math.floor(ms / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+function nextCheckLabel(iso: string | null): string | null {
+  if (!iso) return null;
+  const last = new Date(iso).getTime();
+  if (!Number.isFinite(last)) return null;
+  const next = last + 30 * 60_000;
+  const remaining = next - Date.now();
+  if (remaining <= 0) return "any moment";
+  const min = Math.ceil(remaining / 60_000);
+  return `in ${min} min`;
+}
+
+function CandidateRow({
+  s,
+  approved,
+  promotionTitle,
+  isDuplicate,
+  backtestingId,
+  onForcePromote,
+  onRetire,
+  onEdit,
+  onBacktest,
+}: {
+  s: StrategyVersion;
+  approved: StrategyVersion | null;
+  promotionTitle?: string;
+  isDuplicate: boolean;
+  backtestingId: string | null;
+  onForcePromote: () => void;
+  onRetire: () => void;
+  onEdit: () => void;
+  onBacktest: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const m = s.metrics;
   const trades = m.trades ?? 0;
   const progress = Math.min(100, (trades / TRADES_TO_PROMOTE) * 100);
   const remaining = Math.max(0, TRADES_TO_PROMOTE - trades);
   const canForcePromote = trades >= TRADES_TO_PROMOTE;
 
-  // Param diff vs live — only the keys that changed
+  const friendly = displayNameFor(s);
   const paramDiffs = useMemo(() => {
     if (!approved) return [];
     const baseMap = new Map(approved.params.map((p) => [p.key, p.value]));
     const diffs: Array<{ key: string; before: unknown; after: unknown }> = [];
-    for (const p of inTesting.params) {
+    for (const p of s.params) {
       const before = baseMap.get(p.key);
       if (before !== p.value) diffs.push({ key: p.key, before: before ?? "—", after: p.value });
     }
-    // Also include keys removed from candidate
     for (const p of approved.params) {
-      if (!inTesting.params.some((x) => x.key === p.key)) {
+      if (!s.params.some((x) => x.key === p.key)) {
         diffs.push({ key: p.key, before: p.value, after: "—" });
       }
     }
     return diffs;
-  }, [approved, inTesting]);
+  }, [approved, s.params]);
 
-  const friendly = displayNameFor(inTesting);
   const baseValueForFirstDiff = paramDiffs[0]?.before;
-  const summary =
-    inTesting.friendlySummary ??
-    autoSummaryFromVersion(inTesting.version, baseValueForFirstDiff) ??
-    "Tweaked variant";
+  const summary = s.friendlySummary ?? autoSummaryFromVersion(s.version, baseValueForFirstDiff) ?? "Tweaked variant";
 
   return (
-    <div className="panel p-5 space-y-4 border-status-candidate/30">
+    <div className="py-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="space-y-1.5">
-          <StatusBadge tone="candidate" size="sm" dot pulse>Paper testing</StatusBadge>
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <h2 className="text-xl font-semibold text-foreground">{summary}</h2>
-            <span className="text-xs text-muted-foreground font-mono">{inTesting.name} {inTesting.version}</span>
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-base font-medium text-foreground truncate">{summary}</span>
+            <span className="text-[11px] text-muted-foreground font-mono">{s.name} {s.version}</span>
+            {isDuplicate && <StatusBadge tone="caution" size="sm">duplicate</StatusBadge>}
           </div>
-          <p className="text-sm text-muted-foreground">
-            Trying a tweak on <span className="text-foreground">{friendly}</span> — collecting paper trades to see if it actually does better.
+          <p className="text-xs text-muted-foreground">
+            Variant of <span className="text-foreground">{friendly}</span>
+            {promotionTitle && (
+              <>
+                {" · from "}
+                <Link to="/learning" className="text-primary hover:underline">
+                  {promotionTitle}
+                </Link>
+              </>
+            )}
           </p>
-          {promotionTitle && (
-            <p className="text-[11px] text-muted-foreground italic">
-              Promoted from experiment:{" "}
-              <Link to="/learning" className="text-primary hover:underline">
-                {promotionTitle}
-              </Link>
-            </p>
-          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 shrink-0">
           <Button
-            variant="outline"
             size="sm"
-            className="gap-1.5"
-            onClick={() => onRetire(inTesting.id)}
+            variant="ghost"
+            className="h-7 text-xs gap-1"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? "Hide details" : "Show details"}
           >
-            Retire early
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+            {expanded ? "Less" : "Details"}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Candidate actions">
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Candidate actions">
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onTriggerEvaluate} disabled={evaluating}>
-                {evaluating ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                )}
-                Run check now
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onEdit(inTesting)}>
+              <DropdownMenuItem onClick={onEdit}>
                 <Pencil className="h-4 w-4 mr-2" /> Edit
               </DropdownMenuItem>
               <DropdownMenuItem
-                disabled={backtestingId === inTesting.id}
-                onClick={() => onBacktest(inTesting)}
+                disabled={backtestingId === s.id}
+                onClick={onBacktest}
               >
-                {backtestingId === inTesting.id ? (
+                {backtestingId === s.id ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
                   <FlaskConical className="h-4 w-4 mr-2" />
@@ -568,10 +725,7 @@ function InTestingPanel({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span className="block">
-                      <DropdownMenuItem
-                        disabled={!canForcePromote}
-                        onClick={() => onForcePromote(inTesting.id)}
-                      >
+                      <DropdownMenuItem disabled={!canForcePromote} onClick={onForcePromote}>
                         <ShieldCheck className="h-4 w-4 mr-2" /> Force promote to live
                       </DropdownMenuItem>
                     </span>
@@ -583,47 +737,56 @@ function InTestingPanel({
                   )}
                 </Tooltip>
               </TooltipProvider>
+              <DropdownMenuItem onClick={onRetire} className="text-destructive focus:text-destructive">
+                <Trash2 className="h-4 w-4 mr-2" /> Retire
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
 
-      {/* Metric row with deltas vs approved — friendly subtitles */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-border">
-        <FriendlyDeltaMetric label="Avg profit per trade" sub="Expectancy" cur={m.expectancy} base={approved?.metrics.expectancy ?? null} suffix="R" untested={trades === 0} hint="How many R you make on an average trade." />
-        <FriendlyDeltaMetric label="How often it wins" sub="Win rate" cur={m.winRate * 100} base={approved ? approved.metrics.winRate * 100 : null} suffix="%" untested={trades === 0} hint="% of trades that closed in profit." />
-        <FriendlyDeltaMetric label="Worst losing streak" sub="Max drawdown" cur={m.maxDrawdown * 100} base={approved ? approved.metrics.maxDrawdown * 100 : null} suffix="%" inverse untested={trades === 0} hint="Closer to 0 is better." />
-        <FriendlyDeltaMetric label="Smoothness" sub="Sharpe" cur={m.sharpe} base={approved?.metrics.sharpe ?? null} untested={trades === 0} hint="Higher = less rollercoaster." />
-        <FriendlyMetric label="Sample size" sub="Trades" value={trades === 0 ? "—" : String(trades)} hint="More trades = more confidence in the numbers." />
-      </div>
-
-      {/* Promotion progress with friendlier label */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground">
-            Building evidence · {trades} of {TRADES_TO_PROMOTE} paper trades
-          </span>
-          <span className="text-muted-foreground tabular">
-            {canForcePromote ? "Ready for review" : `${remaining} to go`}
-          </span>
+      {/* Compact progress + headline deltas always visible */}
+      <div className="mt-2.5 grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-center">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-muted-foreground">
+              {trades} of {TRADES_TO_PROMOTE} paper trades
+            </span>
+            <span className="text-muted-foreground tabular">
+              {canForcePromote ? "Ready for review" : `${remaining} to go`}
+            </span>
+          </div>
+          <Progress value={progress} className="h-1.5" />
         </div>
-        <Progress value={progress} className="h-2" />
+        <CompactDelta
+          label="Profit/trade"
+          cur={m.expectancy}
+          base={approved?.metrics.expectancy ?? null}
+          suffix="R"
+          untested={trades === 0}
+        />
+        <CompactDelta
+          label="Win rate"
+          cur={m.winRate * 100}
+          base={approved ? approved.metrics.winRate * 100 : null}
+          suffix="%"
+          untested={trades === 0}
+        />
       </div>
 
-      {/* Param diff — collapsed by default */}
-      {paramDiffs.length > 0 && (
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors"
-            >
-              <ChevronDown className="h-3 w-3" />
-              See what changed ({paramDiffs.length})
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2">
+      {/* Expanded details */}
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-border">
+            <FriendlyDeltaMetric label="Avg profit per trade" sub="Expectancy" cur={m.expectancy} base={approved?.metrics.expectancy ?? null} suffix="R" untested={trades === 0} hint="How many R you make on an average trade." />
+            <FriendlyDeltaMetric label="How often it wins" sub="Win rate" cur={m.winRate * 100} base={approved ? approved.metrics.winRate * 100 : null} suffix="%" untested={trades === 0} hint="% of trades that closed in profit." />
+            <FriendlyDeltaMetric label="Worst losing streak" sub="Max drawdown" cur={m.maxDrawdown * 100} base={approved ? approved.metrics.maxDrawdown * 100 : null} suffix="%" inverse untested={trades === 0} hint="Closer to 0 is better." />
+            <FriendlyDeltaMetric label="Smoothness" sub="Sharpe" cur={m.sharpe} base={approved?.metrics.sharpe ?? null} untested={trades === 0} hint="Higher = less rollercoaster." />
+            <FriendlyMetric label="Sample size" sub="Trades" value={trades === 0 ? "—" : String(trades)} hint="More trades = more confidence in the numbers." />
+          </div>
+          {paramDiffs.length > 0 && (
             <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">What changed</div>
               {paramDiffs.map((d) => (
                 <div key={d.key} className="flex items-center justify-between text-sm">
                   <span className="font-mono text-xs text-muted-foreground">{d.key}</span>
@@ -635,124 +798,53 @@ function InTestingPanel({
                 </div>
               ))}
             </div>
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-
-      {/* Calmer auto-pilot banner */}
-      <div className="rounded-md bg-primary/5 border border-primary/20 p-3 text-sm text-foreground/90 leading-relaxed">
-        <span className="text-base mr-1.5">🤖</span>
-        On auto-pilot — checking every 30 min. Only swaps the live strategy after <span className="text-foreground font-medium">{TRADES_TO_PROMOTE} paper trades</span> and a clear win, then waits a week before swapping again.
-      </div>
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// QUEUE
-// ────────────────────────────────────────────────────────────────────────
-
-function QueuePanel({
-  queued,
-  duplicateIds,
-  promotionMap,
-  onMoveToTesting,
-  onArchive,
-  onRemoveDuplicates,
-}: {
-  queued: StrategyVersion[];
-  duplicateIds: Set<string>;
-  promotionMap: Record<string, string>;
-  onMoveToTesting: (id: string) => void;
-  onArchive: (id: string) => void;
-  onRemoveDuplicates: () => void;
-}) {
-  if (queued.length === 0) return null;
-  const dupCount = queued.filter((q) => duplicateIds.has(q.id)).length;
-
-  return (
-    <div className="panel p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Queue</span>
-          <span className="text-xs text-muted-foreground">— {queued.length} waiting</span>
+          )}
         </div>
-        {dupCount > 0 && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 h-7 text-xs"
-            onClick={onRemoveDuplicates}
-          >
-            <Trash2 className="h-3 w-3" /> Remove {dupCount} duplicate{dupCount === 1 ? "" : "s"}
-          </Button>
-        )}
-      </div>
-      <div className="divide-y divide-border">
-        {queued.map((s) => (
-          <QueueRow
-            key={s.id}
-            s={s}
-            isDuplicate={duplicateIds.has(s.id)}
-            promotionTitle={promotionMap[s.id]}
-            onMoveToTesting={() => onMoveToTesting(s.id)}
-            onArchive={() => onArchive(s.id)}
-          />
-        ))}
-      </div>
+      )}
     </div>
   );
 }
 
-function QueueRow({
-  s,
-  isDuplicate,
-  promotionTitle,
-  onMoveToTesting,
-  onArchive,
+function CompactDelta({
+  label,
+  cur,
+  base,
+  suffix = "",
+  untested = false,
 }: {
-  s: StrategyVersion;
-  isDuplicate: boolean;
-  promotionTitle?: string;
-  onMoveToTesting: () => void;
-  onArchive: () => void;
+  label: string;
+  cur: number;
+  base: number | null;
+  suffix?: string;
+  untested?: boolean;
 }) {
-  // Cheap "what's different" summary — hide if we don't have anything useful
-  const summary = useMemo(
-    () => s.friendlySummary ?? autoSummaryFromVersion(s.version) ?? null,
-    [s.friendlySummary, s.version],
-  );
-
-  return (
-    <div className="flex items-center justify-between gap-3 py-2.5 text-sm flex-wrap">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <span className="text-foreground font-medium truncate">{summary ?? displayNameFor(s)}</span>
-        <span className="text-muted-foreground text-xs font-mono">{s.name} {s.version}</span>
-        {isDuplicate && (
-          <StatusBadge tone="caution" size="sm">duplicate</StatusBadge>
-        )}
+  if (untested) {
+    return (
+      <div className="text-right min-w-[78px]">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-sm tabular text-muted-foreground">—</div>
       </div>
-      <div className="flex items-center gap-3">
-        {promotionTitle && (
-          <span className="text-[11px] text-muted-foreground italic truncate max-w-[180px]" title={promotionTitle}>
-            {promotionTitle}
-          </span>
-        )}
-        <span className="text-[11px] text-muted-foreground tabular">
-          {new Date(s.createdAt).toLocaleDateString()}
+    );
+  }
+  if (base == null || !Number.isFinite(base)) {
+    return (
+      <div className="text-right min-w-[78px]">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-sm tabular text-foreground">{cur.toFixed(2)}{suffix}</div>
+      </div>
+    );
+  }
+  const delta = cur - base;
+  const better = delta > 0;
+  const same = delta === 0;
+  return (
+    <div className="text-right min-w-[78px]">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-sm tabular text-foreground">
+        {cur.toFixed(2)}{suffix}{" "}
+        <span className={`text-[10px] ${same ? "text-muted-foreground" : better ? "text-status-safe" : "text-status-blocked"}`}>
+          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
         </span>
-        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onMoveToTesting}>
-          Move to testing
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-          onClick={onArchive}
-          aria-label="Archive"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
       </div>
     </div>
   );
@@ -804,65 +896,7 @@ function ArchiveRow({
 // Small primitives
 // ────────────────────────────────────────────────────────────────────────
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-sm tabular text-foreground">{value}</div>
-    </div>
-  );
-}
-
-function DeltaMetric({
-  label,
-  cur,
-  base,
-  suffix = "",
-  inverse = false,
-  untested = false,
-}: {
-  label: string;
-  cur: number;
-  base: number | null;
-  suffix?: string;
-  /** True when "lower is better" (e.g. drawdown). */
-  inverse?: boolean;
-  untested?: boolean;
-}) {
-  if (untested) {
-    return (
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-sm tabular text-muted-foreground">—</div>
-      </div>
-    );
-  }
-  if (base == null || !Number.isFinite(base)) {
-    return (
-      <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-sm tabular text-foreground">{cur.toFixed(2)}{suffix}</div>
-      </div>
-    );
-  }
-  const delta = cur - base;
-  const better = inverse ? delta < 0 : delta > 0;
-  const same = delta === 0;
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="text-sm tabular text-foreground">
-        {cur.toFixed(2)}{suffix}{" "}
-        <span className={`text-xs ${same ? "text-muted-foreground" : better ? "text-status-safe" : "text-status-blocked"}`}>
-          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** Plain-English metric: big friendly label on top, technical name + value below.
- *  Tooltip on hover gives the long explanation. */
+/** Plain-English metric tile. */
 function FriendlyMetric({
   label,
   sub,
@@ -1065,5 +1099,3 @@ function StrategyDialog({
   );
 }
 
-// Suppress unused-import lint when RotateCcw is not used (kept for potential future actions).
-void RotateCcw;

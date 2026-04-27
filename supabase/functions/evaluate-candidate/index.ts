@@ -1,20 +1,25 @@
 // ============================================================
 // evaluate-candidate — strategy pipeline auto-promotion job
 // ------------------------------------------------------------
-// Cron every 30 minutes (see migration). For each user with at
-// least one candidate strategy, finds the in-testing candidate
-// (highest paper-trade count) and either:
+// Cron every 30 minutes. For each user with at least one
+// candidate strategy, this evaluates EVERY candidate (parallel
+// paper testing) and produces one of these outcomes per candidate:
 //
-//   - auto-promotes it to approved (archiving the old approved)
-//     when it beats the baseline on expectancy, win rate, sharpe,
-//     and drawdown isn't more than 10pp worse;
-//   - retires it (archived) and lets the next queued candidate
-//     get the testing slot on the next run;
-//   - pauses for human review when drawdown got dramatically
-//     worse (>20pp) — the one case the system refuses to decide
-//     on its own.
+//   - promoted   → candidate beats live by clear margins; archive
+//                  old approved, candidate becomes approved.
+//                  Only ONE promotion per cron run per user; if
+//                  multiple pass, the largest expectancy margin wins.
+//   - retired    → reached ≥100 trades and lost on at least one
+//                  bar (expectancy / win rate / sharpe / drawdown).
+//   - paused     → drawdown blew up by >20pp; needs a human call.
+//   - skipped    → not enough trades yet, or in cooldown window.
 //
-// Always writes an alert so the operator sees what changed.
+// A user-wide 7-day cooldown applies to auto-promotions only;
+// "Run check now" from the UI bypasses the cooldown.
+//
+// Always stamps `system_state.last_evaluated_at` so the UI can
+// show "last check: N min ago".
+//
 // Auth: cron-token via vault, OR a logged-in user can hit it
 // directly with their JWT to force-evaluate ("Run check now").
 // ============================================================
@@ -33,13 +38,12 @@ const json = (b: unknown, s: number) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-// Tighter thresholds (Apr 2026 audit) — promotions should be rare and earned.
 const MIN_TRADES_TO_EVALUATE = 100;
-const MIN_EXP_MARGIN = 0.05;        // candidate must beat live by ≥0.05R expectancy
-const MIN_WIN_RATE_MARGIN = 0.03;   // …and ≥3pp on win rate
-const DRAWDOWN_TOLERANCE_PP = 0.10; // 10 percentage points
-const DRAWDOWN_CRITICAL_PP = 0.20;  // 20 pp → ask the human
-const COOLDOWN_DAYS = 7;            // lock auto-promotions for 7 days after one runs
+const MIN_EXP_MARGIN = 0.05;
+const MIN_WIN_RATE_MARGIN = 0.03;
+const DRAWDOWN_TOLERANCE_PP = 0.10;
+const DRAWDOWN_CRITICAL_PP = 0.20;
+const COOLDOWN_DAYS = 7;
 
 type StrategyRow = {
   id: string;
@@ -49,6 +53,13 @@ type StrategyRow = {
   metrics: Record<string, number> | null;
   updated_at: string;
 };
+
+type CandidateResult =
+  | { candidate: string; outcome: "promoted"; trades: number }
+  | { candidate: string; outcome: "retired"; trades: number; failReasons: string }
+  | { candidate: string; outcome: "paused"; trades: number; reason: string }
+  | { candidate: string; outcome: "skipped"; trades: number; reason: "not_enough_trades" | "cooldown"; need?: number; cooldown_days_remaining?: number }
+  | { candidate: string; outcome: "ready"; trades: number; expMargin: number };
 
 function metric(s: StrategyRow, key: string): number {
   const v = s.metrics?.[key];
@@ -62,12 +73,7 @@ async function createAlert(
   title: string,
   message: string,
 ) {
-  await admin.from("alerts").insert({
-    user_id: userId,
-    severity,
-    title,
-    message,
-  });
+  await admin.from("alerts").insert({ user_id: userId, severity, title, message });
 }
 
 async function evaluateForUser(
@@ -75,7 +81,6 @@ async function evaluateForUser(
   userId: string,
   isCron: boolean,
 ) {
-  // Pull approved + all candidates in one round-trip.
   const { data: rows } = await admin
     .from("strategies")
     .select("id,name,version,status,metrics,updated_at")
@@ -87,91 +92,149 @@ async function evaluateForUser(
   const approved = all.find((s) => s.status === "approved") ?? null;
   const candidates = all.filter((s) => s.status === "candidate");
 
+  // Always stamp the heartbeat so the UI knows the loop is alive.
+  await admin
+    .from("system_state")
+    .update({ last_evaluated_at: new Date().toISOString() })
+    .eq("user_id", userId);
+
   if (candidates.length === 0) {
-    return { userId, skipped: "no_candidates" };
+    return { userId, evaluated: 0, results: [] as CandidateResult[], skipped: "no_candidates" };
   }
   if (!approved) {
-    // Without a baseline we can't compare — skip silently.
-    return { userId, skipped: "no_approved_baseline" };
+    return { userId, evaluated: 0, results: [] as CandidateResult[], skipped: "no_approved_baseline" };
   }
 
-  // Pick the in-testing candidate: most paper trades, then most-recently updated.
-  const inTesting = [...candidates].sort((a, b) => {
-    const dt = metric(b, "trades") - metric(a, "trades");
-    if (dt !== 0) return dt;
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-  })[0];
-
-  const trades = metric(inTesting, "trades");
-  if (trades < MIN_TRADES_TO_EVALUATE) {
-    return {
-      userId,
-      candidate: inTesting.version,
-      skipped: "not_enough_trades",
-      trades,
-      need: MIN_TRADES_TO_EVALUATE,
-    };
+  // Cooldown: applies to auto (cron) only.
+  let cooldownDaysRemaining = 0;
+  if (isCron) {
+    const { data: state } = await admin
+      .from("system_state")
+      .select("last_auto_promoted_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const last = (state as { last_auto_promoted_at: string | null } | null)?.last_auto_promoted_at;
+    if (last) {
+      const ageMs = Date.now() - new Date(last).getTime();
+      const cooldownMs = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+      if (ageMs < cooldownMs) {
+        cooldownDaysRemaining = Math.ceil((cooldownMs - ageMs) / (24 * 60 * 60 * 1000));
+      }
+    }
   }
 
-  // Compare on the four criteria — now with real margins, not "≥".
   const aExp = metric(approved, "expectancy");
-  const cExp = metric(inTesting, "expectancy");
   const aWin = metric(approved, "winRate");
-  const cWin = metric(inTesting, "winRate");
-  const aDD = metric(approved, "maxDrawdown"); // negative numbers; -0.05 is better than -0.10
-  const cDD = metric(inTesting, "maxDrawdown");
+  const aDD = metric(approved, "maxDrawdown");
   const aSharpe = metric(approved, "sharpe");
-  const cSharpe = metric(inTesting, "sharpe");
 
-  const expOk = (cExp - aExp) >= MIN_EXP_MARGIN;
-  const winOk = (cWin - aWin) >= MIN_WIN_RATE_MARGIN;
-  // Drawdown is stored as a negative fraction. ddDelta > 0 means candidate is BETTER (less negative).
-  const ddDelta = cDD - aDD;
-  const ddOk = ddDelta >= -DRAWDOWN_TOLERANCE_PP;
-  const ddCritical = ddDelta < -DRAWDOWN_CRITICAL_PP;
-  const sharpeOk = cSharpe >= aSharpe;
-  const allPass = expOk && winOk && ddOk && sharpeOk;
+  const results: CandidateResult[] = [];
+  // Pass 1: classify every candidate. Don't promote yet — we want to pick
+  // the best of any that pass before mutating state.
+  const readyToPromote: Array<{ row: StrategyRow; expMargin: number; trades: number }> = [];
 
-  // Special case: drawdown blew up — pause and ask the human, even if returns improved.
-  if (ddCritical) {
+  for (const c of candidates) {
+    const trades = metric(c, "trades");
+    if (trades < MIN_TRADES_TO_EVALUATE) {
+      results.push({
+        candidate: c.version,
+        outcome: "skipped",
+        reason: "not_enough_trades",
+        trades,
+        need: MIN_TRADES_TO_EVALUATE,
+      });
+      continue;
+    }
+
+    const cExp = metric(c, "expectancy");
+    const cWin = metric(c, "winRate");
+    const cDD = metric(c, "maxDrawdown");
+    const cSharpe = metric(c, "sharpe");
+
+    const expMargin = cExp - aExp;
+    const winMargin = cWin - aWin;
+    const ddDelta = cDD - aDD;
+
+    const expOk = expMargin >= MIN_EXP_MARGIN;
+    const winOk = winMargin >= MIN_WIN_RATE_MARGIN;
+    const ddOk = ddDelta >= -DRAWDOWN_TOLERANCE_PP;
+    const ddCritical = ddDelta < -DRAWDOWN_CRITICAL_PP;
+    const sharpeOk = cSharpe >= aSharpe;
+    const allPass = expOk && winOk && ddOk && sharpeOk;
+
+    if (ddCritical) {
+      await createAlert(
+        admin,
+        userId,
+        "warning",
+        "Candidate needs your call — drawdown concern",
+        `${c.version} hit ${trades} trades and looks better on returns, but max drawdown worsened by ${Math.abs(ddDelta * 100).toFixed(1)}pp. Review before promoting.`,
+      );
+      results.push({
+        candidate: c.version,
+        outcome: "paused",
+        trades,
+        reason: "drawdown_critical",
+      });
+      continue;
+    }
+
+    if (allPass) {
+      // If we're in cooldown (cron only), defer — don't retire a winner.
+      if (isCron && cooldownDaysRemaining > 0) {
+        results.push({
+          candidate: c.version,
+          outcome: "skipped",
+          reason: "cooldown",
+          trades,
+          cooldown_days_remaining: cooldownDaysRemaining,
+        });
+        continue;
+      }
+      readyToPromote.push({ row: c, expMargin, trades });
+      results.push({
+        candidate: c.version,
+        outcome: "ready",
+        trades,
+        expMargin,
+      });
+      continue;
+    }
+
+    // Failed the bar → retire.
+    const failReasons = [
+      !expOk && `expectancy gap too small (${cExp.toFixed(2)}R vs ${aExp.toFixed(2)}R, need +${MIN_EXP_MARGIN.toFixed(2)}R)`,
+      !winOk && `win rate gap too small (${(cWin * 100).toFixed(0)}% vs ${(aWin * 100).toFixed(0)}%, need +${(MIN_WIN_RATE_MARGIN * 100).toFixed(0)}pp)`,
+      !ddOk && `drawdown worsened by ${Math.abs(ddDelta * 100).toFixed(1)}pp`,
+      !sharpeOk && `sharpe (${cSharpe.toFixed(2)} vs ${aSharpe.toFixed(2)})`,
+    ].filter(Boolean).join(", ");
+
+    await admin.from("strategies").update({ status: "archived" }).eq("id", c.id);
     await createAlert(
       admin,
       userId,
-      "warning",
-      "Candidate needs your call — drawdown concern",
-      `${inTesting.version} hit ${trades} trades and looks better on returns, but max drawdown worsened by ${Math.abs(ddDelta * 100).toFixed(1)}pp. Review before promoting.`,
+      "info",
+      `Candidate ${c.version} retired`,
+      `Didn't beat the baseline after ${trades} trades. Failed on: ${failReasons}.`,
     );
-    return { userId, candidate: inTesting.version, paused: "drawdown_critical", trades };
+    results.push({
+      candidate: c.version,
+      outcome: "retired",
+      trades,
+      failReasons,
+    });
   }
 
-  if (allPass) {
-    // Cooldown check (cron only — manual "Run check now" can still promote).
-    if (isCron) {
-      const { data: state } = await admin
-        .from("system_state")
-        .select("last_auto_promoted_at")
-        .eq("user_id", userId)
-        .maybeSingle();
-      const last = (state as { last_auto_promoted_at: string | null } | null)?.last_auto_promoted_at;
-      if (last) {
-        const ageMs = Date.now() - new Date(last).getTime();
-        const cooldownMs = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
-        if (ageMs < cooldownMs) {
-          const daysLeft = Math.ceil((cooldownMs - ageMs) / (24 * 60 * 60 * 1000));
-          return {
-            userId,
-            candidate: inTesting.version,
-            skipped: "cooldown",
-            trades,
-            cooldown_days_remaining: daysLeft,
-          };
-        }
-      }
-    }
+  // Pass 2: at most one promotion per run. Best expectancy margin wins.
+  if (readyToPromote.length > 0) {
+    readyToPromote.sort((a, b) => b.expMargin - a.expMargin);
+    const winner = readyToPromote[0];
+    const cExp = metric(winner.row, "expectancy");
+    const cWin = metric(winner.row, "winRate");
+    const cSharpe = metric(winner.row, "sharpe");
 
-    // Auto-promote: archive old approved, candidate becomes approved.
     await admin.from("strategies").update({ status: "archived" }).eq("id", approved.id);
-    await admin.from("strategies").update({ status: "approved" }).eq("id", inTesting.id);
+    await admin.from("strategies").update({ status: "approved" }).eq("id", winner.row.id);
     await admin
       .from("system_state")
       .update({ last_auto_promoted_at: new Date().toISOString() })
@@ -181,43 +244,30 @@ async function evaluateForUser(
       admin,
       userId,
       "info",
-      `🚀 Strategy auto-promoted to ${inTesting.version}`,
-      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${trades} paper trades. Auto-promotions paused for ${COOLDOWN_DAYS} days.`,
+      `🚀 Strategy auto-promoted to ${winner.row.version}`,
+      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades. Auto-promotions paused for ${COOLDOWN_DAYS} days.`,
     );
-    return { userId, promoted: inTesting.version, trades };
+
+    // Mark the winner's "ready" entry as "promoted"; remaining "ready"
+    // entries become "skipped" (they'll get re-evaluated after cooldown).
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.outcome !== "ready") continue;
+      if (r.candidate === winner.row.version) {
+        results[i] = { candidate: r.candidate, outcome: "promoted", trades: r.trades };
+      } else {
+        results[i] = {
+          candidate: r.candidate,
+          outcome: "skipped",
+          reason: "cooldown",
+          trades: r.trades,
+          cooldown_days_remaining: COOLDOWN_DAYS,
+        };
+      }
+    }
   }
 
-  // Failed criteria → retire this candidate. Next queued one will inherit the slot on the next run.
-  await admin.from("strategies").update({ status: "archived" }).eq("id", inTesting.id);
-
-  const failReasons = [
-    !expOk && `expectancy gap too small (${cExp.toFixed(2)}R vs ${aExp.toFixed(2)}R, need +${MIN_EXP_MARGIN.toFixed(2)}R)`,
-    !winOk && `win rate gap too small (${(cWin * 100).toFixed(0)}% vs ${(aWin * 100).toFixed(0)}%, need +${(MIN_WIN_RATE_MARGIN * 100).toFixed(0)}pp)`,
-    !ddOk && `drawdown worsened by ${Math.abs(ddDelta * 100).toFixed(1)}pp`,
-    !sharpeOk && `sharpe (${cSharpe.toFixed(2)} vs ${aSharpe.toFixed(2)})`,
-  ].filter(Boolean).join(", ");
-
-  // Look ahead: is there another candidate waiting?
-  const remaining = candidates.filter((c) => c.id !== inTesting.id);
-  if (remaining.length === 0) {
-    await createAlert(
-      admin,
-      userId,
-      "info",
-      `Candidate ${inTesting.version} retired · pipeline empty`,
-      `Didn't beat the baseline after ${trades} trades. Failed on: ${failReasons}. Head to Learning to promote a new experiment.`,
-    );
-  } else {
-    await createAlert(
-      admin,
-      userId,
-      "info",
-      `Candidate ${inTesting.version} retired`,
-      `Didn't beat the baseline after ${trades} trades. Failed on: ${failReasons}. Next candidate is now in testing.`,
-    );
-  }
-
-  return { userId, retired: inTesting.version, trades, failReasons };
+  return { userId, evaluated: candidates.length, results };
 }
 
 Deno.serve(async (req: Request) => {
@@ -232,7 +282,6 @@ Deno.serve(async (req: Request) => {
     const authHeader = req.headers.get("Authorization") ?? "";
     const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
 
-    // Check cron token first; fall back to authenticated-user evaluation.
     let isCron = false;
     try {
       const { data: tok } = await admin.rpc("get_evaluate_candidate_cron_token");
@@ -245,14 +294,12 @@ Deno.serve(async (req: Request) => {
     let userIds: string[] = [];
 
     if (isCron) {
-      // Only process users that actually own at least one candidate strategy.
       const { data: rows } = await admin
         .from("strategies")
         .select("user_id")
         .eq("status", "candidate");
       userIds = Array.from(new Set((rows ?? []).map((r: { user_id: string }) => r.user_id)));
     } else {
-      // Manual trigger from the Strategy Lab UI — single-user path.
       const userClient = createClient(SUPABASE_URL, ANON_KEY, {
         global: { headers: { Authorization: authHeader } },
       });
