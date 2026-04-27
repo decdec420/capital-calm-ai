@@ -62,12 +62,12 @@ export function classifyAlert(alert: Alert): ClassifiedAlert {
         "A scheduled background job (cron) hasn't reported in within its expected window.",
       why: "While the heartbeat is missed, no new signals are generated and automated lifecycle steps (approvals, exits, learning) pause. Open positions are unaffected by the heartbeat itself, but won't be re-evaluated until ticks resume.",
       fixes: [
-        "Open the Health page to confirm whether the cron job is actually failing or just intentionally idle.",
+        "Open Risk Center to check system state and confirm whether the bot is paused or the kill-switch is engaged.",
         "If the bot is paused or the kill-switch is engaged, this clears on its own once you resume — the alert will stop firing within a few minutes.",
         "If the cron really stopped, redeploy the related edge function or contact support.",
       ],
-      primaryAction: { label: "Open Health", to: "/health" },
-      secondaryAction: { label: "Open Risk Center", to: "/risk" },
+      primaryAction: { label: "Open Risk Center", to: "/risk" },
+      secondaryAction: { label: "Open Settings", to: "/settings" },
     };
   }
 
@@ -103,12 +103,12 @@ export function classifyAlert(alert: Alert): ClassifiedAlert {
       fixes: [
         "Open Risk Center to see the live value vs. limit and which guardrail tripped.",
         blocked
-          ? "Either wait for the limit to reset (e.g. daily loss resets at the day boundary) or adjust the guardrail in Doctrine if it's miscalibrated."
+          ? "Either wait for the limit to reset (e.g. daily loss resets at the day boundary) or adjust the guardrail in Strategy Lab if it's miscalibrated."
           : "Consider reducing exposure or pausing manually before it escalates to a block.",
         "Review recent trades to understand what pushed utilisation up.",
       ],
       primaryAction: { label: "Open Risk Center", to: "/risk" },
-      secondaryAction: { label: "Open Doctrine", to: "/doctrine" },
+      secondaryAction: { label: "Open Strategy Lab", to: "/strategy" },
     };
   }
 
