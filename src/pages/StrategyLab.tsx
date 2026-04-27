@@ -866,8 +866,92 @@ function DeltaMetric({
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Strategy create/edit dialog (unchanged from prior version)
+/** Plain-English metric: big friendly label on top, technical name + value below.
+ *  Tooltip on hover gives the long explanation. */
+function FriendlyMetric({
+  label,
+  sub,
+  value,
+  hint,
+}: {
+  label: string;
+  sub: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="cursor-help">
+            <div className="text-xs text-muted-foreground leading-tight">{label}</div>
+            <div className="text-base tabular text-foreground font-medium mt-0.5">{value}</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/** Same as FriendlyMetric but shows a delta vs the live baseline. */
+function FriendlyDeltaMetric({
+  label,
+  sub,
+  cur,
+  base,
+  suffix = "",
+  inverse = false,
+  untested = false,
+  hint,
+}: {
+  label: string;
+  sub: string;
+  cur: number;
+  base: number | null;
+  suffix?: string;
+  inverse?: boolean;
+  untested?: boolean;
+  hint: string;
+}) {
+  let body: React.ReactNode;
+  if (untested) {
+    body = <div className="text-base tabular text-muted-foreground font-medium mt-0.5">—</div>;
+  } else if (base == null || !Number.isFinite(base)) {
+    body = (
+      <div className="text-base tabular text-foreground font-medium mt-0.5">
+        {cur.toFixed(2)}{suffix}
+      </div>
+    );
+  } else {
+    const delta = cur - base;
+    const better = inverse ? delta < 0 : delta > 0;
+    const same = delta === 0;
+    body = (
+      <div className="text-base tabular text-foreground font-medium mt-0.5">
+        {cur.toFixed(2)}{suffix}{" "}
+        <span className={`text-xs ${same ? "text-muted-foreground" : better ? "text-status-safe" : "text-status-blocked"}`}>
+          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
+        </span>
+      </div>
+    );
+  }
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="cursor-help">
+            <div className="text-xs text-muted-foreground leading-tight">{label}</div>
+            {body}
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[220px] text-xs">{hint} Number in parentheses is the change vs the live strategy.</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 // ────────────────────────────────────────────────────────────────────────
 
 function StrategyDialog({
