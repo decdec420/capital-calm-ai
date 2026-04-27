@@ -21,7 +21,7 @@ export interface CapitalPreservationDoctrine {
   };
   hardRules: {
     maxOrderUsdHardCap: 1;
-    maxDailyTradesHardCap: 2;
+    maxDailyTradesHardCap: 5;
     maxDailyLossUsdHardCap: 1;
     minBalanceUsdKillSwitch: 8;
     symbolWhitelist: readonly ["BTC-USD", "ETH-USD", "SOL-USD"];
@@ -56,7 +56,7 @@ export const CAPITAL_PRESERVATION_DOCTRINE: CapitalPreservationDoctrine = {
   },
   hardRules: {
     maxOrderUsdHardCap: 1,
-    maxDailyTradesHardCap: 2,
+    maxDailyTradesHardCap: 5,
     maxDailyLossUsdHardCap: 1,
     minBalanceUsdKillSwitch: 8,
     symbolWhitelist: ["BTC-USD", "ETH-USD", "SOL-USD"] as const,
@@ -93,8 +93,8 @@ export function validateDoctrineInvariants(): void {
   if (CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxOrderUsdHardCap > 1) {
     throw new Error("Doctrine invariant failed: maxOrderUsdHardCap must be <= $1.");
   }
-  if (CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyTradesHardCap > 2) {
-    throw new Error("Doctrine invariant failed: maxDailyTradesHardCap must be <= 2.");
+  if (CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyTradesHardCap > 5) {
+    throw new Error("Doctrine invariant failed: maxDailyTradesHardCap must be <= 5.");
   }
   if (CAPITAL_PRESERVATION_DOCTRINE.hardRules.maxDailyLossUsdHardCap > 1) {
     throw new Error("Doctrine invariant failed: maxDailyLossUsdHardCap must be <= $1.");

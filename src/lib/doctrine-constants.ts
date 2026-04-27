@@ -15,7 +15,7 @@ export const DOCTRINE = {
   /** Hard cap per single order, in USD. */
   MAX_ORDER_USD: 1,
   /** Hard cap on number of trades opened per UTC day. */
-  MAX_TRADES_PER_DAY: 2,
+  MAX_TRADES_PER_DAY: 5,
   /** Hard cap on cumulative realized losses per UTC day, USD. */
   MAX_DAILY_LOSS_USD: 1,
   /** Below this equity, the kill switch fires and trading halts. */

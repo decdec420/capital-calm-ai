@@ -16,7 +16,7 @@ import {
 
 Deno.test("doctrine — constants match capital-preservation law", () => {
   assertEquals(MAX_ORDER_USD, 1);
-  assertEquals(MAX_TRADES_PER_DAY, 2);
+  assertEquals(MAX_TRADES_PER_DAY, 5);
   assertEquals(MAX_DAILY_LOSS_USD, 1);
   assertEquals(KILL_SWITCH_FLOOR_USD, 8);
   assertEquals(SYMBOL_WHITELIST.slice(), ["BTC-USD", "ETH-USD", "SOL-USD"]);
