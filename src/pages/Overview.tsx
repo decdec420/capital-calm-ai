@@ -621,6 +621,7 @@ export default function Overview() {
         lossToday={lossToday}
         lossVsCap={lossVsCap}
         floorDistance={floorDistance}
+        pendingSignals={pendingSignals}
       />
 
       <AlertDetailSheet
