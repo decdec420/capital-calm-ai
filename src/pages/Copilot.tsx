@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,9 +31,9 @@ import { getProfile } from "@/lib/doctrine-constants";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
 const SUGGESTED = [
-  "What's the current regime telling me?",
-  "Should I be sitting on hands right now?",
-  "Why did my last trade lose / win?",
+  "What's the board looking like right now?",
+  "Should I be sitting on hands?",
+  "What broke on my last trade?",
   "Which guardrail is closest to tripping?",
 ];
 
@@ -587,7 +587,7 @@ export default function Copilot() {
 
           <div className="panel p-4 space-y-3">
             <div>
-              <div className="text-sm font-medium text-foreground">What Max sees</div>
+              <div className="text-sm font-medium text-foreground">What Harvey sees</div>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 Auto-attached to every message you send.
               </p>
