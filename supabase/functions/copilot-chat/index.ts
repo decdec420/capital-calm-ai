@@ -11,6 +11,7 @@
 // Auth: validates Supabase JWT in-function (verify_jwt = false at gateway).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 
 const corsHeaders = {
