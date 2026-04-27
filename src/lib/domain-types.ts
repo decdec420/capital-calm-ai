@@ -111,7 +111,7 @@ export type JournalKind = "research" | "trade" | "learning" | "skip" | "daily" |
 
 export type ExperimentStatus = "queued" | "running" | "accepted" | "rejected" | "needs_review";
 
-export type ExperimentProposedBy = "user" | "copilot";
+export type ExperimentProposedBy = "user" | "copilot" | "coach";
 
 export interface ExperimentBacktestSide {
   metrics: StrategyMetrics;
