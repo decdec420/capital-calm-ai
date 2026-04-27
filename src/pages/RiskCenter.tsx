@@ -5,6 +5,8 @@ import { StatusBadge } from "@/components/trader/StatusBadge";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
+import { PerTradeStopPanel } from "@/components/trader/PerTradeStopPanel";
+import { DoctrineGuardrailGrid } from "@/components/trader/DoctrineGuardrailGrid";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
