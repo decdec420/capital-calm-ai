@@ -44,8 +44,8 @@ describe("risk gate stack", () => {
     expect(reasons.some((r) => r.code === "TRADE_COUNT_CAP")).toBe(true);
   });
 
-  it("halts when daily realized loss hits the $1 cap", () => {
-    const reasons = evaluateRiskGates(baseCtx({ dailyRealizedPnlUsd: -1 }));
+  it("halts when daily realized loss hits the $2 cap", () => {
+    const reasons = evaluateRiskGates(baseCtx({ dailyRealizedPnlUsd: -2 }));
     expect(reasons.some((r) => r.code === "DAILY_LOSS_CAP")).toBe(true);
   });
 
