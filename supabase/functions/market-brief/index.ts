@@ -1,6 +1,7 @@
 // market-brief edge function — generates a terse trader brief using Lovable AI.
 // Reads the caller's recent trades + journals via service-role, plus client-supplied
 // market context (regime + recent candles), and returns a 2-3 sentence brief.
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,6 +44,11 @@ Deno.serve(async (req) => {
 
     // Fetch recent journals via service role
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Rate limit: 10 req / 60s per user
+    const rl = await checkRateLimit(admin, userId, "market-brief", 10);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     const { data: journals } = await admin
       .from("journal_entries")
       .select("kind,title,summary,created_at")

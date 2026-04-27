@@ -1,5 +1,6 @@
 // journal-explain edge function — produces an LLM explanation for a single
 // journal entry and writes it back to the row.
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,6 +46,11 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Rate limit: 10 req / 60s per user
+    const rl = await checkRateLimit(admin, userId, "journal-explain", 10);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     const { data: entry, error: entryErr } = await admin
       .from("journal_entries")
       .select("*")

@@ -113,6 +113,30 @@ export type Database = {
         }
         Relationships: []
       }
+      api_rate_limits: {
+        Row: {
+          function_name: string
+          id: string
+          request_count: number
+          user_id: string
+          window_start: string
+        }
+        Insert: {
+          function_name: string
+          id?: string
+          request_count?: number
+          user_id: string
+          window_start?: string
+        }
+        Update: {
+          function_name?: string
+          id?: string
+          request_count?: number
+          user_id?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
       broker_credentials: {
         Row: {
           api_key_secret_name: string
@@ -1360,6 +1384,19 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      check_and_increment_rate_limit: {
+        Args: {
+          p_function_name: string
+          p_max_requests: number
+          p_user_id: string
+          p_window_seconds: number
+        }
+        Returns: {
+          allowed: boolean
+          remaining: number
+          reset_at: string
+        }[]
       }
       check_jessica_heartbeat: { Args: never; Returns: undefined }
       get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }

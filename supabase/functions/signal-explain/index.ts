@@ -2,6 +2,7 @@
 // Pulls the signal + its context_snapshot and asks the model for a longer,
 // structured rationale. Caches the result back to decision_reason so we
 // don't burn credits re-explaining.
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,6 +48,11 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Rate limit: 10 req / 60s per user
+    const rl = await checkRateLimit(admin, userId, "signal-explain", 10);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     const { data: signal, error: sigErr } = await admin
       .from("trade_signals")
       .select("*")

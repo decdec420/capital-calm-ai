@@ -12,6 +12,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { SYMBOL_WHITELIST, type Symbol } from "../_shared/doctrine.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -716,6 +717,10 @@ Deno.serve(async (req) => {
       const { data: ud, error: ue } = await userClient.auth.getUser();
       if (ue || !ud?.user) return json({ error: "Unauthorized" }, 401);
       userIds = [ud.user.id];
+
+      // Rate limit user-triggered runs only (cron path is system-driven).
+      const rl = await checkRateLimit(admin, ud.user.id, "market-intelligence", 5);
+      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
     }
 
     const results: Array<{ userId: string; symbol: string; ok: boolean; error?: string }> = [];

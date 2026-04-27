@@ -5,6 +5,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runSharedBacktest, type SharedCandle, type SharedParam } from "./backtest-shared.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -253,6 +254,10 @@ Deno.serve(async (req: Request) => {
       const { data: userData, error: userErr } = await userClient.auth.getUser(token);
       if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
       userIds = [userData.user.id];
+
+      // Rate limit user-triggered runs only.
+      const rl = await checkRateLimit(admin, userData.user.id, "run-experiment", 5);
+      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
     }
 
     if (userIds.length === 0) return json({ ok: true, processed: 0 }, 200);

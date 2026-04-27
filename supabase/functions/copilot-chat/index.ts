@@ -11,6 +11,7 @@
 // Auth: validates Supabase JWT in-function (verify_jwt = false at gateway).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 
 const corsHeaders = {
@@ -141,6 +142,12 @@ Deno.serve(async (req: Request) => {
     const { data: userData, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
     const userId = userData.user.id;
+
+    // --- Rate limit: 20 req / 60s per user ---
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const rlAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const rl = await checkRateLimit(rlAdmin, userId, "copilot-chat", 20);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
 
     // --- Input validation ---
     let payload: { conversationId?: unknown; userMessage?: unknown; context?: unknown };

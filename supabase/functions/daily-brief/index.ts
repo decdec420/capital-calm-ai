@@ -19,6 +19,7 @@
 //   - caution_flags: dedup'd active news flag labels
 
 import { SYMBOL_WHITELIST } from "../_shared/doctrine.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -319,6 +320,10 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Rate limit single-user JWT path: 5 req / 60s
+    const rl = await checkRateLimit(admin, userData.user.id, "daily-brief", 5);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
 
     const result = await buildBriefForUser(admin, userData.user.id, LOVABLE_API_KEY);
     await upsertBrief(admin, userData.user.id, result);

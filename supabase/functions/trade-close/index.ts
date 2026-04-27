@@ -23,6 +23,7 @@ import {
   type LifecycleTransition,
   type TradeLifecyclePhase,
 } from "../_shared/lifecycle.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 validateDoctrineInvariants();
 
@@ -75,6 +76,10 @@ Deno.serve(async (req) => {
     }
     const userId = userData.user.id;
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Rate limit: 20 req / 60s per user
+    const rl = await checkRateLimit(admin, userId, "trade-close", 20);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
 
     const { data: trade, error: tradeErr } = await admin
       .from("trades")
