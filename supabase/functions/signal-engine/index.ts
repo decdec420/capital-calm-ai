@@ -193,14 +193,21 @@ DECISION HIERARCHY (work through all of these before deciding):
    - unfavorable: Raise confidence threshold by 0.2. Reduce size.
    - highly_unfavorable: Do NOT trade unless the setup is exceptional (confidence > 0.85)
 
-3. MULTI-TIMEFRAME CONFIRMATION:
-   You receive both 1h and 4h candle data.
-   The 4h tells you the intermediate structure — is the 1h entry happening
-   WITH or AGAINST the 4h trend?
-   - 4h trending up + 1h pullback entry = high quality long (trend alignment)
-   - 4h trending down + 1h counter-trend long = low quality (fighting 4h trend)
-   Only take trades where the 1h entry aligns with the 4h structure.
-   This single filter eliminates the majority of false signals.
+3. MULTI-TIMEFRAME CONFIRMATION (4h structure → 1h setup → 15m timing):
+   You receive 15m, 1h, and 4h candle data. Use them like a senior trader:
+   - 4h tells you the intermediate trend — the river you're swimming with or against.
+   - 1h tells you the setup — pullback, breakout, key level reaction.
+   - 15m tells you the TIMING — is the entry happening NOW, or are you early?
+   Rules:
+     • 4h trending up + 1h pullback entry = high quality long (trend alignment)
+     • 4h trending down + 1h counter-trend long = low quality (fighting 4h trend)
+     • 15m trend AGAINST your direction = wait. The micro tape disagrees with you;
+       don't catch a falling knife on a long, don't sell into a bounce on a short.
+     • 15m trend WITH your direction = green light. Entry timing confirmed.
+     • 15m trend FLAT but 1h/4h aligned = acceptable; small extra patience helps
+       but don't skip a quality setup just because the last 45 min was quiet.
+   Only take trades where 4h structure, 1h setup, and 15m timing all cooperate.
+   This single discipline eliminates the majority of false signals.
 
 4. PULLBACK PREFERENCE:
    The BEST entries are pullbacks to the fast EMA in an established trend.
