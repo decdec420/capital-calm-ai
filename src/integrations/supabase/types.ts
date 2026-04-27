@@ -795,6 +795,7 @@ export type Database = {
           mode: string
           paper_account_balance: number
           params_wired_live: boolean
+          pause_reason: string | null
           selected_broker: string | null
           trading_paused_until: string | null
           updated_at: string
@@ -821,6 +822,7 @@ export type Database = {
           mode?: string
           paper_account_balance?: number
           params_wired_live?: boolean
+          pause_reason?: string | null
           selected_broker?: string | null
           trading_paused_until?: string | null
           updated_at?: string
@@ -847,6 +849,7 @@ export type Database = {
           mode?: string
           paper_account_balance?: number
           params_wired_live?: boolean
+          pause_reason?: string | null
           selected_broker?: string | null
           trading_paused_until?: string | null
           updated_at?: string
@@ -903,10 +906,48 @@ export type Database = {
         }
         Relationships: []
       }
+      tool_calls: {
+        Row: {
+          actor: string
+          called_at: string
+          id: string
+          reason: string | null
+          result: Json | null
+          success: boolean
+          tool_args: Json
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          actor: string
+          called_at?: string
+          id?: string
+          reason?: string | null
+          result?: Json | null
+          success?: boolean
+          tool_args?: Json
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          actor?: string
+          called_at?: string
+          id?: string
+          reason?: string | null
+          result?: Json | null
+          success?: boolean
+          tool_args?: Json
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       trade_signals: {
         Row: {
           ai_model: string
           ai_reasoning: string
+          approved_at: string | null
+          approved_by: string | null
           confidence: number
           context_snapshot: Json
           created_at: string
@@ -925,6 +966,7 @@ export type Database = {
           proposed_stop: number | null
           proposed_target: number | null
           regime: string
+          rejected_reason: string | null
           setup_score: number
           side: string
           size_pct: number
@@ -938,6 +980,8 @@ export type Database = {
         Insert: {
           ai_model?: string
           ai_reasoning?: string
+          approved_at?: string | null
+          approved_by?: string | null
           confidence?: number
           context_snapshot?: Json
           created_at?: string
@@ -956,6 +1000,7 @@ export type Database = {
           proposed_stop?: number | null
           proposed_target?: number | null
           regime?: string
+          rejected_reason?: string | null
           setup_score?: number
           side: string
           size_pct?: number
@@ -969,6 +1014,8 @@ export type Database = {
         Update: {
           ai_model?: string
           ai_reasoning?: string
+          approved_at?: string | null
+          approved_by?: string | null
           confidence?: number
           context_snapshot?: Json
           created_at?: string
@@ -987,6 +1034,7 @@ export type Database = {
           proposed_stop?: number | null
           proposed_target?: number | null
           regime?: string
+          rejected_reason?: string | null
           setup_score?: number
           side?: string
           size_pct?: number
