@@ -32,6 +32,7 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Plus, TrendingUp, X } from "lucide-react";
 import type { Trade, TradeSide } from "@/lib/domain-types";
+import { formatBaseQty, formatUsd } from "@/lib/utils";
 import { toast } from "sonner";
 
 export default function Trades() {
@@ -132,7 +133,10 @@ export default function Trades() {
 
 
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 pt-4 border-t border-border">
-            <Cell label="Size" value={`${openPosition.size.toFixed(4)}`} />
+            <Cell
+              label="Size"
+              value={`${formatBaseQty(openPosition.size)} · ${formatUsd(openPosition.size * (lastPrice || openPosition.entryPrice))}`}
+            />
             <Cell label="Entry" value={`$${openPosition.entryPrice.toFixed(2)}`} />
             <Cell label="Last" value={lastPrice ? `$${lastPrice.toFixed(2)}` : "—"} />
             <Cell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} tone="blocked" />
@@ -240,7 +244,10 @@ export default function Trades() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <Cell label="Side" value={selected.side.toUpperCase()} />
-                  <Cell label="Size" value={`${selected.size.toFixed(4)}`} />
+                  <Cell
+                    label="Size"
+                    value={`${formatBaseQty(selected.size)} · ${formatUsd(selected.size * (selected.exitPrice ?? selected.entryPrice))}`}
+                  />
                   <Cell label="Entry" value={`$${selected.entryPrice.toFixed(2)}`} />
                   <Cell label="Exit" value={selected.exitPrice !== null ? `$${selected.exitPrice.toFixed(2)}` : "—"} />
                   <Cell label="PnL" value={`${(selected.pnl ?? 0) >= 0 ? "+" : ""}$${(selected.pnl ?? 0).toFixed(2)}`} tone={(selected.pnl ?? 0) >= 0 ? "safe" : "blocked"} />
