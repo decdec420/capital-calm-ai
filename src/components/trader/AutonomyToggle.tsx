@@ -29,7 +29,12 @@ export function AutonomyToggle() {
     }
   };
 
-  const hint = LEVELS.find((l) => l.value === current)?.hint ?? "";
+  const dynamicHint = () => {
+    const qualifier = isLive ? "real order" : "paper order";
+    if (current === "manual") return `You review every signal before any ${qualifier} executes.`;
+    if (current === "assisted") return `${qualifier}s auto-execute when confidence ≥ 85%. You review the rest.`;
+    return `All signals auto-execute within doctrine limits. No approval needed.`;
+  };
 
   return (
     <div className="panel p-4 space-y-3">
@@ -74,7 +79,12 @@ export function AutonomyToggle() {
           </button>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground italic">{hint}</p>
+      <p className="text-xs text-muted-foreground italic">{dynamicHint()}</p>
+      {current === "autonomous" && (
+        <div className="text-[10px] uppercase tracking-wider font-semibold text-status-caution bg-status-caution/10 border border-status-caution/30 rounded-sm px-2 py-1 text-center">
+          ⚡ All clear signals execute automatically
+        </div>
+      )}
     </div>
   );
 }
