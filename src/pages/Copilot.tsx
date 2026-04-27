@@ -43,6 +43,11 @@ export default function Copilot() {
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
+  const [intelTimestamps, setIntelTimestamps] = useState<Record<string, string>>({});
+  const [pipelineStep, setPipelineStep] = useState<
+    null | "braintrust" | "engine" | "briefing" | "done" | "error"
+  >(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { data: system } = useSystemState();
   const { data: account } = useAccountState();
