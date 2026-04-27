@@ -291,7 +291,7 @@ Return a structured JSON object with these exact keys:
       ],
       response_format: { type: "json_object" },
       stream: false,
-      max_tokens: 1200,
+      max_tokens: 4000,
     }),
   });
 
