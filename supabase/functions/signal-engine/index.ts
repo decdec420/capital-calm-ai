@@ -503,6 +503,8 @@ async function runTickForUser(
     { data: pendingSignals },
     { data: recentSignals },
     { data: intelligenceBriefs },
+    { data: doctrineRow },
+    { data: recentClosedTrades },
     patternMemory,
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -534,6 +536,18 @@ async function runTickForUser(
       .from("market_intelligence")
       .select("*")
       .eq("user_id", userId),
+    admin
+      .from("doctrine_settings")
+      .select("loss_cooldown_minutes,consecutive_loss_limit")
+      .eq("user_id", userId)
+      .maybeSingle(),
+    admin
+      .from("trades")
+      .select("symbol,pnl,closed_at")
+      .eq("user_id", userId)
+      .eq("status", "closed")
+      .order("closed_at", { ascending: false })
+      .limit(10),
     buildPatternMemory(admin, userId),
   ]);
 
