@@ -247,6 +247,48 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_briefs: {
+        Row: {
+          ai_model: string
+          brief_date: string
+          brief_text: string
+          caution_flags: string[]
+          created_at: string
+          id: string
+          key_levels: Json
+          session_bias: string
+          updated_at: string
+          user_id: string
+          watch_symbols: string[]
+        }
+        Insert: {
+          ai_model?: string
+          brief_date: string
+          brief_text?: string
+          caution_flags?: string[]
+          created_at?: string
+          id?: string
+          key_levels?: Json
+          session_bias?: string
+          updated_at?: string
+          user_id: string
+          watch_symbols?: string[]
+        }
+        Update: {
+          ai_model?: string
+          brief_date?: string
+          brief_text?: string
+          caution_flags?: string[]
+          created_at?: string
+          id?: string
+          key_levels?: Json
+          session_bias?: string
+          updated_at?: string
+          user_id?: string
+          watch_symbols?: string[]
+        }
+        Relationships: []
+      }
       doctrine_settings: {
         Row: {
           consecutive_loss_limit: number
@@ -471,7 +513,9 @@ export type Database = {
           market_phase: string
           nearest_resistance: number | null
           nearest_support: number | null
+          news_flags: Json
           pattern_context: string
+          running_narrative: string | null
           sentiment_summary: string
           symbol: string
           trend_structure: string
@@ -496,7 +540,9 @@ export type Database = {
           market_phase?: string
           nearest_resistance?: number | null
           nearest_support?: number | null
+          news_flags?: Json
           pattern_context?: string
+          running_narrative?: string | null
           sentiment_summary?: string
           symbol: string
           trend_structure?: string
@@ -521,7 +567,9 @@ export type Database = {
           market_phase?: string
           nearest_resistance?: number | null
           nearest_support?: number | null
+          news_flags?: Json
           pattern_context?: string
+          running_narrative?: string | null
           sentiment_summary?: string
           symbol?: string
           trend_structure?: string
@@ -1067,7 +1115,18 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      trade_coach_grades: {
+        Row: {
+          avg_grade_numeric: number | null
+          count: number | null
+          grade: string | null
+          last_graded_at: string | null
+          regime: string | null
+          symbol: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       append_audit_log: {
@@ -1101,6 +1160,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
