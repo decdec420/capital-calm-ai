@@ -717,22 +717,16 @@ function QueueRow({
   onArchive: () => void;
 }) {
   // Cheap "what's different" summary — hide if we don't have anything useful
-  const changedSummary = useMemo(() => {
-    // We don't have access to approved here; just surface the version tail
-    // which usually encodes the param=value (set by promoteToStrategy).
-    const m = s.version.match(/\+([^=]+)=(.+)$/);
-    if (m) return `${m[1]} = ${m[2]}`;
-    return null;
-  }, [s.version]);
+  const summary = useMemo(
+    () => s.friendlySummary ?? autoSummaryFromVersion(s.version) ?? null,
+    [s.friendlySummary, s.version],
+  );
 
   return (
     <div className="flex items-center justify-between gap-3 py-2.5 text-sm flex-wrap">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <span className="text-foreground font-medium truncate">{s.name}</span>
-        <span className="text-muted-foreground text-xs">{s.version}</span>
-        {changedSummary && (
-          <span className="text-muted-foreground font-mono text-xs">· {changedSummary}</span>
-        )}
+        <span className="text-foreground font-medium truncate">{summary ?? displayNameFor(s)}</span>
+        <span className="text-muted-foreground text-xs font-mono">{s.name} {s.version}</span>
         {isDuplicate && (
           <StatusBadge tone="caution" size="sm">duplicate</StatusBadge>
         )}
