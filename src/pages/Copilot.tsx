@@ -12,6 +12,8 @@ import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
 import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
 import { ConversationSidebar } from "@/components/trader/ConversationSidebar";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,7 +25,7 @@ import { useExperiments } from "@/hooks/useExperiments";
 import { useSignals } from "@/hooks/useSignals";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { Send, Sparkles, Brain, Play, Check, X, Telescope } from "lucide-react";
+import { Send, Sparkles, Brain, Play, Check, X, Telescope, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
@@ -400,13 +402,42 @@ export default function Copilot() {
         </div>
 
         {/* CENTER COLUMN — chat / history / calibration tabs */}
-        <div className="panel flex flex-col" style={{ minHeight: "55vh" }}>
+        <div className="panel flex flex-col" style={{ minHeight: "65vh" }}>
           <Tabs defaultValue="chat" className="flex-1 flex flex-col">
-            <TabsList className="mx-3 mt-3 self-start">
-              <TabsTrigger value="chat">Chat</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
-              <TabsTrigger value="calibration">Calibration</TabsTrigger>
-            </TabsList>
+            <div className="mx-3 mt-3 flex items-center justify-between gap-2">
+              <TooltipProvider delayDuration={200}>
+                <TabsList>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TabsTrigger value="chat">Chat</TabsTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Conversation with the Copilot. Live system context auto-attached.</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TabsTrigger value="history">Signal Log</TabsTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>Every engine tick — proposed, skipped, executed, or halted.</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TabsTrigger value="calibration">AI Accuracy</TabsTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      When the AI says 80% confidence, is it right 80% of the time? This chart grades its honesty.
+                    </TooltipContent>
+                  </Tooltip>
+                </TabsList>
+              </TooltipProvider>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+                onClick={async () => { await createConversation(); }}
+              >
+                <Plus className="h-3 w-3" /> New chat
+              </Button>
+            </div>
 
             <TabsContent value="chat" className="flex-1 flex flex-col mt-2 data-[state=inactive]:hidden">
               {loadingMessages && messages.length === 0 ? (
@@ -438,23 +469,26 @@ export default function Copilot() {
                     </div>
                   )}
                   {messages.map((m) => (
-                    <div key={m.id} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                    <div key={m.id} className={cn("flex flex-col gap-0.5", m.role === "user" ? "items-end" : "items-start")}>
                       <div
                         className={cn(
-                          "max-w-[85%] rounded-lg px-3.5 py-2.5 text-sm",
+                          "max-w-[85%] rounded-lg px-3 py-2 text-xs",
                           m.role === "user"
                             ? "bg-primary/15 border border-primary/25 text-foreground"
                             : "bg-secondary border border-border text-foreground",
                         )}
                       >
                         {m.role === "assistant" ? (
-                          <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary">
+                          <div className="prose prose-xs prose-invert max-w-none prose-p:my-1 prose-li:my-0 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary leading-relaxed">
                             <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
                           </div>
                         ) : (
                           <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
                         )}
                       </div>
+                      <span className="text-[10px] text-muted-foreground px-1 tabular">
+                        {new Date(m.createdAt ?? Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -487,10 +521,13 @@ export default function Copilot() {
             </TabsContent>
 
             <TabsContent value="history" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-medium text-foreground">Signal history</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium text-foreground">Signal log</div>
                 <span className="text-xs text-muted-foreground">{history.length} decisions</span>
               </div>
+              <p className="text-[11px] text-muted-foreground mb-3">
+                Every engine decision. Click the <Telescope className="inline h-3 w-3 align-text-bottom" /> icon on any row for the full reasoning.
+              </p>
               {history.length === 0 ? (
                 <div className="panel p-6 text-center text-xs text-muted-foreground italic">
                   No history yet. Every tick — propose, skip, or halt — lands here.
@@ -531,6 +568,9 @@ export default function Copilot() {
             </TabsContent>
 
             <TabsContent value="calibration" className="flex-1 overflow-y-auto p-4 mt-2 data-[state=inactive]:hidden">
+              <p className="text-[11px] text-muted-foreground mb-3">
+                Dots on the diagonal = the AI knows when its hand is good. Builds after 10+ executed signals.
+              </p>
               <CalibrationChart signals={history} />
             </TabsContent>
           </Tabs>
@@ -540,20 +580,80 @@ export default function Copilot() {
         <div className="space-y-3">
           <AutonomyToggle />
 
-          <div className="panel p-4">
-            <div className="text-sm font-medium text-foreground mb-2">Context attached</div>
-            <ul className="text-xs text-muted-foreground space-y-1.5">
-              <li>• Mode: <span className="text-foreground capitalize">{system?.mode ?? "—"}</span></li>
-              <li>
-                • Engine pick:{" "}
-                <span className="text-foreground capitalize">
-                  {chosenSym ?? "none"}
-                  {chosenRow ? ` · ${String(chosenRow.regime).replace("_", " ")}` : ""}
+          <div className="panel p-4 space-y-3">
+            <div className="text-sm font-medium text-foreground">Live context</div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Mode</span>
+                <span className="text-foreground capitalize tabular">{system?.mode ?? "—"}</span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Equity</span>
+                <span className="text-foreground tabular">
+                  {account ? `$${account.equity.toFixed(2)}` : "—"}
                 </span>
-              </li>
-              <li>• Open: <span className="text-foreground">{open[0] ? `${open[0].side} ${open[0].symbol}` : "none"}</span></li>
-              <li>• Pending signal: <span className="text-foreground">{activeSignal ? `${activeSignal.side} (${(activeSignal.confidence*100).toFixed(0)}%)` : "none"}</span></li>
-            </ul>
+              </div>
+
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-muted-foreground shrink-0">Engine pick</span>
+                <span className="text-foreground text-right">
+                  {chosenSym ? (
+                    <span className="inline-flex flex-col items-end gap-1">
+                      <span className="capitalize">{chosenSym.replace("-USD", "")}</span>
+                      {chosenRow && chosenRow.regime !== "unknown" && (
+                        <RegimeBadge regime={chosenRow.regime as Exclude<typeof chosenRow.regime, "unknown">} confidence={chosenRow.confidence} />
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic">none</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Open</span>
+                <span className="text-foreground">
+                  {open[0] ? (
+                    <span className="capitalize">{open[0].side} {open[0].symbol.replace("-USD", "")}</span>
+                  ) : (
+                    <span className="text-muted-foreground italic">none</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Signal</span>
+                <span className="text-foreground">
+                  {activeSignal ? (
+                    <span className="capitalize tabular">
+                      {activeSignal.side} {(activeSignal.confidence * 100).toFixed(0)}%
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic">none</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Corr. cap</span>
+                <span className="text-foreground tabular">
+                  {open.length}/1{" "}
+                  {open.length >= 1 ? (
+                    <span className="text-status-caution">active</span>
+                  ) : (
+                    <span className="text-status-safe">clear</span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-2">
+              <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                This context is auto-attached to every message.
+              </p>
+            </div>
           </div>
         </div>
       </div>
