@@ -21,6 +21,7 @@ function parseSnapshot(raw: any): EngineSnapshot | null {
 }
 
 function mapRow(r: any): SystemState {
+  const profile = r.active_profile;
   return {
     id: r.id,
     mode: r.mode as SystemMode,
@@ -38,6 +39,10 @@ function mapRow(r: any): SystemState {
     paperAccountBalance: Number(r.paper_account_balance ?? 1000),
     paramsWiredLive: !!r.params_wired_live,
     tradingPausedUntil: r.trading_paused_until ?? null,
+    activeProfile:
+      profile === "active" || profile === "aggressive" || profile === "sentinel"
+        ? profile
+        : "sentinel",
   };
 }
 
@@ -83,6 +88,7 @@ export function useSystemState() {
     if (patch.autonomyLevel) dbPatch.autonomy_level = patch.autonomyLevel;
     if (patch.tradingPausedUntil !== undefined) dbPatch.trading_paused_until = patch.tradingPausedUntil;
     if (patch.paperAccountBalance !== undefined) dbPatch.paper_account_balance = patch.paperAccountBalance;
+    if (patch.activeProfile) dbPatch.active_profile = patch.activeProfile;
     const { error } = await supabase.from("system_state").update(dbPatch).eq("user_id", user.id);
     if (error) throw error;
     await refetch();
