@@ -535,11 +535,25 @@ Identify:
 2. Quality of potential long entries in this environment?
 3. Quality of potential short entries?
 4. What should the execution bot watch for in the next 4-6 hours?
+5. SHORT-HORIZON MOMENTUM (mandatory): read the last ~4 hours of 1h candles
+   and report a 1h read AND a 4h read (covering ~last 4 candles vs prior).
+   Allowed values: "up", "down", "flat", "mixed". Use "mixed" only when bars
+   genuinely conflict; do not use it as a hedge. Add ONE LINE explaining
+   what just happened (e.g. "1h: sharp rejection at 65k, last 3 closes red").
+
+The desk REQUIRES a fresh momentum read on every brief. Without it the
+execution engine will refuse to propose any trade for this symbol.
 `.trim();
 
   return callExpert(apiKey, PATTERN_RECOGNITION_SYSTEM, userMsg, "submit_pattern_brief", {
     type: "object",
-    required: ["pattern_context", "entry_quality_context"],
+    required: [
+      "pattern_context",
+      "entry_quality_context",
+      "recent_momentum_1h",
+      "recent_momentum_4h",
+      "recent_momentum_notes",
+    ],
     additionalProperties: false,
     properties: {
       pattern_context: {
@@ -551,6 +565,23 @@ Identify:
         type: "string",
         description:
           "2-3 sentences. What entry quality can the bot expect? Where would a HIGH quality entry be? What makes entries low quality here?",
+      },
+      recent_momentum_1h: {
+        type: "string",
+        enum: ["up", "down", "flat", "mixed"],
+        description:
+          "Short-horizon momentum read for the last ~1h (last 1-2 1h candles).",
+      },
+      recent_momentum_4h: {
+        type: "string",
+        enum: ["up", "down", "flat", "mixed"],
+        description:
+          "Short-horizon momentum read for the last ~4h (last 4 1h candles vs prior 4).",
+      },
+      recent_momentum_notes: {
+        type: "string",
+        description:
+          "ONE sentence explaining the recent momentum read — what just happened on the tape that drove these calls.",
       },
     },
   });
@@ -660,6 +691,16 @@ async function runIntelligenceForSymbol(
       environment_rating: cryptoResult?.environment_rating ?? "neutral",
       pattern_context: patternResult?.pattern_context ?? "",
       entry_quality_context: patternResult?.entry_quality_context ?? "",
+      // Short-horizon momentum read (mandatory for the engine's freshness gate).
+      // Only stamp recent_momentum_at when we actually got a fresh read this run,
+      // so a partial failure doesn't masquerade as fresh data.
+      recent_momentum_1h: patternResult?.recent_momentum_1h ?? null,
+      recent_momentum_4h: patternResult?.recent_momentum_4h ?? null,
+      recent_momentum_notes: patternResult?.recent_momentum_notes ?? null,
+      recent_momentum_at:
+        patternResult?.recent_momentum_1h && patternResult?.recent_momentum_4h
+          ? new Date().toISOString()
+          : null,
       running_narrative: updatedNarrative,
       news_flags: newsFlags,
       generated_at: new Date().toISOString(),

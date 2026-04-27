@@ -831,11 +831,12 @@ async function runTickForUser(
     };
   }
 
-  // ── Re-entry cooldown + anti-tilt lock ─────────────────────────
+  // ── Re-entry cooldown + stepped anti-tilt ─────────────────────
   // Pulls operator-tunable knobs from doctrine_settings (with safe
-  // fallbacks if the row is missing).
+  // fallbacks if the row is missing). The hard-stop default is 4
+  // (matches the new doctrine default); 2 = caution, 3 = cooldown.
   const reentryCooldownMin = Number(doctrineRow?.loss_cooldown_minutes ?? 30);
-  const consecutiveLossLimit = Number(doctrineRow?.consecutive_loss_limit ?? 2);
+  const consecutiveLossLimit = Number(doctrineRow?.consecutive_loss_limit ?? 4);
   const closedTrades = (recentClosedTrades ?? []) as Array<{
     symbol: string;
     pnl: number | null;
@@ -843,19 +844,38 @@ async function runTickForUser(
   }>;
 
   // Anti-tilt: count consecutive losses from most-recent backwards until a
-  // winner (or no more rows). If we hit the configured limit, halt all
-  // symbols this tick. The streak naturally breaks when a winner closes.
+  // winner (or no more rows). Streak naturally breaks when a winner closes.
   let consecutiveLosses = 0;
+  let lastLossClosedAt: string | null = null;
   for (const t of closedTrades) {
-    if (t.pnl != null && Number(t.pnl) < 0) consecutiveLosses += 1;
-    else break;
+    if (t.pnl != null && Number(t.pnl) < 0) {
+      consecutiveLosses += 1;
+      if (lastLossClosedAt === null) lastLossClosedAt = t.closed_at;
+    } else break;
   }
-  if (consecutiveLossLimit > 0 && consecutiveLosses >= consecutiveLossLimit) {
+
+  // Stepped levels:
+  //   ≥ limit (default 4) → CONSECUTIVE_LOSS_HARD_STOP (halt all trading)
+  //   == limit-1 (default 3) → ANTI_TILT_COOLDOWN (pause new trades 30-60m)
+  //   == limit-2 (default 2) → ANTI_TILT_CAUTION (size reduced + stronger
+  //                            confirmation required, but trades can still fire)
+  const cooldownThreshold = Math.max(1, consecutiveLossLimit - 1);
+  const cautionThreshold = Math.max(1, consecutiveLossLimit - 2);
+  const antiTiltLevel: "none" | "caution" | "cooldown" | "hard_stop" =
+    consecutiveLosses >= consecutiveLossLimit
+      ? "hard_stop"
+      : consecutiveLosses >= cooldownThreshold
+        ? "cooldown"
+        : consecutiveLosses >= cautionThreshold && cautionThreshold < cooldownThreshold
+          ? "caution"
+          : "none";
+
+  if (antiTiltLevel === "hard_stop") {
     const tiltGate = gate(
-      GATE_CODES.ANTI_TILT_LOCK,
+      GATE_CODES.CONSECUTIVE_LOSS_HARD_STOP,
       "halt",
-      `Anti-tilt lock: ${consecutiveLosses} consecutive losing trades. Stop trading and review the journal.`,
-      { consecutiveLosses, limit: consecutiveLossLimit },
+      `Hard Stop: ${consecutiveLosses} consecutive losses. Manual review required before new trades.`,
+      { consecutiveLosses, limit: consecutiveLossLimit, level: "hard_stop" },
     );
     await persistSnapshot(admin, userId, {
       gateReasons: [tiltGate],
@@ -864,12 +884,59 @@ async function runTickForUser(
     });
     return {
       userId,
-      tick: "anti_tilt",
+      tick: "anti_tilt_hard_stop",
       gateReasons: [tiltGate],
       expiredCount,
       perSymbol: [],
     };
   }
+
+  if (antiTiltLevel === "cooldown") {
+    // Pause new trades for max(loss_cooldown_minutes, 30) since the last loss.
+    const cooldownMin = Math.max(30, reentryCooldownMin);
+    const sinceLossMin = lastLossClosedAt
+      ? (Date.now() - new Date(lastLossClosedAt).getTime()) / 60_000
+      : Number.POSITIVE_INFINITY;
+    if (sinceLossMin < cooldownMin) {
+      const remainMin = Math.max(1, Math.round(cooldownMin - sinceLossMin));
+      const tiltGate = gate(
+        GATE_CODES.ANTI_TILT_COOLDOWN,
+        "halt",
+        `Cooldown Mode: ${consecutiveLosses} consecutive losses. New trades paused for ~${remainMin}m while the desk reassesses.`,
+        {
+          consecutiveLosses,
+          limit: consecutiveLossLimit,
+          level: "cooldown",
+          cooldownMinutes: cooldownMin,
+          remainingMinutes: remainMin,
+        },
+      );
+      await persistSnapshot(admin, userId, {
+        gateReasons: [tiltGate],
+        perSymbol: [],
+        chosenSymbol: null,
+      });
+      return {
+        userId,
+        tick: "anti_tilt_cooldown",
+        gateReasons: [tiltGate],
+        expiredCount,
+        perSymbol: [],
+      };
+    }
+  }
+
+  // Caution mode is NOT a halt — it's surfaced as a soft gate that
+  // sticks with the snapshot so the UI shows a Caution badge, and it
+  // tightens confidence + size at sizing time below.
+  const cautionGate = antiTiltLevel === "caution"
+    ? gate(
+        GATE_CODES.ANTI_TILT_CAUTION,
+        "warn",
+        `Caution Mode: ${consecutiveLosses} consecutive losses. Size reduced and stronger confirmation required.`,
+        { consecutiveLosses, limit: consecutiveLossLimit, level: "caution" },
+      )
+    : null;
 
   // Per-symbol re-entry cooldown: if the most recent CLOSED trade for a
   // given symbol was a loss within the cooldown window, that symbol is
@@ -1034,6 +1101,36 @@ async function runTickForUser(
     const symbolIntel = intelligenceBySymbol[symbol] ?? null;
     const newsSummary = summarizeNewsFlags(symbolIntel?.news_flags);
     const reentryHit = reentryLockedSymbols.get(symbol);
+
+    // Brain Trust momentum freshness gate. Required before any proposal:
+    // both 1h and 4h reads must be present AND the read must be ≤2h old.
+    const momentumAt = symbolIntel?.recent_momentum_at
+      ? new Date(symbolIntel.recent_momentum_at).getTime()
+      : null;
+    const momentumAgeMin = momentumAt
+      ? (Date.now() - momentumAt) / 60_000
+      : Number.POSITIVE_INFINITY;
+    const momentum1h = symbolIntel?.recent_momentum_1h ?? null;
+    const momentum4h = symbolIntel?.recent_momentum_4h ?? null;
+    const momentumStale =
+      !momentum1h || !momentum4h || !momentumAt || momentumAgeMin > 120;
+    const momentumGate = momentumStale
+      ? gate(
+          GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE,
+          "block",
+          `${symbol}: Trade blocked — Brain Trust stale or missing short-horizon momentum read.`,
+          {
+            symbol,
+            momentum1h,
+            momentum4h,
+            momentumAgeMinutes: Number.isFinite(momentumAgeMin)
+              ? Math.round(momentumAgeMin)
+              : null,
+            maxAgeMinutes: 120,
+          },
+        )
+      : null;
+
     const lockGate = newsSummary.hasCritical
       ? gate(
           GATE_CODES.NEWS_FLAG_CRITICAL,
@@ -1046,6 +1143,8 @@ async function runTickForUser(
           }.`,
           { symbol, activeNewsFlags: newsSummary.active },
         )
+      : momentumGate
+      ? momentumGate
       : reentryHit
       ? gate(
           GATE_CODES.REENTRY_COOLDOWN,
