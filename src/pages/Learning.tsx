@@ -154,6 +154,9 @@ export default function Learning() {
         </div>
       </div>
 
+      {/* KATRINA — Strategy Review */}
+      <KatrinaPanel review={katrinaReview} onRun={runKatrinaNow} running={katrinaRunning} />
+
       {/* NEEDS REVIEW */}
       {needsReview.length > 0 && (
         <div className="panel">
