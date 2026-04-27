@@ -572,13 +572,24 @@ async function runIntelligenceForSymbol(
   symbol: Symbol,
   apiKey: string,
 ): Promise<void> {
-  // Fetch candles + free external data in parallel.
-  const [c1hRes, c4hRes, c1dRes, fundingRes, fgRes] = await Promise.allSettled([
+  // Load previous Brain Trust output for narrative continuity.
+  const { data: prevRow } = await admin
+    .from("market_intelligence")
+    .select("running_narrative")
+    .eq("user_id", userId)
+    .eq("symbol", symbol)
+    .maybeSingle();
+  const previousNarrative =
+    (prevRow as { running_narrative?: string | null } | null)?.running_narrative ?? null;
+
+  // Fetch candles + free external data + news in parallel.
+  const [c1hRes, c4hRes, c1dRes, fundingRes, fgRes, newsRes] = await Promise.allSettled([
     fetchCoinbaseCandles(symbol, 3600),
     fetchCoinbaseCandles(symbol, 14400),
     fetchCoinbaseCandles(symbol, 86400),
     fetchFundingRate(symbol),
     fetchFearGreed(),
+    fetchCryptoNews(symbol),
   ]);
 
   const candles1h = c1hRes.status === "fulfilled" ? c1hRes.value : [];
@@ -586,6 +597,7 @@ async function runIntelligenceForSymbol(
   const candles1d = c1dRes.status === "fulfilled" ? c1dRes.value : [];
   const funding = fundingRes.status === "fulfilled" ? fundingRes.value : null;
   const fg = fgRes.status === "fulfilled" ? fgRes.value : null;
+  const news = newsRes.status === "fulfilled" ? newsRes.value : [];
 
   if (candles4h.length === 0 || candles1d.length === 0) {
     console.error(`No candles for ${symbol}; skipping AI experts.`);
@@ -594,8 +606,8 @@ async function runIntelligenceForSymbol(
 
   // Macro + Crypto experts run in parallel; Pattern needs S/R from Macro.
   const [macroResult, cryptoResult] = await Promise.all([
-    runMacroStrategist(apiKey, symbol, candles4h, candles1d),
-    runCryptoIntelAnalyst(apiKey, symbol, funding, fg),
+    runMacroStrategist(apiKey, symbol, candles4h, candles1d, previousNarrative),
+    runCryptoIntelAnalyst(apiKey, symbol, funding, fg, news, previousNarrative),
   ]);
 
   const patternResult = await runPatternSpecialist(
@@ -604,12 +616,22 @@ async function runIntelligenceForSymbol(
     candles1h,
     (macroResult?.nearest_support as number | undefined) ?? null,
     (macroResult?.nearest_resistance as number | undefined) ?? null,
+    previousNarrative,
   );
 
   if (!macroResult && !cryptoResult && !patternResult) {
     console.error(`All experts failed for ${symbol}`);
     return;
   }
+
+  const updatedNarrative =
+    (macroResult?.updated_narrative as string | undefined)?.trim() ||
+    previousNarrative ||
+    null;
+
+  const newsFlags = Array.isArray(cryptoResult?.news_flags)
+    ? cryptoResult!.news_flags
+    : [];
 
   const { error } = await admin.from("market_intelligence").upsert(
     {
@@ -631,6 +653,8 @@ async function runIntelligenceForSymbol(
       environment_rating: cryptoResult?.environment_rating ?? "neutral",
       pattern_context: patternResult?.pattern_context ?? "",
       entry_quality_context: patternResult?.entry_quality_context ?? "",
+      running_narrative: updatedNarrative,
+      news_flags: newsFlags,
       generated_at: new Date().toISOString(),
       candle_count_1h: candles1h.length,
       candle_count_4h: candles4h.length,
