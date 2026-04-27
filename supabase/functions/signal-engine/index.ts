@@ -1612,6 +1612,7 @@ Deno.serve(async (req) => {
             u.user_id,
             candlesBySymbol,
             candlesBySymbol4h,
+            candlesBySymbol15m,
             LOVABLE_API_KEY,
           );
           results.push(r);
@@ -1660,6 +1661,7 @@ Deno.serve(async (req) => {
       userData.user.id,
       candlesBySymbol,
       candlesBySymbol4h,
+      candlesBySymbol15m,
       LOVABLE_API_KEY,
     );
     const status = result.tick === "ai_error" ? 500 : 200;
