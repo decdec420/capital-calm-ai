@@ -12,7 +12,9 @@ import {
   KILL_SWITCH_FLOOR_USD,
   MAX_ORDER_USD,
   RISK_PER_TRADE_PCT,
+  getProfile,
   isWhitelistedSymbol,
+  type TradingProfile,
 } from "./doctrine.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
@@ -24,13 +26,13 @@ import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
  *     notional = (equity × riskPct) / (|entry − stop| / entry)
  *
  * The output still flows through clampSize() so doctrine caps
- * (MAX_ORDER_USD, kill-switch floor, min order) are always applied.
+ * (per-order cap, kill-switch floor, min order) are always applied.
  *
  * @param equityUsd      Current account equity (USD)
  * @param entry          Proposed entry price
  * @param stop           Proposed stop-loss price
  * @param riskPct        Fraction of equity to risk (e.g. 0.01 = 1%)
- *                       Defaults to doctrine RISK_PER_TRADE_PCT.
+ *                       Defaults to Sentinel RISK_PER_TRADE_PCT.
  * @returns              USD notional to send into clampSize(); 0 if inputs are invalid
  */
 export function notionalFromRiskPct(
@@ -67,6 +69,8 @@ export interface ClampSizeInput {
    * un-tradable residuals.
    */
   minOrderUsd?: number;
+  /** Active trading profile id or object. Sentinel default. */
+  profile?: string | TradingProfile;
 }
 
 export interface ClampSizeResult {
