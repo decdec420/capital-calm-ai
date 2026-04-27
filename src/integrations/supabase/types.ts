@@ -593,6 +593,10 @@ export type Database = {
           nearest_support: number | null
           news_flags: Json
           pattern_context: string
+          recent_momentum_1h: string | null
+          recent_momentum_4h: string | null
+          recent_momentum_at: string | null
+          recent_momentum_notes: string | null
           running_narrative: string | null
           sentiment_summary: string
           symbol: string
@@ -620,6 +624,10 @@ export type Database = {
           nearest_support?: number | null
           news_flags?: Json
           pattern_context?: string
+          recent_momentum_1h?: string | null
+          recent_momentum_4h?: string | null
+          recent_momentum_at?: string | null
+          recent_momentum_notes?: string | null
           running_narrative?: string | null
           sentiment_summary?: string
           symbol: string
@@ -647,6 +655,10 @@ export type Database = {
           nearest_support?: number | null
           news_flags?: Json
           pattern_context?: string
+          recent_momentum_1h?: string | null
+          recent_momentum_4h?: string | null
+          recent_momentum_at?: string | null
+          recent_momentum_notes?: string | null
           running_narrative?: string | null
           sentiment_summary?: string
           symbol?: string
@@ -1128,6 +1140,7 @@ export type Database = {
           decided_at: string | null
           decided_by: string | null
           decision_reason: string | null
+          direction_basis: string | null
           executed_trade_id: string | null
           expires_at: string
           horizon: string
@@ -1162,6 +1175,7 @@ export type Database = {
           decided_at?: string | null
           decided_by?: string | null
           decision_reason?: string | null
+          direction_basis?: string | null
           executed_trade_id?: string | null
           expires_at?: string
           horizon?: string
@@ -1196,6 +1210,7 @@ export type Database = {
           decided_at?: string | null
           decided_by?: string | null
           decision_reason?: string | null
+          direction_basis?: string | null
           executed_trade_id?: string | null
           expires_at?: string
           horizon?: string
@@ -1226,6 +1241,7 @@ export type Database = {
           closed_at: string | null
           created_at: string
           current_price: number | null
+          direction_basis: string | null
           entry_price: number
           exit_price: number | null
           horizon: string
@@ -1264,6 +1280,7 @@ export type Database = {
           closed_at?: string | null
           created_at?: string
           current_price?: number | null
+          direction_basis?: string | null
           entry_price: number
           exit_price?: number | null
           horizon?: string
@@ -1302,6 +1319,7 @@ export type Database = {
           closed_at?: string | null
           created_at?: string
           current_price?: number | null
+          direction_basis?: string | null
           entry_price?: number
           exit_price?: number | null
           horizon?: string
