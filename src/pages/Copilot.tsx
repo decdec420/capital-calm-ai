@@ -187,6 +187,94 @@ export default function Copilot() {
     }
   };
 
+  const runFullPipeline = async () => {
+    if (pipelineStep !== null && pipelineStep !== "done" && pipelineStep !== "error") return;
+    setPipelineStep("braintrust");
+    setPipelineError(null);
+
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        toast.error("Sign in first.");
+        setPipelineStep("error");
+        setPipelineError("auth failed");
+        return;
+      }
+
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      };
+
+      // Step 1: Brain Trust
+      const brainRes = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-intelligence`,
+        { method: "POST", headers, body: JSON.stringify({}) },
+      );
+      if (!brainRes.ok) {
+        const e = await brainRes.json().catch(() => ({}));
+        setPipelineStep("error");
+        setPipelineError(e.error ?? "Brain Trust failed");
+        toast.error("Brain Trust failed — check function logs.");
+        return;
+      }
+      const { data: freshIntel } = await supabase
+        .from("market_intelligence")
+        .select("symbol, generated_at");
+      if (freshIntel) {
+        const map: Record<string, string> = {};
+        for (const row of freshIntel) {
+          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+        }
+        setIntelTimestamps(map);
+      }
+
+      // Step 2: Signal Engine (Donna)
+      setPipelineStep("engine");
+      const engineRes = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-engine`,
+        { method: "POST", headers, body: JSON.stringify({}) },
+      );
+      let engineJson: Record<string, unknown> = {};
+      if (engineRes.ok) {
+        engineJson = await engineRes.json().catch(() => ({}));
+      } else {
+        const e = await engineRes.json().catch(() => ({}));
+        setPipelineStep("error");
+        setPipelineError((e as { error?: string }).error ?? "Engine failed");
+        toast.error("Donna failed — check function logs.");
+        return;
+      }
+
+      // Step 3: Harvey briefing
+      setPipelineStep("briefing");
+      const tick = (engineJson.tick as string) ?? "unknown";
+      const reasons = Array.isArray(engineJson.gateReasons)
+        ? (engineJson.gateReasons as Array<{ message?: string }>)
+        : [];
+      const firstReason = reasons[0]?.message ?? null;
+      const pipelinePrompt = [
+        `[Pipeline run complete — Brain Trust refreshed, Donna ticked]`,
+        `Engine result: ${tick}${firstReason ? ` — ${firstReason}` : ""}.`,
+        `Give me your two-sentence Harvey briefing on what this means for the next window.`,
+      ].join(" ");
+
+      if (activeId) {
+        await send(pipelinePrompt);
+      }
+
+      setPipelineStep("done");
+      setTimeout(() => setPipelineStep(null), 8000);
+    } catch (err) {
+      setPipelineStep("error");
+      setPipelineError("unexpected error");
+      toast.error("Pipeline error — see console.");
+      console.error("[runFullPipeline]", err);
+    }
+  };
+
   const decide = async (action: "approve" | "reject") => {
     if (!activeSignal || busy) return;
     setBusy(action);
