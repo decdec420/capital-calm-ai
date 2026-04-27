@@ -451,6 +451,84 @@ export type Database = {
         }
         Relationships: []
       }
+      market_intelligence: {
+        Row: {
+          candle_count_1d: number | null
+          candle_count_1h: number | null
+          candle_count_4h: number | null
+          entry_quality_context: string
+          environment_rating: string
+          fear_greed_label: string | null
+          fear_greed_score: number | null
+          funding_rate_pct: number | null
+          funding_rate_signal: string
+          generated_at: string
+          id: string
+          key_level_notes: string | null
+          macro_bias: string
+          macro_confidence: number
+          macro_summary: string
+          market_phase: string
+          nearest_resistance: number | null
+          nearest_support: number | null
+          pattern_context: string
+          sentiment_summary: string
+          symbol: string
+          trend_structure: string
+          user_id: string
+        }
+        Insert: {
+          candle_count_1d?: number | null
+          candle_count_1h?: number | null
+          candle_count_4h?: number | null
+          entry_quality_context?: string
+          environment_rating?: string
+          fear_greed_label?: string | null
+          fear_greed_score?: number | null
+          funding_rate_pct?: number | null
+          funding_rate_signal?: string
+          generated_at?: string
+          id?: string
+          key_level_notes?: string | null
+          macro_bias?: string
+          macro_confidence?: number
+          macro_summary?: string
+          market_phase?: string
+          nearest_resistance?: number | null
+          nearest_support?: number | null
+          pattern_context?: string
+          sentiment_summary?: string
+          symbol: string
+          trend_structure?: string
+          user_id: string
+        }
+        Update: {
+          candle_count_1d?: number | null
+          candle_count_1h?: number | null
+          candle_count_4h?: number | null
+          entry_quality_context?: string
+          environment_rating?: string
+          fear_greed_label?: string | null
+          fear_greed_score?: number | null
+          funding_rate_pct?: number | null
+          funding_rate_signal?: string
+          generated_at?: string
+          id?: string
+          key_level_notes?: string | null
+          macro_bias?: string
+          macro_confidence?: number
+          macro_summary?: string
+          market_phase?: string
+          nearest_resistance?: number | null
+          nearest_support?: number | null
+          pattern_context?: string
+          sentiment_summary?: string
+          symbol?: string
+          trend_structure?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       notification_preferences: {
         Row: {
           chat_id: number | null
