@@ -1017,6 +1017,13 @@ async function runTickForUser(
           "No intelligence brief available — Brain Trust hasn't run yet. Be conservative.",
       },
     timeframes: {
+      "15m": {
+        lastPrice: candles15m[candles15m.length - 1]?.c ?? 0,
+        trend: momentum15m.trend,
+        lastBarPct: momentum15m.lastBarPct,
+        last3BarsPct: momentum15m.last3BarsPct,
+        candleCount: candles15m.length,
+      },
       "1h": {
         lastPrice: candles1h[candles1h.length - 1]?.c ?? 0,
         trend: trend1h,
