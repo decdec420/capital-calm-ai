@@ -1223,6 +1223,9 @@ async function runTickForUser(
           ? `${Math.round((Date.now() - new Date(intel.generated_at).getTime()) / 60000)}min ago`
           : "not available",
         isStale: intel._stale ?? false,
+        // Active news/event flags (critical ones already hard-gated upstream;
+        // this surfaces the warnings/info ones to the AI so it can be cautious).
+        activeNewsFlags: summarizeNewsFlags(intel.news_flags).active,
       }
       : {
         error:
