@@ -209,17 +209,104 @@ Deno.serve(async (req: Request) => {
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
+    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+    // Build the base messages array.
+    type ToolMessage =
+      | { role: "system" | "user" | "tool"; content: string; tool_call_id?: string }
+      | { role: "assistant"; content: string; tool_calls?: unknown[] };
+
+    const baseMessages: ToolMessage[] = [
+      { role: "system", content: buildSystemPrompt(safeContext) },
+      ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      { role: "user", content: userMessage },
+    ];
+
+    // First pass — non-streaming, detect tool calls.
+    let finalMessages: ToolMessage[] = baseMessages;
+    try {
+      const firstPassRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: baseMessages,
+          tools: DESK_TOOLS,
+          tool_choice: "auto",
+          stream: false,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (firstPassRes.ok) {
+        const firstJson = await firstPassRes.json().catch(() => null);
+        const firstChoice = firstJson?.choices?.[0];
+        const toolCalls = firstChoice?.message?.tool_calls ?? [];
+
+        if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+          const toolResults: ToolMessage[] = [];
+          for (const tc of toolCalls) {
+            const toolName = tc?.function?.name ?? "";
+            let toolArgs: Record<string, unknown> = {};
+            try {
+              toolArgs = JSON.parse(tc?.function?.arguments ?? "{}");
+            } catch {
+              /* ignore — feed empty args */
+            }
+
+            const result = await executeTool(toolName, toolArgs, {
+              userId,
+              token,
+              supabaseUrl,
+              supabaseAnonKey,
+              serviceRoleKey: SERVICE_ROLE_KEY,
+              actor: "harvey_chat",
+            });
+
+            toolResults.push({
+              role: "tool",
+              tool_call_id: tc.id,
+              content: JSON.stringify(result),
+            });
+          }
+
+          finalMessages = [
+            ...baseMessages,
+            {
+              role: "assistant",
+              content: firstChoice?.message?.content ?? "",
+              tool_calls: toolCalls,
+            },
+            ...toolResults,
+          ];
+        }
+      } else if (firstPassRes.status === 429) {
+        return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
+      } else if (firstPassRes.status === 402) {
+        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
+      } else {
+        const t = await firstPassRes.text().catch(() => "");
+        console.error("first-pass gateway error", firstPassRes.status, t);
+        // Fall through to streaming with no tools.
+      }
+    } catch (e) {
+      console.error("first-pass tool detection failed", e);
+      // Fall through and stream the original prompt.
+    }
+
+    // Second pass (streaming) — use finalMessages (with or without tool results).
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: buildSystemPrompt(safeContext) },
-          ...history,
-          { role: "user", content: userMessage },
-        ],
+        messages: finalMessages,
         stream: true,
       }),
     });
