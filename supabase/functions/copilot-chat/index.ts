@@ -207,8 +207,6 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Internal server error" }, 500);
     }
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
     // Build the base messages array.
