@@ -65,7 +65,90 @@ const SYMBOLS = SYMBOL_WHITELIST;
 // Technical Analyst stays on Flash — runs on every tick (288×/day).
 const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
 // Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
-const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
+
+// ─── Coach: per-(symbol, side) historical loss penalty ─────────
+// Looks at recent closed trades for this symbol+side. If win-rate is poor
+// over a meaningful sample, returns:
+//   - a confidence multiplier (≤1) applied before persisting the signal
+//   - a one-line warning string to inject into the AI prompt
+// Returns null when there's no actionable signal (sample too small or
+// performance is fine).
+export interface CoachVerdict {
+  confidenceMultiplier: number;
+  warning: string;
+  sampleSize: number;
+  winRate: number;
+  netPnlUsd: number;
+}
+
+export function computeCoachVerdict(
+  recentTrades: ReadonlyArray<{ pnl: number | null; outcome?: string | null }>,
+): CoachVerdict | null {
+  const sample = recentTrades.filter((t) => t.pnl != null).slice(0, 10);
+  if (sample.length < 3) return null;
+  const wins = sample.filter((t) => Number(t.pnl) > 0).length;
+  const winRate = wins / sample.length;
+  const netPnlUsd = sample.reduce((s, t) => s + Number(t.pnl ?? 0), 0);
+  if (winRate >= 0.4 && netPnlUsd >= 0) return null;
+
+  let confidenceMultiplier = 1;
+  let tone = "";
+  if (winRate < 0.25) {
+    confidenceMultiplier = 0.7;
+    tone = "STRONG WARNING";
+  } else if (winRate < 0.4 || netPnlUsd < 0) {
+    confidenceMultiplier = 0.85;
+    tone = "Caution";
+  } else {
+    return null;
+  }
+
+  const warning =
+    `${tone}: last ${sample.length} trades on this symbol/side ` +
+    `won ${wins}/${sample.length} (${(winRate * 100).toFixed(0)}%), ` +
+    `net ${netPnlUsd >= 0 ? "+" : ""}$${netPnlUsd.toFixed(2)}. ` +
+    `Confidence will be penalized ×${confidenceMultiplier.toFixed(2)} unless edge is exceptional.`;
+
+  return { confidenceMultiplier, warning, sampleSize: sample.length, winRate, netPnlUsd };
+}
+
+// ─── News flags: extract active + critical from intel.news_flags ──
+// market_intelligence.news_flags is jsonb; we expect an array of
+// { label: string, severity: "critical" | "warning" | "info", active?: boolean,
+//   note?: string, until?: string }.
+// We treat missing `active` as true and missing `severity` as "info".
+export interface NewsFlagSummary {
+  active: Array<{ label: string; severity: string; note?: string; until?: string }>;
+  hasCritical: boolean;
+}
+
+export function summarizeNewsFlags(rawFlags: unknown): NewsFlagSummary {
+  if (!Array.isArray(rawFlags)) return { active: [], hasCritical: false };
+  const now = Date.now();
+  const active: NewsFlagSummary["active"] = [];
+  let hasCritical = false;
+  for (const f of rawFlags) {
+    if (!f || typeof f !== "object") continue;
+    const flag = f as {
+      label?: string;
+      severity?: string;
+      active?: boolean;
+      note?: string;
+      until?: string;
+    };
+    if (!flag.label) continue;
+    if (flag.active === false) continue;
+    if (flag.until) {
+      const untilTs = Date.parse(flag.until);
+      if (Number.isFinite(untilTs) && untilTs < now) continue;
+    }
+    const severity = (flag.severity ?? "info").toLowerCase();
+    active.push({ label: flag.label, severity, note: flag.note, until: flag.until });
+    if (severity === "critical") hasCritical = true;
+  }
+  return { active, hasCritical };
+}
+
 
 // ─── Expired-pending sweep ─────────────────────────────────────
 // Marks stale pending signals as expired and appends a lifecycle
