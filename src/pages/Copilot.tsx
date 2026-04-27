@@ -79,9 +79,44 @@ export default function Copilot() {
   const activeSignal = pending[0];
   const activeProfile = getProfile(system?.activeProfile);
 
+  const lastBrainTrustRun = useMemo(() => {
+    const times = Object.values(intelTimestamps).map((t) => new Date(t).getTime()).filter(Boolean);
+    if (times.length === 0) return null;
+    return new Date(Math.max(...times));
+  }, [intelTimestamps]);
+
+  const lastEngineRun = useMemo(() => {
+    const ts = (system?.lastEngineSnapshot as { ranAt?: string } | null)?.ranAt;
+    return ts ? new Date(ts) : null;
+  }, [system]);
+
+  const formatAge = (d: Date | null): string => {
+    if (!d) return "never";
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  };
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from("market_intelligence")
+        .select("symbol, generated_at");
+      if (data) {
+        const map: Record<string, string> = {};
+        for (const row of data) {
+          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+        }
+        setIntelTimestamps(map);
+      }
+    };
+    load();
+  }, []);
 
   // Render a single structured gate reason as a sonner toast.
   const toastForGate = (g: GateReason) => {
