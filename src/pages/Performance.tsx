@@ -249,9 +249,9 @@ export default function Performance() {
       note: `${promotedStrategies.length} approved strategy(s)`,
     },
     {
-      label: "Real broker connected",
-      ok: system?.brokerConnection === "connected",
-      note: system?.brokerConnection ?? "not configured",
+      label: "Paper trading engine running",
+      ok: system?.bot === "running" || system?.bot === "paused",
+      note: `bot: ${system?.bot ?? "unknown"} · mode: ${system?.mode ?? "paper"}`,
     },
   ];
 
