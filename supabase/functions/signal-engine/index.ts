@@ -1330,6 +1330,18 @@ async function runTickForUser(
   const side = decision.side ?? "long";
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
 
+  // ── Coach: penalize confidence if recent (symbol, side) has bled ──
+  // Looks at the last 10 closed trades for this exact pair. If win-rate
+  // is poor over a meaningful sample, we shrink the confidence score
+  // (which feeds size + auto-execute threshold) and prepend a warning
+  // so the operator sees why a high-conviction setup landed at lower
+  // confidence in the UI.
+  const sameSidedRecent = (recentClosedTrades ?? []).filter(
+    (t: { symbol: string; side?: string | null; pnl: number | null }) =>
+      t.symbol === winner.symbol && (t.side ?? null) === side,
+  );
+  const coachVerdict = computeCoachVerdict(sameSidedRecent);
+
   // Stop fallback uses the strategy's stop_atr_mult so the param actually
   // changes live trades, not just backtests. We approximate ATR as 1% of
   // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
@@ -1348,7 +1360,16 @@ async function runTickForUser(
     0.05,
     Math.min(0.25, Number(decision.size_pct ?? 0.15)),
   );
-  const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const rawConf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const conf = coachVerdict
+    ? Math.max(0, Math.min(1, rawConf * coachVerdict.confidenceMultiplier))
+    : rawConf;
+  if (coachVerdict) {
+    decision.reasoning = `[Coach] ${coachVerdict.warning} ${decision.reasoning ?? ""}`.trim();
+    console.log(
+      `coach: ${winner.symbol}/${side} conf ${rawConf.toFixed(2)} → ${conf.toFixed(2)} (${coachVerdict.warning})`,
+    );
+  }
   const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
   // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
   const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
