@@ -1,13 +1,37 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, AlertTriangle, Info, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Info, Search, Trash2 } from "lucide-react";
 import { useAlerts } from "@/hooks/useAlerts";
-import { AlertDetailSheet } from "@/components/trader/AlertDetailSheet";
-import { AlertBanner } from "@/components/trader/AlertBanner";
+import { AlertCard } from "@/components/trader/AlertCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { cn } from "@/lib/utils";
 import type { Alert, AlertSeverity } from "@/lib/domain-types";
+
+/**
+ * Group consecutive *info* alerts that share the same title into a single
+ * card. Critical and warning alerts are never grouped — each one stays
+ * individually visible and dismissable.
+ */
+type AlertGroup = { lead: Alert; members: Alert[] };
+
+function groupAlerts(alerts: Alert[]): AlertGroup[] {
+  const out: AlertGroup[] = [];
+  for (const a of alerts) {
+    const last = out[out.length - 1];
+    const canMerge =
+      last &&
+      a.severity === "info" &&
+      last.lead.severity === "info" &&
+      last.lead.title === a.title;
+    if (canMerge) {
+      last.members.push(a);
+    } else {
+      out.push({ lead: a, members: [] });
+    }
+  }
+  return out;
+}
 
 type FilterKey = "all" | AlertSeverity;
 
@@ -28,8 +52,11 @@ export default function Alerts() {
   const { alerts, loading, dismiss } = useAlerts();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState<Alert | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
+
+  const dismissMany = async (ids: string[]) => {
+    for (const id of ids) await dismiss(id).catch(() => {});
+  };
 
   const counts = useMemo(() => {
     const c: Record<AlertSeverity, number> = { info: 0, warning: 0, critical: 0 };
@@ -145,46 +172,18 @@ export default function Alerts() {
             }
           />
         ) : (
-          filtered.map((a) => (
-            <div key={a.id} className="relative group">
-              <button
-                type="button"
-                onClick={() => setActive(a)}
-                className="w-full text-left rounded-md transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                aria-label={`Open alert: ${a.title}`}
-              >
-                <AlertBanner
-                  severity={a.severity}
-                  title={a.title}
-                  message={a.message}
-                  timestamp={new Date(a.timestamp).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                />
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  dismiss(a.id);
-                }}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-secondary"
-                aria-label="Dismiss alert"
-              >
-                <X className="h-3 w-3 text-muted-foreground" />
-              </button>
-            </div>
+      groupAlerts(filtered).map((g) => (
+            <AlertCard
+              key={g.lead.id}
+              alert={g.lead}
+              groupCount={1 + g.members.length}
+              groupMembers={g.members}
+              onDismiss={(id) => dismiss(id)}
+              onDismissGroup={(ids) => dismissMany(ids)}
+            />
           ))
         )}
       </div>
-
-      <AlertDetailSheet
-        alert={active}
-        onClose={() => setActive(null)}
-        onDismiss={(id) => dismiss(id)}
-      />
     </div>
   );
 }
