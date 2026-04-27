@@ -97,14 +97,14 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
     reasons.push(gate(GATE_CODES.BOT_PAUSED, "halt", "Bot is paused."));
   }
 
-  // Kill-switch floor (hard)
-  if (ctx.equityUsd < KILL_SWITCH_FLOOR_USD) {
+  // Kill-switch floor (hard) — uses per-user resolved floor when present.
+  if (ctx.equityUsd < KILL_SWITCH_FLOOR) {
     reasons.push(
       gate(
         GATE_CODES.BALANCE_FLOOR,
         "halt",
-        `Equity $${ctx.equityUsd.toFixed(2)} below kill-switch floor $${KILL_SWITCH_FLOOR_USD}.`,
-        { equityUsd: ctx.equityUsd, floor: KILL_SWITCH_FLOOR_USD },
+        `Equity $${ctx.equityUsd.toFixed(2)} below kill-switch floor $${KILL_SWITCH_FLOOR.toFixed(2)}.`,
+        { equityUsd: ctx.equityUsd, floor: KILL_SWITCH_FLOOR },
       ),
     );
   }
