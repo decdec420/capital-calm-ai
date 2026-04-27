@@ -1,7 +1,14 @@
 import { useSystemState } from "@/hooks/useSystemState";
+import { useTrades } from "@/hooks/useTrades";
+
+// Mirrors doctrine.ts MAX_CORRELATED_POSITIONS — kept inline for a footer badge.
+const MAX_CORRELATED_POSITIONS = 1;
 
 export function StatusFooter() {
   const { data: s } = useSystemState();
+  const { open } = useTrades();
+  const openCount = open?.length ?? 0;
+  const corrFull = openCount >= MAX_CORRELATED_POSITIONS;
 
   if (!s) {
     return (
@@ -29,6 +36,13 @@ export function StatusFooter() {
       <span className="h-3 w-px bg-border" />
       <span>
         bot <span className="text-foreground/80">{s.bot}</span>
+      </span>
+      <span className="h-3 w-px bg-border" />
+      <span title={corrFull ? "Correlation cap reached — engine will block new entries" : "Open correlated positions"}>
+        corr{" "}
+        <span className={corrFull ? "text-status-blocked" : "text-status-safe"}>
+          {openCount}/{MAX_CORRELATED_POSITIONS}
+        </span>
       </span>
       <div className="flex-1" />
       <span>BTC-USD · UTC {new Date().toUTCString().slice(17, 22)}</span>

@@ -11,9 +11,44 @@
 import {
   KILL_SWITCH_FLOOR_USD,
   MAX_ORDER_USD,
+  RISK_PER_TRADE_PCT,
   isWhitelistedSymbol,
 } from "./doctrine.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
+
+/**
+ * Compute notional from a fixed % of equity at risk per trade,
+ * given the entry and stop distance. This is the textbook
+ * professional sizing formula:
+ *
+ *     notional = (equity × riskPct) / (|entry − stop| / entry)
+ *
+ * The output still flows through clampSize() so doctrine caps
+ * (MAX_ORDER_USD, kill-switch floor, min order) are always applied.
+ *
+ * @param equityUsd      Current account equity (USD)
+ * @param entry          Proposed entry price
+ * @param stop           Proposed stop-loss price
+ * @param riskPct        Fraction of equity to risk (e.g. 0.01 = 1%)
+ *                       Defaults to doctrine RISK_PER_TRADE_PCT.
+ * @returns              USD notional to send into clampSize(); 0 if inputs are invalid
+ */
+export function notionalFromRiskPct(
+  equityUsd: number,
+  entry: number,
+  stop: number,
+  riskPct: number = RISK_PER_TRADE_PCT,
+): number {
+  if (!Number.isFinite(equityUsd) || equityUsd <= 0) return 0;
+  if (!Number.isFinite(entry) || entry <= 0) return 0;
+  if (!Number.isFinite(stop) || stop <= 0) return 0;
+  const stopDistPct = Math.abs(entry - stop) / entry;
+  if (stopDistPct <= 0) return 0;
+  const dollarRisk = equityUsd * Math.max(0, riskPct);
+  // notional × stopDistPct = dollarRisk  ⇒  notional = dollarRisk / stopDistPct
+  const notional = dollarRisk / stopDistPct;
+  return Number.isFinite(notional) && notional > 0 ? notional : 0;
+}
 
 export interface ClampSizeInput {
   /** What the AI proposed, in quote currency (USD) */

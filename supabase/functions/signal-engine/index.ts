@@ -15,6 +15,7 @@ import {
   CAPITAL_PRESERVATION_DOCTRINE,
   MAX_CORRELATED_POSITIONS,
   MAX_ORDER_USD,
+  RISK_PER_TRADE_PCT,
   SYMBOL_WHITELIST,
   validateDoctrineInvariants,
 } from "../_shared/doctrine.ts";
@@ -34,7 +35,7 @@ import {
   evaluateRiskGates,
   type RiskContext,
 } from "../_shared/risk.ts";
-import { clampSize } from "../_shared/sizing.ts";
+import { clampSize, notionalFromRiskPct } from "../_shared/sizing.ts";
 import {
   appendTransition,
   transitionSignal,
@@ -192,14 +193,21 @@ DECISION HIERARCHY (work through all of these before deciding):
    - unfavorable: Raise confidence threshold by 0.2. Reduce size.
    - highly_unfavorable: Do NOT trade unless the setup is exceptional (confidence > 0.85)
 
-3. MULTI-TIMEFRAME CONFIRMATION:
-   You receive both 1h and 4h candle data.
-   The 4h tells you the intermediate structure — is the 1h entry happening
-   WITH or AGAINST the 4h trend?
-   - 4h trending up + 1h pullback entry = high quality long (trend alignment)
-   - 4h trending down + 1h counter-trend long = low quality (fighting 4h trend)
-   Only take trades where the 1h entry aligns with the 4h structure.
-   This single filter eliminates the majority of false signals.
+3. MULTI-TIMEFRAME CONFIRMATION (4h structure → 1h setup → 15m timing):
+   You receive 15m, 1h, and 4h candle data. Use them like a senior trader:
+   - 4h tells you the intermediate trend — the river you're swimming with or against.
+   - 1h tells you the setup — pullback, breakout, key level reaction.
+   - 15m tells you the TIMING — is the entry happening NOW, or are you early?
+   Rules:
+     • 4h trending up + 1h pullback entry = high quality long (trend alignment)
+     • 4h trending down + 1h counter-trend long = low quality (fighting 4h trend)
+     • 15m trend AGAINST your direction = wait. The micro tape disagrees with you;
+       don't catch a falling knife on a long, don't sell into a bounce on a short.
+     • 15m trend WITH your direction = green light. Entry timing confirmed.
+     • 15m trend FLAT but 1h/4h aligned = acceptable; small extra patience helps
+       but don't skip a quality setup just because the last 45 min was quiet.
+   Only take trades where 4h structure, 1h setup, and 15m timing all cooperate.
+   This single discipline eliminates the majority of false signals.
 
 4. PULLBACK PREFERENCE:
    The BEST entries are pullbacks to the fast EMA in an established trend.
@@ -482,6 +490,7 @@ async function runTickForUser(
   userId: string,
   candlesBySymbol: Record<Symbol, Candle[]>,
   candlesBySymbol4h: Record<Symbol, Candle[]>,
+  candlesBySymbol15m: Record<Symbol, Candle[]>,
   LOVABLE_API_KEY: string,
 ) {
   const expiredCount = await expirePendingSignals(admin, userId);
@@ -494,6 +503,8 @@ async function runTickForUser(
     { data: pendingSignals },
     { data: recentSignals },
     { data: intelligenceBriefs },
+    { data: doctrineRow },
+    { data: recentClosedTrades },
     patternMemory,
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -525,6 +536,18 @@ async function runTickForUser(
       .from("market_intelligence")
       .select("*")
       .eq("user_id", userId),
+    admin
+      .from("doctrine_settings")
+      .select("loss_cooldown_minutes,consecutive_loss_limit")
+      .eq("user_id", userId)
+      .maybeSingle(),
+    admin
+      .from("trades")
+      .select("symbol,pnl,closed_at")
+      .eq("user_id", userId)
+      .eq("status", "closed")
+      .order("closed_at", { ascending: false })
+      .limit(10),
     buildPatternMemory(admin, userId),
   ]);
 
@@ -603,6 +626,71 @@ async function runTickForUser(
       expiredCount,
       perSymbol: [],
     };
+  }
+
+  // ── Re-entry cooldown + anti-tilt lock ─────────────────────────
+  // Pulls operator-tunable knobs from doctrine_settings (with safe
+  // fallbacks if the row is missing).
+  const reentryCooldownMin = Number(doctrineRow?.loss_cooldown_minutes ?? 30);
+  const consecutiveLossLimit = Number(doctrineRow?.consecutive_loss_limit ?? 2);
+  const closedTrades = (recentClosedTrades ?? []) as Array<{
+    symbol: string;
+    pnl: number | null;
+    closed_at: string | null;
+  }>;
+
+  // Anti-tilt: count consecutive losses from most-recent backwards until a
+  // winner (or no more rows). If we hit the configured limit, halt all
+  // symbols this tick. The streak naturally breaks when a winner closes.
+  let consecutiveLosses = 0;
+  for (const t of closedTrades) {
+    if (t.pnl != null && Number(t.pnl) < 0) consecutiveLosses += 1;
+    else break;
+  }
+  if (consecutiveLossLimit > 0 && consecutiveLosses >= consecutiveLossLimit) {
+    const tiltGate = gate(
+      GATE_CODES.ANTI_TILT_LOCK,
+      "halt",
+      `Anti-tilt lock: ${consecutiveLosses} consecutive losing trades. Stop trading and review the journal.`,
+      { consecutiveLosses, limit: consecutiveLossLimit },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [tiltGate],
+      perSymbol: [],
+      chosenSymbol: null,
+    });
+    return {
+      userId,
+      tick: "anti_tilt",
+      gateReasons: [tiltGate],
+      expiredCount,
+      perSymbol: [],
+    };
+  }
+
+  // Per-symbol re-entry cooldown: if the most recent CLOSED trade for a
+  // given symbol was a loss within the cooldown window, that symbol is
+  // locked this tick. Wins clear the lock instantly. This prevents the
+  // bot from "revenge re-entering" the same coin after a stop-out.
+  const reentryLockedSymbols = new Map<string, { closedAt: string; minutesAgo: number }>();
+  if (reentryCooldownMin > 0) {
+    const seen = new Set<string>();
+    for (const t of closedTrades) {
+      if (!t.closed_at || seen.has(t.symbol)) continue;
+      seen.add(t.symbol);
+      const minutesAgo =
+        (Date.now() - new Date(t.closed_at).getTime()) / 60_000;
+      if (
+        minutesAgo <= reentryCooldownMin &&
+        t.pnl != null &&
+        Number(t.pnl) < 0
+      ) {
+        reentryLockedSymbols.set(t.symbol, {
+          closedAt: t.closed_at,
+          minutesAgo,
+        });
+      }
+    }
   }
 
   // Persisted approved strategy (if any) so signals & trades carry identity.
@@ -730,10 +818,20 @@ async function runTickForUser(
     };
     const riskGates = evaluateRiskGates(riskCtx);
 
-    // The first refusal is the "lock" reason we show per-row.
-    const lockGate = riskGates.find(
-      (r) => r.severity === "halt" || r.severity === "block",
-    );
+    // The first refusal is the "lock" reason we show per-row. Re-entry
+    // cooldown takes precedence so the operator sees WHY this symbol is
+    // skipped rather than a generic "no setup" message.
+    const reentryHit = reentryLockedSymbols.get(symbol);
+    const lockGate = reentryHit
+      ? gate(
+          GATE_CODES.REENTRY_COOLDOWN,
+          "block",
+          `${symbol}: re-entry cooldown — last loss ${Math.round(reentryHit.minutesAgo)}m ago, ${reentryCooldownMin}m window.`,
+          { symbol, ...reentryHit, cooldownMinutes: reentryCooldownMin },
+        )
+      : riskGates.find(
+          (r) => r.severity === "halt" || r.severity === "block",
+        );
 
     // No-candles gate is additive (surfaced regardless of risk gates)
     if (!candles || candles.length === 0) {
@@ -878,6 +976,7 @@ async function runTickForUser(
   const intel = intelligenceBySymbol[winner.symbol] ?? null;
   const candles1h = candlesBySymbol[winner.symbol] ?? [];
   const candles4h = candlesBySymbol4h[winner.symbol] ?? [];
+  const candles15m = candlesBySymbol15m[winner.symbol] ?? [];
 
   const trend1h = (() => {
     if (candles1h.length < 20) return "insufficient_data";
@@ -900,6 +999,26 @@ async function runTickForUser(
       : secondHalf < firstHalf * 0.99
       ? "down"
       : "flat";
+  })();
+  // 15m momentum: are the last few bars going WITH the proposed direction?
+  // Used for entry timing — gives the AI a "right now / wait" signal.
+  const momentum15m = (() => {
+    if (candles15m.length < 8) {
+      return { trend: "insufficient_data", lastBarPct: 0, last3BarsPct: 0 };
+    }
+    const recent = candles15m.slice(-8).map((c) => c.c);
+    const last = recent[recent.length - 1];
+    const prev = recent[recent.length - 2];
+    const threeAgo = recent[recent.length - 4];
+    const lastBarPct = ((last - prev) / prev) * 100;
+    const last3BarsPct = ((last - threeAgo) / threeAgo) * 100;
+    const trend =
+      last3BarsPct > 0.15 ? "up" : last3BarsPct < -0.15 ? "down" : "flat";
+    return {
+      trend,
+      lastBarPct: Number(lastBarPct.toFixed(3)),
+      last3BarsPct: Number(last3BarsPct.toFixed(3)),
+    };
   })();
 
   const contextPacket = {
@@ -994,6 +1113,13 @@ async function runTickForUser(
           "No intelligence brief available — Brain Trust hasn't run yet. Be conservative.",
       },
     timeframes: {
+      "15m": {
+        lastPrice: candles15m[candles15m.length - 1]?.c ?? 0,
+        trend: momentum15m.trend,
+        lastBarPct: momentum15m.lastBarPct,
+        last3BarsPct: momentum15m.last3BarsPct,
+        candleCount: candles15m.length,
+      },
       "1h": {
         lastPrice: candles1h[candles1h.length - 1]?.c ?? 0,
         trend: trend1h,
@@ -1081,14 +1207,42 @@ async function runTickForUser(
     };
   }
 
-  // ── Stage 4: clamp size through the doctrine ──────────────────
+  // ── Stage 4: derive entry/stop, then size by % risk ──────────
   const side = decision.side ?? "long";
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
-  const sizePct = Math.max(
+
+  // Stop fallback uses the strategy's stop_atr_mult so the param actually
+  // changes live trades, not just backtests. We approximate ATR as 1% of
+  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
+  // already exposes annualizedVolPct if a future revision wants tighter.
+  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
+  const stop = Number(
+    decision.proposed_stop ??
+      (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
+  );
+
+  // % risk-based sizing — the professional way:
+  //   notional = (equity × riskPct) / stopDistancePct
+  // The AI's size_pct hint is used only as a *confidence* nudge that can
+  // shrink the trade, never grow it past the doctrine cap or the risk floor.
+  const aiSizeHint = Math.max(
     0.05,
     Math.min(0.25, Number(decision.size_pct ?? 0.15)),
   );
-  const aiProposedUsd = equity * sizePct;
+  const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+  const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
+  // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
+  const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
+  // Allow the AI to *shrink* via size_pct vs the 0.25 maximum slot.
+  const aiShrinkMult = Math.max(0.4, Math.min(1.0, aiSizeHint / 0.25));
+  const sizingMult = Math.min(confMult, aiShrinkMult);
+  // If risk-based math produces zero (degenerate stop), fall back to the
+  // legacy equity × hint behaviour so we never insert a 0-USD signal.
+  const aiProposedUsd = riskBasedUsd > 0
+    ? riskBasedUsd * sizingMult
+    : equity * aiSizeHint;
+
+  const sizePct = equity > 0 ? aiProposedUsd / equity : aiSizeHint;
 
   const clamp = clampSize({
     proposedQuoteUsd: aiProposedUsd,
@@ -1131,15 +1285,6 @@ async function runTickForUser(
   let sizeUsd = clamp.sizeUsd;
   let fullSize = clamp.qty;
 
-  // Stop fallback uses the strategy's stop_atr_mult so the param actually
-  // changes live trades, not just backtests. We approximate ATR as 1% of
-  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
-  // already exposes annualizedVolPct if a future revision wants tighter.
-  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
-  const stop = Number(
-    decision.proposed_stop ??
-      (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
-  );
   const riskPerUnit = Math.abs(entry - stop);
   // Target fallback honors the strategy's tp_r_mult.
   const target = Number(
@@ -1152,7 +1297,6 @@ async function runTickForUser(
     decision.proposed_tp1 ??
       (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
   );
-  const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
 
   // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
   // Only fires when a trade is actually proposed — keeps cost low since
@@ -1542,18 +1686,23 @@ Deno.serve(async (req) => {
       if (tok && tok === body.cronToken) isCronFanout = true;
     }
 
-    // Fetch BOTH 1h and 4h candles for ALL symbols in parallel — shared
-    // across users this tick. The 4h provides multi-timeframe context so
-    // the Technical Analyst AI can confirm 1h entries against the 4h trend.
-    const [candleResults1h, candleResults4h] = await Promise.all([
+    // Fetch 1h, 4h AND 15m candles for ALL symbols in parallel — shared
+    // across users this tick. The 4h provides intermediate-trend context;
+    // the 15m provides entry-timing momentum so the Technical Analyst can
+    // tell the difference between "right setup, right time" and "right
+    // setup, too early."
+    const [candleResults1h, candleResults4h, candleResults15m] = await Promise.all([
       Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s))),
       Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 14400))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 900))),
     ]);
     const candlesBySymbol = {} as Record<Symbol, Candle[]>;
     const candlesBySymbol4h = {} as Record<Symbol, Candle[]>;
+    const candlesBySymbol15m = {} as Record<Symbol, Candle[]>;
     SYMBOLS.forEach((s, i) => {
       const r1h = candleResults1h[i];
       const r4h = candleResults4h[i];
+      const r15 = candleResults15m[i];
       if (r1h.status === "fulfilled") candlesBySymbol[s] = r1h.value;
       else {
         console.error(`Failed to fetch ${s} 1h:`, r1h.reason);
@@ -1563,6 +1712,11 @@ Deno.serve(async (req) => {
       else {
         console.error(`Failed to fetch ${s} 4h:`, r4h.reason);
         candlesBySymbol4h[s] = [];
+      }
+      if (r15.status === "fulfilled") candlesBySymbol15m[s] = r15.value;
+      else {
+        console.error(`Failed to fetch ${s} 15m:`, r15.reason);
+        candlesBySymbol15m[s] = [];
       }
     });
 
@@ -1582,6 +1736,7 @@ Deno.serve(async (req) => {
             u.user_id,
             candlesBySymbol,
             candlesBySymbol4h,
+            candlesBySymbol15m,
             LOVABLE_API_KEY,
           );
           results.push(r);
@@ -1630,6 +1785,7 @@ Deno.serve(async (req) => {
       userData.user.id,
       candlesBySymbol,
       candlesBySymbol4h,
+      candlesBySymbol15m,
       LOVABLE_API_KEY,
     );
     const status = result.tick === "ai_error" ? 500 : 200;
