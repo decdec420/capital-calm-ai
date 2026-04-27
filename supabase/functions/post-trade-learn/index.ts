@@ -482,6 +482,7 @@ BRAIN TRUST CONTEXT (current cached intel — proxy for entry-time):
     raw: {
       tradeId: t.id,
       source: "trade-coach",
+      aiModel: TRADE_COACH_MODEL,
       grade,
       processVerdict: verdict,
       macroAlignment: macroAlign,
