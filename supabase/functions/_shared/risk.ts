@@ -48,6 +48,12 @@ export interface RiskContext {
   guardrails?: Array<{ label: string; level: string; utilization: number }>;
   /** Active trading profile id (sentinel | active | aggressive). Sentinel default. */
   profile?: string | TradingProfile;
+  /**
+   * Per-user resolved doctrine (overrides profile hardcaps when present).
+   * When supplied, this is the authoritative source for daily-trade cap,
+   * daily-loss USD cap, and the kill-switch floor.
+   */
+  resolved?: ResolvedDoctrine;
 }
 
 export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
