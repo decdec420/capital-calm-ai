@@ -476,6 +476,92 @@ export default function Copilot() {
         }
       />
 
+      {/* Pipeline Status Strip */}
+      <div className="flex items-center gap-4 px-1 py-2 border-b border-border/40 text-[11px] text-muted-foreground flex-wrap">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mr-1">Agents</span>
+
+        {/* Brain Trust */}
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            "w-1.5 h-1.5 rounded-full",
+            lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
+              ? "bg-status-safe" : "bg-muted-foreground/40"
+          )} />
+          <span>Brain Trust</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="tabular">{formatAge(lastBrainTrustRun)}</span>
+        </div>
+
+        <span className="text-border">|</span>
+
+        {/* Signal Engine (Donna) */}
+        <div className="flex items-center gap-1.5">
+          <span className={cn(
+            "w-1.5 h-1.5 rounded-full",
+            lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
+              ? "bg-status-safe animate-pulse"
+              : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
+                ? "bg-status-safe" : "bg-muted-foreground/40"
+          )} />
+          <span>Donna</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="tabular">{formatAge(lastEngineRun)}</span>
+        </div>
+
+        <span className="text-border">|</span>
+
+        {/* Harvey */}
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-status-safe" />
+          <span>Harvey</span>
+          <span className="text-muted-foreground/50">·</span>
+          <span className="text-muted-foreground/50">gemini-flash</span>
+        </div>
+
+        {/* Pipeline run progress inline */}
+        {pipelineStep && (
+          <>
+            <span className="text-border">|</span>
+            <div className="flex items-center gap-2 ml-1">
+              {(["braintrust", "engine", "briefing"] as const).map((step, i) => {
+                const labels = { braintrust: "Brain Trust", engine: "Donna", briefing: "Harvey" };
+                const stepOrder = ["braintrust", "engine", "briefing", "done"];
+                const currentIdx = stepOrder.indexOf(pipelineStep);
+                const done = pipelineStep === "done" || currentIdx > i;
+                const active = currentIdx === i;
+                const errored = pipelineStep === "error" && active;
+                return (
+                  <span key={step} className={cn(
+                    "flex items-center gap-1",
+                    done ? "text-status-safe" : active ? "text-foreground" : "text-muted-foreground/40"
+                  )}>
+                    {errored ? "✗" : done ? "✓" : active ? "·" : "○"}
+                    {labels[step]}
+                  </span>
+                );
+              })}
+              {pipelineStep === "done" && <span className="text-status-safe text-[10px]">pipeline complete</span>}
+              {pipelineStep === "error" && <span className="text-status-blocked text-[10px]">{pipelineError}</span>}
+            </div>
+          </>
+        )}
+
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1.5 border border-border/50 hover:border-border"
+            disabled={pipelineStep !== null && pipelineStep !== "done" && pipelineStep !== "error"}
+            onClick={runFullPipeline}
+          >
+            <Sparkles className="h-3 w-3" />
+            {pipelineStep && pipelineStep !== "done" && pipelineStep !== "error"
+              ? "Running…"
+              : "⚡ Run full pipeline"}
+          </Button>
+        </div>
+      </div>
+
       {/* SIGNAL BRIDGE — top of page, above everything else */}
       {activeSignal ? (
         <div className="space-y-2">
