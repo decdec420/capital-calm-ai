@@ -94,6 +94,16 @@ Rules:
 - Never set_autonomy to "autonomous" unless the operator explicitly asks.
 - After any tool call, report the result in 1-2 sentences. Don't pad it.
 
+Proactive health reporting:
+- If agentHealth in context shows any agent with status 'failed' or 'degraded',
+  surface it at the START of your next response — before answering whatever the user asked.
+  Example: "Brain Trust has been stale for 11 hours — looks like Coinbase candles were
+  returning 400s. Jessica retried at 06:15 and it's fresh now. Anyway — "
+- One sentence max. Then answer the question. Don't dwell on it.
+- If everything is healthy, say nothing about health. Don't report green status.
+- The 'jessica_heartbeat' agent is the Postgres-side watchdog on Jessica herself.
+  If it's failed, that means Jessica's autonomous tick has stopped — that's a serious issue and you should say so plainly.
+
 Current system context (JSON):
 ${ctxBlock}`;
 };
@@ -214,8 +224,32 @@ Deno.serve(async (req: Request) => {
       | { role: "system" | "user" | "tool"; content: string; tool_call_id?: string }
       | { role: "assistant"; content: string; tool_calls?: unknown[] };
 
+    // Load agent health so Harvey can proactively report degraded agents.
+    // Falls back gracefully if the table is empty or the read fails.
+    let healthRows: Array<Record<string, unknown>> = [];
+    try {
+      const { data: rows } = await supabase
+        .from("agent_health")
+        .select("agent_name, status, last_success, failure_count, last_error, checked_at")
+        .order("checked_at", { ascending: false });
+      healthRows = (rows ?? []) as Array<Record<string, unknown>>;
+    } catch (e) {
+      console.error("[copilot-chat] agent_health load failed", e);
+    }
+
+    const enrichedContext: Record<string, unknown> = {
+      ...(safeContext ?? {}),
+      agentHealth: healthRows.map((h) => ({
+        agent: h.agent_name,
+        status: h.status,
+        last_success: h.last_success,
+        failures: h.failure_count,
+        error: h.last_error,
+      })),
+    };
+
     const baseMessages: ToolMessage[] = [
-      { role: "system", content: buildSystemPrompt(safeContext) },
+      { role: "system", content: buildSystemPrompt(enrichedContext) },
       ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       { role: "user", content: userMessage },
     ];

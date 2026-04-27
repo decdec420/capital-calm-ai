@@ -1,46 +1,114 @@
-# Fix Copilot Layout in Fullscreen
 
-## The problem
-The Copilot page locks its three columns to `[180px _ 1fr _ 180px]` at the `lg` breakpoint (≥1024px). At any larger size (the fullscreen screenshot is ~1500px wide), the side columns stay at 180px and everything inside them gets squeezed:
+# Watchdog: Two-Layer Health Monitoring
 
-- Left column: "Engine watchlist · 3 markets" header wraps to 3 lines; the BTC/ETH/SOL cards collapse to a vertical stack instead of using the 3-column grid they were designed for.
-- "Last engine tick" header collides with its timestamp.
-- Right column: "Autonomy" label overlaps "paper-only until live armed"; the Manual/Assisted/Autonomous segmented toggle is too narrow for its labels; the green/orange status banner wraps awkwardly.
+Your instinct is right. Claude's prompt is **Option A done well** — Jessica becomes a thoughtful watchdog of the other agents and Harvey reports issues proactively. But it has the gap you spotted: **nobody watches Jessica**. If her cron silently dies, the whole health system goes blind without any alarm.
 
-The center chat panel is fine — the bug is purely in the side rails and how their contents flex.
+Adding **Option C (a Postgres heartbeat)** alongside it costs almost nothing and closes that gap. Postgres is the most reliable component you have, it can't be killed by a Deno runtime crash, and it already powers your existing alert triggers.
 
-## What I'll change
+## What we're building
 
-### 1. Copilot page grid (`src/pages/Copilot.tsx`)
-Replace the rigid `lg:grid-cols-[180px_1fr_180px]` with a tiered, fluid layout:
+```text
+  ┌─────────────────────────────────────────────────────────────┐
+  │  Layer 1: Jessica (every 60s)                               │
+  │  Watches: brain_trust, signal_engine, herself               │
+  │  Writes: agent_health rows                                  │
+  │  Recovers: auto-fires run_brain_trust if stale              │
+  └────────────────────────┬────────────────────────────────────┘
+                           │ writes to
+                           ▼
+                    agent_health table
+                           ▲
+                           │ reads from
+  ┌────────────────────────┴────────────────────────────────────┐
+  │  Layer 2: Postgres heartbeat (every 3 min, pg_cron)         │
+  │  Watches: ONLY Jessica's last_jessica_decision freshness    │
+  │  Writes: alerts row + agent_health row for jessica          │
+  │  Cannot recover — its job is to scream loudly               │
+  └─────────────────────────────────────────────────────────────┘
+                           ▲
+                           │ reads
+                           │
+  ┌────────────────────────┴────────────────────────────────────┐
+  │  Layer 3: Harvey (when you open Copilot)                    │
+  │  Reads: agent_health + recent alerts                        │
+  │  Surfaces: any degraded/failed agent in his next response   │
+  └─────────────────────────────────────────────────────────────┘
+```
 
-- `< md` (≤768px): single column, stacked (already works).
-- `md` (768–1279px): single column, but the chat keeps its tall height and the side panels sit above/below.
-- `xl` (≥1280px): three columns at `[260px_1fr_280px]` — wide enough that the symbol cards, engine-tick row, autonomy toggle, and "What Max sees" panel all breathe.
-- `2xl` (≥1536px): three columns at `[300px_1fr_320px]` — fullscreen on a 15"+ display.
+The key insight: **Jessica + Postgres watch each other.** If Jessica dies, Postgres notices in <5 minutes. If Postgres pg_cron dies, Jessica notices her own missing heartbeat on the next tick. Both have to fail simultaneously for you to be blind, which is vastly less likely than either failing alone.
 
-This eliminates the squeeze while keeping the chat the dominant column.
+---
 
-### 2. MultiSymbolStrip (`src/components/trader/MultiSymbolStrip.tsx`)
-- Header row uses `flex-wrap gap-2` so the title and "snapshot · Xm ago" don't collide when the column is narrow.
-- Symbol grid drops the `md:grid-cols-3` (which only made sense in the old wide center layout) and uses `grid-cols-1` everywhere — three small cards stacked vertically reads cleanly in a side rail and the cards are no longer squished.
+## Plan
 
-### 3. AutonomyToggle (`src/components/trader/AutonomyToggle.tsx`)
-- Top row becomes `flex-wrap` so "Autonomy" and the "paper-only until live armed" / "LIVE — real money" tag stack on a new line when the column is narrow instead of overlapping.
-- Segmented buttons: drop the inline `(paper)` / `(LIVE)` qualifier from the buttons themselves (it's already shown in the header) so each button just shows its label and never truncates.
-- The "All clear signals execute automatically" callout: shorten to "Auto-executes within doctrine limits" so it never wraps to 3 lines.
+### Step 1 — Adopt Claude's prompt as written, with two corrections
 
-### 4. "Last engine tick" panel (in Copilot.tsx)
-Wrap the header `flex` with `flex-wrap gap-y-1` so the timestamp falls to a second line gracefully if the column is narrow, instead of wrapping the title.
+Implement everything in Claude's prompt (steps 1–4). It's well-designed. Two small fixes:
 
-### 5. "What Max sees" context panel (in Copilot.tsx)
-Already uses `flex justify-between` per row — add `min-w-0` and `truncate` to the value cells so very long engine-pick text stays on one line, and keep the panel readable at the new 280–320px width.
+- **The `agent_health` migration uses `REFERENCES auth.users(id)`.** Per your project rules, app tables shouldn't FK into `auth.users`. Drop the `REFERENCES auth.users(id) ON DELETE CASCADE` clause — the RLS policy `auth.uid() = user_id` is the actual safety net.
+- **Add an `INSERT/UPDATE` RLS policy for the service role.** The current policy is SELECT-only for users, which is correct, but Jessica's upserts run via service role so they bypass RLS — that's fine. Just confirming no policy needs to allow user-side writes (it doesn't).
 
-## What I'm NOT changing
-- The center chat panel — its `min(72vh, 760px)` height and overflow logic are correct.
-- The Risk Center page — that one's fine in fullscreen, the screenshot only flagged Copilot.
-- The signal bridge banner at the top — it spans full width and already responds well.
-- The sidebar — it's controlled by the global `AppLayout` and isn't part of this bug.
+### Step 2 — Add a fourth agent: `jessica_heartbeat` (Option C)
 
-## Verification
-After the changes I'll spot-check the file structure and run the existing test suite (`bunx vitest run`) to make sure nothing breaks. Tests cover doctrine/risk/sizing logic, not layout, so they should all stay green.
+Create one more migration that adds a Postgres function and pg_cron job:
+
+**`check_jessica_heartbeat()`** — runs every 3 minutes:
+1. For each row in `system_state`, look at `last_jessica_decision->>'ran_at'`.
+2. If null or older than 4 minutes:
+   - Upsert `agent_health` with `agent_name='jessica_heartbeat'`, `status='failed'`, `last_error='Jessica has not ticked in N minutes — cron may be down'`.
+   - Insert an `alerts` row (severity `critical`, title `Jessica heartbeat lost`) — but only if no identical alert exists from the last 30 min (dedupe).
+3. If fresh: upsert `agent_health` row to `status='healthy'`.
+
+Schedule it with pg_cron at `*/3 * * * *`. No edge function, no token, no LLM. Pure SQL.
+
+**Why a separate `jessica_heartbeat` agent name (not just `jessica`)?**
+The row `agent_name='jessica'` is what Jessica writes about herself. The row `agent_name='jessica_heartbeat'` is what Postgres writes about Jessica. If the two ever disagree — Jessica says she's fine but Postgres says she hasn't ticked — that itself is a useful signal that something weird is happening (maybe she's writing rows but not actually reasoning).
+
+### Step 3 — Surface heartbeat in Harvey + the pipeline strip
+
+Tiny additions on top of Claude's prompt:
+
+- **Harvey:** the `agent_health` query in `copilot-chat` already picks up `jessica_heartbeat` for free (it selects all rows). His instruction to lead with degraded/failed agents covers it automatically.
+- **Pipeline strip in `Copilot.tsx`:** Claude's `healthDot()` helper already keys on `agent_name`. Add one more dot or merge `jessica_heartbeat` into the existing Jessica dot — we'll use the *worst* of `jessica` and `jessica_heartbeat` so the dot turns red the moment either source flags trouble.
+
+### Step 4 — Verify
+
+1. `bunx vitest run` — all 88 tests still pass.
+2. Manually invoke Jessica → confirm `agent_health` rows appear for `brain_trust`, `signal_engine`, `jessica`.
+3. Wait 3+ minutes → confirm a `jessica_heartbeat` row appears (status `healthy`) from the pg_cron job.
+4. Manually update `last_jessica_decision` to a 10-minute-old timestamp → within 3 min, `jessica_heartbeat` should flip to `failed` and an alert should appear.
+5. Open Copilot → Harvey should lead with the heartbeat warning.
+6. Restore the timestamp → Harvey goes quiet again.
+
+---
+
+## What NOT to change
+
+- Don't touch doctrine, signal-engine, market-intelligence, or any other edge function logic.
+- Don't add a third persona ("Norma" or similar) — Postgres + Jessica is enough. Defer until the watchdog logic genuinely needs LLM reasoning.
+- Don't try to fix the Coinbase 4h `400` errors in this prompt — that's a separate fire (likely a granularity/limit param issue). The watchdog will at least make sure you *see* it next time.
+
+---
+
+## Technical details
+
+**New migration files:**
+- `YYYYMMDDHHMMSS_agent_health.sql` — table from Claude's prompt, minus the `auth.users` FK.
+- `YYYYMMDDHHMMSS_jessica_heartbeat.sql` — defines `check_jessica_heartbeat()` SECURITY DEFINER function and schedules it via `cron.schedule('jessica-heartbeat', '*/3 * * * *', ...)`.
+
+**Heartbeat dedupe:** the alert insert uses
+```sql
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.alerts
+  WHERE user_id = v_user_id
+    AND title = 'Jessica heartbeat lost'
+    AND created_at > now() - interval '30 minutes'
+)
+```
+so a sustained outage doesn't spam alerts every 3 minutes.
+
+**Edge function changes:** exactly as in Claude's prompt — `jessica/index.ts` gets `checkAgentHealth()` + the pre-tick recovery block, `copilot-chat/index.ts` loads `agent_health` and gets the proactive-reporting instruction.
+
+**Frontend changes:** `Copilot.tsx` gets the `agentHealth` state + `healthDot()` helper from Claude's prompt, with one tweak: the Jessica dot uses `Math.min(jessica.severity, jessica_heartbeat.severity)` (in terms of color tier) so either source can turn it red.
+
+**RLS:** `agent_health` is read-only for users via `auth.uid() = user_id`. All writes go through service role from Jessica or the heartbeat function (which is SECURITY DEFINER). No user-side writes needed.

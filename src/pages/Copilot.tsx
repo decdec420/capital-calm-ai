@@ -118,6 +118,43 @@ export default function Copilot() {
     load();
   }, []);
 
+  // Agent health — refreshed every 30s. Drives pipeline-strip dot colors.
+  const [agentHealth, setAgentHealth] = useState<
+    Record<string, { status: string; staleMinutes: number | null }>
+  >({});
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase
+        .from("agent_health")
+        .select("agent_name, status, last_success, checked_at");
+      if (data) {
+        const map: Record<string, { status: string; staleMinutes: number | null }> = {};
+        for (const row of data) {
+          const staleMinutes = row.last_success
+            ? Math.floor((Date.now() - new Date(row.last_success).getTime()) / 60000)
+            : null;
+          map[row.agent_name] = { status: row.status, staleMinutes };
+        }
+        setAgentHealth(map);
+      }
+    };
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Map an agent's health.status → tailwind dot class.
+  // 'healthy' → green · 'stale' → amber · 'degraded' → amber pulse · 'failed' → red pulse.
+  // Returns null if no health row exists yet so callers can fall back to timestamp-based logic.
+  const healthDot = (agentKey: string): string | null => {
+    const h = agentHealth[agentKey];
+    if (!h) return null;
+    if (h.status === "healthy") return "bg-status-safe";
+    if (h.status === "stale") return "bg-status-caution";
+    if (h.status === "degraded") return "bg-status-caution animate-pulse";
+    return "bg-status-blocked animate-pulse";
+  };
+
   // Render a single structured gate reason as a sonner toast.
   const toastForGate = (g: GateReason) => {
     const Icon = gateIconFor(g.code);
@@ -484,8 +521,10 @@ export default function Copilot() {
         <div className="flex items-center gap-1.5">
           <span className={cn(
             "w-1.5 h-1.5 rounded-full",
-            lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
-              ? "bg-status-safe" : "bg-muted-foreground/40"
+            healthDot("brain_trust") ?? (
+              lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
+                ? "bg-status-safe" : "bg-muted-foreground/40"
+            )
           )} />
           <span>Brain Trust</span>
           <span className="text-muted-foreground/50">·</span>
@@ -498,10 +537,12 @@ export default function Copilot() {
         <div className="flex items-center gap-1.5">
           <span className={cn(
             "w-1.5 h-1.5 rounded-full",
-            lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
-              ? "bg-status-safe animate-pulse"
-              : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
-                ? "bg-status-safe" : "bg-muted-foreground/40"
+            healthDot("signal_engine") ?? (
+              lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
+                ? "bg-status-safe animate-pulse"
+                : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
+                  ? "bg-status-safe" : "bg-muted-foreground/40"
+            )
           )} />
           <span>Donna</span>
           <span className="text-muted-foreground/50">·</span>
@@ -520,7 +561,7 @@ export default function Copilot() {
 
         <span className="text-border">|</span>
 
-        {/* Jessica — autonomous orchestrator */}
+        {/* Jessica — autonomous orchestrator. Dot uses worst of (jessica, jessica_heartbeat). */}
         <div className="flex items-center gap-1.5">
           {(() => {
             const decision = system?.lastJessicaDecision ?? null;
@@ -528,21 +569,24 @@ export default function Copilot() {
             const ageSec = ranAt
               ? Math.floor((Date.now() - new Date(ranAt).getTime()) / 1000)
               : null;
-            const healthy = ageSec !== null && ageSec < 90;
             const ageLabel =
               ageSec === null
                 ? "never"
                 : ageSec < 60
                   ? `${ageSec}s ago`
                   : `${Math.floor(ageSec / 60)}m ago`;
+            // Pick the worse of Jessica's self-report and Postgres' heartbeat view.
+            const severity = (s?: string) =>
+              s === "failed" ? 3 : s === "degraded" ? 2 : s === "stale" ? 1 : 0;
+            const self = agentHealth["jessica"]?.status;
+            const hb = agentHealth["jessica_heartbeat"]?.status;
+            const worstStatus = severity(self) >= severity(hb) ? self : hb;
+            const dotClass = worstStatus
+              ? (healthDot(severity(self) >= severity(hb) ? "jessica" : "jessica_heartbeat") ?? "bg-muted-foreground/40")
+              : (ageSec !== null && ageSec < 90 ? "bg-status-safe" : "bg-muted-foreground/40");
             return (
               <>
-                <span
-                  className={cn(
-                    "w-1.5 h-1.5 rounded-full",
-                    healthy ? "bg-status-safe" : "bg-muted-foreground/40",
-                  )}
-                />
+                <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
                 <span>Jessica</span>
                 <span className="text-muted-foreground/50">·</span>
                 <span className="tabular">{ageLabel}</span>

@@ -50,6 +50,42 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_health: {
+        Row: {
+          agent_name: string
+          checked_at: string
+          failure_count: number
+          id: string
+          last_error: string | null
+          last_failure: string | null
+          last_success: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          agent_name: string
+          checked_at?: string
+          failure_count?: number
+          id?: string
+          last_error?: string | null
+          last_failure?: string | null
+          last_success?: string | null
+          status: string
+          user_id: string
+        }
+        Update: {
+          agent_name?: string
+          checked_at?: string
+          failure_count?: number
+          id?: string
+          last_error?: string | null
+          last_failure?: string | null
+          last_success?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       alerts: {
         Row: {
           created_at: string
@@ -1214,6 +1250,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      check_jessica_heartbeat: { Args: never; Returns: undefined }
       get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
