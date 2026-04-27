@@ -4,6 +4,7 @@ import { MetricCard } from "@/components/trader/MetricCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
+import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
 import { AlertBanner } from "@/components/trader/AlertBanner";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
