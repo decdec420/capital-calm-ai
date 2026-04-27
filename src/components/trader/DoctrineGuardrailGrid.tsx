@@ -27,7 +27,8 @@ import { DoctrineEditSheet } from "@/components/trader/DoctrineEditSheet";
 import type { DoctrineField } from "@/lib/doctrine-resolver";
 import { formatUsd } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { STALE_DATA_SECONDS } from "@/lib/doctrine-constants";
+import { DOCTRINE } from "@/lib/doctrine-constants";
+const STALE_DATA_SECONDS = DOCTRINE.STALE_DATA_SECONDS;
 import { StatusBadge } from "./StatusBadge";
 
 type Tone = "safe" | "caution" | "blocked";
