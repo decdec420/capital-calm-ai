@@ -693,6 +693,7 @@ async function runTickForUser(
     }
   }
 
+  // Persisted approved strategy (if any) so signals & trades carry identity.
   // CRITICAL: we now load `params` too so the live engine actually uses
   // ema_fast / ema_slow / rsi_period / stop_atr_mult / tp_r_mult from the
   // approved strategy. Previously the engine only loaded id/version, which
