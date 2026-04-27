@@ -141,7 +141,7 @@ export function DoctrineGuardrailGrid() {
       {
         key: "correlation",
         label: "Correlated positions",
-        description: `Only ${DOCTRINE.MAX_CORRELATED_POSITIONS} open crypto position at a time — BTC/ETH/SOL move together.`,
+        description: `Up to ${DOCTRINE.MAX_CORRELATED_POSITIONS} open crypto positions at a time — BTC/ETH/SOL move together.`,
         icon: Layers,
         current: `${open.length}`,
         limit: `${DOCTRINE.MAX_CORRELATED_POSITIONS}`,

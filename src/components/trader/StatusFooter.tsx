@@ -1,8 +1,8 @@
 import { useSystemState } from "@/hooks/useSystemState";
 import { useTrades } from "@/hooks/useTrades";
+import { DOCTRINE } from "@/lib/doctrine-constants";
 
-// Mirrors doctrine.ts MAX_CORRELATED_POSITIONS — kept inline for a footer badge.
-const MAX_CORRELATED_POSITIONS = 1;
+const MAX_CORRELATED_POSITIONS = DOCTRINE.MAX_CORRELATED_POSITIONS;
 
 export function StatusFooter() {
   const { data: s } = useSystemState();
