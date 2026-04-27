@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
+import { Plus, ShieldAlert, ShieldCheck, Trash2, X, Zap } from "lucide-react";
 import { useGuardrails, type NewGuardrailInput } from "@/hooks/useGuardrails";
 import { useSystemState } from "@/hooks/useSystemState";
 import type { RiskGuardrail, RiskLevel } from "@/lib/domain-types";
