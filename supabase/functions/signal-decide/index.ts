@@ -22,6 +22,7 @@ import {
   snapshotAgeSeconds,
   STALE_SNAPSHOT_MAX_AGE_SECONDS,
 } from "../_shared/snapshot.ts";
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 validateDoctrineInvariants();
 
