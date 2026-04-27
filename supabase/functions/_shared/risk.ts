@@ -12,13 +12,13 @@
 // ============================================================
 
 import {
-  KILL_SWITCH_FLOOR_USD,
   MAX_SPREAD_BPS,
   STALE_DATA_SECONDS,
   getProfile,
   isWhitelistedSymbol,
   type TradingProfile,
 } from "./doctrine.ts";
+import type { ResolvedDoctrine } from "./doctrine-resolver.ts";
 import { GATE_CODES, gate, type GateReason } from "./reasons.ts";
 
 export interface RiskContext {
