@@ -6,12 +6,12 @@ import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { DailyBriefPanel } from "@/components/trader/DailyBriefPanel";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
-import { AlertBanner } from "@/components/trader/AlertBanner";
+
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/MetricDrilldowns";
-import { AlertDetailSheet } from "@/components/trader/AlertDetailSheet";
+
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,14 +24,13 @@ import {
   Sparkles,
   TrendingDown,
   TrendingUp,
-  X,
   Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAccountState } from "@/hooks/useAccountState";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useTrades } from "@/hooks/useTrades";
-import { useAlerts } from "@/hooks/useAlerts";
+
 import { useGuardrails } from "@/hooks/useGuardrails";
 import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
@@ -40,7 +39,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
 import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
-import type { Alert, Regime } from "@/lib/domain-types";
+import type { Regime } from "@/lib/domain-types";
 import { DOCTRINE } from "@/lib/doctrine-constants";
 
 function FreshnessDot({ timestamp }: { timestamp: number | null }) {
@@ -62,7 +61,7 @@ export default function Overview() {
   const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
   const { open, closed } = useTrades();
-  const { alerts, dismiss } = useAlerts();
+  
   const { guardrails } = useGuardrails();
   const { candles } = useCandles();
   const { pending: pendingSignals } = useSignals();
@@ -70,7 +69,7 @@ export default function Overview() {
   const [briefLoading, setBriefLoading] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownKind | null>(null);
-  const [activeAlert, setActiveAlert] = useState<Alert | null>(null);
+  
   const activeSignal = pendingSignals[0];
 
   // Snapshot is the source of truth. Local computeRegime is the fallback
@@ -96,11 +95,6 @@ export default function Overview() {
   const unrealizedToday = open.reduce((sum, t) => sum + (t.unrealizedPnl ?? 0), 0);
   const lossToday = Math.min(0, realizedToday);
 
-  const severityCounts = useMemo(() => {
-    const c = { critical: 0, warning: 0, info: 0 };
-    for (const a of alerts) c[a.severity] = (c[a.severity] ?? 0) + 1;
-    return c;
-  }, [alerts]);
 
   const lastCandleTime = candles[candles.length - 1]?.t != null ? candles[candles.length - 1].t * 1000 : null;
 
