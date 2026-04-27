@@ -1434,6 +1434,7 @@ async function runTickForUser(
     symbolPrice: entry,
     symbol: winner.symbol,
     profile: activeProfile,
+    resolved: resolvedDoctrine,
   });
 
   if (clamp.blocked) {
