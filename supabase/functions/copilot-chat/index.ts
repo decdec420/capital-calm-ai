@@ -237,22 +237,26 @@ Deno.serve(async (req: Request) => {
 
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    // Build the base messages array.
     type ToolMessage =
       | { role: "system" | "user" | "tool"; content: string; tool_call_id?: string }
       | { role: "assistant"; content: string; tool_calls?: unknown[] };
 
-    // Load agent health so Harvey can proactively report degraded agents.
-    // Falls back gracefully if the table is empty or the read fails.
+    // Load agent health from cache (60s TTL). Falls back gracefully if read fails.
     let healthRows: Array<Record<string, unknown>> = [];
-    try {
-      const { data: rows } = await supabase
-        .from("agent_health")
-        .select("agent_name, status, last_success, failure_count, last_error, checked_at")
-        .order("checked_at", { ascending: false });
-      healthRows = (rows ?? []) as Array<Record<string, unknown>>;
-    } catch (e) {
-      console.error("[copilot-chat] agent_health load failed", e);
+    const now = Date.now();
+    if (_agentHealthCache && now - _agentHealthCache.at < AGENT_HEALTH_TTL_MS) {
+      healthRows = _agentHealthCache.rows;
+    } else {
+      try {
+        const { data: rows } = await supabase
+          .from("agent_health")
+          .select("agent_name, status, last_success, failure_count, last_error, checked_at")
+          .order("checked_at", { ascending: false });
+        healthRows = (rows ?? []) as Array<Record<string, unknown>>;
+        _agentHealthCache = { rows: healthRows, at: now };
+      } catch (e) {
+        console.error("[copilot-chat] agent_health load failed", e);
+      }
     }
 
     const enrichedContext: Record<string, unknown> = {
@@ -272,10 +276,12 @@ Deno.serve(async (req: Request) => {
       { role: "user", content: userMessage },
     ];
 
-    // First pass — non-streaming, detect tool calls.
-    let finalMessages: ToolMessage[] = baseMessages;
-    try {
-      const firstPassRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Single streaming call with tools enabled. The model either streams text OR
+    // emits tool_calls (in which case we execute them and do a follow-up streaming
+    // call with the tool results). This avoids the 10–30s blocking pre-pass we used
+    // to do, so the user sees first tokens in 1–3s in the common no-tool case.
+    const callStream = async (msgs: ToolMessage[], includeTools: boolean) =>
+      fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
@@ -283,137 +289,258 @@ Deno.serve(async (req: Request) => {
         },
         body: JSON.stringify({
           model: "google/gemini-3-flash-preview",
-          messages: baseMessages,
-          tools: DESK_TOOLS,
-          tool_choice: "auto",
-          stream: false,
-          max_tokens: 1024,
+          messages: msgs,
+          ...(includeTools
+            ? { tools: DESK_TOOLS, tool_choice: "auto" }
+            : {}),
+          stream: true,
         }),
       });
 
-      if (firstPassRes.ok) {
-        const firstJson = await firstPassRes.json().catch(() => null);
-        const firstChoice = firstJson?.choices?.[0];
-        const toolCalls = firstChoice?.message?.tool_calls ?? [];
-
-        if (Array.isArray(toolCalls) && toolCalls.length > 0) {
-          const toolResults: ToolMessage[] = [];
-          for (const tc of toolCalls) {
-            const toolName = tc?.function?.name ?? "";
-            let toolArgs: Record<string, unknown> = {};
-            try {
-              toolArgs = JSON.parse(tc?.function?.arguments ?? "{}");
-            } catch {
-              /* ignore — feed empty args */
-            }
-
-            const result = await executeTool(toolName, toolArgs, {
-              userId,
-              token,
-              supabaseUrl,
-              supabaseAnonKey,
-              serviceRoleKey: SERVICE_ROLE_KEY,
-              actor: "harvey_chat",
-            });
-
-            toolResults.push({
-              role: "tool",
-              tool_call_id: tc.id,
-              content: JSON.stringify(result),
-            });
-          }
-
-          finalMessages = [
-            ...baseMessages,
-            {
-              role: "assistant",
-              content: firstChoice?.message?.content ?? "",
-              tool_calls: toolCalls,
-            },
-            ...toolResults,
-          ];
-        }
-      } else if (firstPassRes.status === 429) {
-        return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
-      } else if (firstPassRes.status === 402) {
-        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
-      } else {
-        const t = await firstPassRes.text().catch(() => "");
-        console.error("first-pass gateway error", firstPassRes.status, t);
-        // Fall through to streaming with no tools.
-      }
-    } catch (e) {
-      console.error("first-pass tool detection failed", e);
-      // Fall through and stream the original prompt.
-    }
-
-    // Second pass (streaming) — use finalMessages (with or without tool results).
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: finalMessages,
-        stream: true,
-      }),
-    });
-
-    if (!response.ok || !response.body) {
-      if (response.status === 429) {
+    const firstResp = await callStream(baseMessages, true);
+    if (!firstResp.ok || !firstResp.body) {
+      if (firstResp.status === 429) {
         return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
       }
-      if (response.status === 402) {
+      if (firstResp.status === 402) {
         return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
       }
-      const text = await response.text().catch(() => "");
-      console.error("Gateway error", response.status, text);
+      const text = await firstResp.text().catch(() => "");
+      console.error("Gateway error", firstResp.status, text);
       return json({ error: "AI gateway error" }, 500);
     }
 
-    // --- Tee the stream: pass through to client AND accumulate assistant text for DB ---
-    let assistantBuffer = "";
-    let textBuffer = "";
+    // Inspect first chunk(s) to see if the model is emitting tool_calls or text.
+    // We peek at the SSE stream; if we see tool_calls deltas, we drain the stream
+    // (no client output yet), execute tools, then start a fresh streaming call
+    // whose body we forward to the client. If we see text content first, we forward
+    // the original stream straight through (this is the hot path).
+    const reader = firstResp.body.getReader();
     const decoder = new TextDecoder();
 
-    const transform = new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        controller.enqueue(chunk);
-        // Parse SSE deltas to capture the final assistant text
-        textBuffer += decoder.decode(chunk, { stream: true });
-        let idx: number;
-        while ((idx = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, idx);
-          textBuffer = textBuffer.slice(idx + 1);
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6).trim();
-          if (data === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (typeof delta === "string") assistantBuffer += delta;
-          } catch {
-            // partial JSON — ignore, will be retried with next chunk
-          }
-        }
-      },
-      async flush() {
-        if (assistantBuffer.trim().length > 0) {
-          const { error } = await supabase.from("chat_messages").insert({
-            conversation_id: conversationId,
-            user_id: userId,
-            role: "assistant",
-            content: assistantBuffer,
-          });
-          if (error) console.error("persist assistant message failed", error);
-        }
-      },
-    });
+    type ToolCallAccum = {
+      id?: string;
+      name?: string;
+      arguments: string;
+    };
+    const toolCallsByIdx = new Map<number, ToolCallAccum>();
+    let sawTextContent = false;
+    let sawToolCalls = false;
+    let assistantTextSoFar = "";
+    let lineBuffer = "";
+    const bufferedChunks: Uint8Array[] = []; // for forwarding if we go text-path
 
-    return new Response(response.body.pipeThrough(transform), {
+    const parseSSELine = (line: string): unknown | null => {
+      if (!line.startsWith("data: ")) return null;
+      const payload = line.slice(6).trim();
+      if (payload === "[DONE]") return "__DONE__";
+      try {
+        return JSON.parse(payload);
+      } catch {
+        return null;
+      }
+    };
+
+    // Peek loop: read until we know whether this is a text response or a tool-call response.
+    // For Gemini via Lovable Gateway, the first 1-3 chunks reveal which path it is.
+    const PEEK_BUDGET_MS = 8000;
+    const peekStart = Date.now();
+    let peekDone = false;
+
+    while (!peekDone) {
+      if (Date.now() - peekStart > PEEK_BUDGET_MS) break;
+      const { value, done } = await reader.read();
+      if (done) {
+        peekDone = true;
+        break;
+      }
+      bufferedChunks.push(value);
+      lineBuffer += decoder.decode(value, { stream: true });
+
+      let nl: number;
+      while ((nl = lineBuffer.indexOf("\n")) !== -1) {
+        let line = lineBuffer.slice(0, nl);
+        lineBuffer = lineBuffer.slice(nl + 1);
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        const parsed = parseSSELine(line);
+        if (!parsed) continue;
+        if (parsed === "__DONE__") {
+          peekDone = true;
+          break;
+        }
+        const choice = (parsed as { choices?: Array<Record<string, unknown>> }).choices?.[0];
+        const delta = (choice?.delta ?? {}) as {
+          content?: string;
+          tool_calls?: Array<{
+            index?: number;
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          }>;
+        };
+        if (typeof delta.content === "string" && delta.content.length > 0) {
+          sawTextContent = true;
+          assistantTextSoFar += delta.content;
+          peekDone = true; // text path → stop peeking, forward what we have + the rest
+          break;
+        }
+        if (Array.isArray(delta.tool_calls)) {
+          sawToolCalls = true;
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            const cur = toolCallsByIdx.get(idx) ?? { arguments: "" };
+            if (tc.id) cur.id = tc.id;
+            if (tc.function?.name) cur.name = tc.function.name;
+            if (tc.function?.arguments) cur.arguments += tc.function.arguments;
+            toolCallsByIdx.set(idx, cur);
+          }
+          // Keep reading — tool_calls span multiple chunks. Stop on finish_reason.
+        }
+        const finish = choice?.finish_reason;
+        if (typeof finish === "string" && finish.length > 0) {
+          peekDone = true;
+          break;
+        }
+      }
+    }
+
+    // Helper: build a transform stream that tees output (forward to client + capture for DB).
+    const makeTeeTransform = (seedText = "") => {
+      let assistantBuffer = seedText;
+      let textBuffer = "";
+      const dec = new TextDecoder();
+      return new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+          textBuffer += dec.decode(chunk, { stream: true });
+          let idx: number;
+          while ((idx = textBuffer.indexOf("\n")) !== -1) {
+            let line = textBuffer.slice(0, idx);
+            textBuffer = textBuffer.slice(idx + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(data);
+              const d = parsed.choices?.[0]?.delta?.content;
+              if (typeof d === "string") assistantBuffer += d;
+            } catch {
+              /* partial JSON — next chunk completes it */
+            }
+          }
+        },
+        async flush() {
+          if (assistantBuffer.trim().length > 0) {
+            const { error } = await supabase.from("chat_messages").insert({
+              conversation_id: conversationId,
+              user_id: userId,
+              role: "assistant",
+              content: assistantBuffer,
+            });
+            if (error) console.error("persist assistant message failed", error);
+          }
+        },
+      });
+    };
+
+    // === TEXT PATH (hot path) ===
+    // Reconstruct a stream that yields the buffered chunks we already read, then
+    // continues from the original reader. This is what the client gets.
+    if (!sawToolCalls || sawTextContent) {
+      const passthrough = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          for (const c of bufferedChunks) controller.enqueue(c);
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+            }
+          } catch (e) {
+            console.error("stream forward error", e);
+          } finally {
+            controller.close();
+          }
+        },
+        cancel() {
+          reader.cancel().catch(() => {});
+        },
+      });
+
+      return new Response(passthrough.pipeThrough(makeTeeTransform()), {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      });
+    }
+
+    // === TOOL PATH ===
+    // Drain any remaining bytes from the first call (we don't forward them) so the
+    // upstream connection closes cleanly. Then execute each tool and make a second
+    // streaming call whose body IS forwarded to the client.
+    try {
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+    } catch {
+      /* ignore drain errors */
+    }
+
+    const orderedToolCalls = [...toolCallsByIdx.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, v]) => v)
+      .filter((tc) => tc.name);
+
+    const toolResults: ToolMessage[] = [];
+    for (const tc of orderedToolCalls) {
+      let toolArgs: Record<string, unknown> = {};
+      try {
+        toolArgs = JSON.parse(tc.arguments || "{}");
+      } catch {
+        /* feed empty args */
+      }
+      const result = await executeTool(tc.name!, toolArgs, {
+        userId,
+        token,
+        supabaseUrl,
+        supabaseAnonKey,
+        serviceRoleKey: SERVICE_ROLE_KEY,
+        actor: "harvey_chat",
+      });
+      toolResults.push({
+        role: "tool",
+        tool_call_id: tc.id ?? "",
+        content: JSON.stringify(result),
+      });
+    }
+
+    const followupMessages: ToolMessage[] = [
+      ...baseMessages,
+      {
+        role: "assistant",
+        content: assistantTextSoFar,
+        tool_calls: orderedToolCalls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments || "{}" },
+        })),
+      },
+      ...toolResults,
+    ];
+
+    const followupResp = await callStream(followupMessages, false);
+    if (!followupResp.ok || !followupResp.body) {
+      if (followupResp.status === 429) {
+        return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
+      }
+      if (followupResp.status === 402) {
+        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
+      }
+      const t = await followupResp.text().catch(() => "");
+      console.error("followup gateway error", followupResp.status, t);
+      return json({ error: "AI gateway error" }, 500);
+    }
+
+    return new Response(followupResp.body.pipeThrough(makeTeeTransform()), {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
