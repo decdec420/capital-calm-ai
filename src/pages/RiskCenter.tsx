@@ -133,6 +133,9 @@ export default function RiskCenter() {
         </button>
       </div>
 
+      {/* Per-trade auto-sell — answers "when does the bot bail out?" */}
+      <PerTradeStopPanel />
+
       {/* Live engine gates from the last tick — not user-defined guardrails. */}
       <div className="panel p-4 space-y-2.5">
         <div className="flex items-center justify-between">
@@ -156,34 +159,39 @@ export default function RiskCenter() {
         )}
       </div>
 
+      {/* Doctrine source-of-truth: derived live from doctrine + account + trades. */}
+      <DoctrineGuardrailGrid />
 
       {loading ? (
         <p className="text-xs text-muted-foreground italic">Loading…</p>
-      ) : guardrails.length === 0 ? (
-        <EmptyState
-          icon={<ShieldCheck className="h-5 w-5" />}
-          title="No guardrails configured"
-          description="Add at least a balance floor and a daily loss cap before you start trading."
-          action={<Button size="sm" onClick={() => setNewOpen(true)}>Add guardrail</Button>}
-        />
-      ) : (
+      ) : guardrails.length === 0 ? null : (
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-sm font-medium text-foreground">
-              {filter === "all" ? "All guardrails" : `${filter} guardrails`} · {filtered.length}
-            </span>
-            {filter !== "all" && (
-              <button
-                type="button"
-                onClick={() => setFilter("all")}
-                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-              >
-                Clear filter <X className="h-3 w-3" />
-              </button>
-            )}
+          <div className="flex items-end justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">
+                Custom annotations · {filtered.length}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Display-only guardrails for ops awareness. The engine does <span className="text-foreground/80">not</span> read these — see Doctrine guardrails above for what's actually enforced.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              {filter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setFilter("all")}
+                  className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                >
+                  Clear filter <X className="h-3 w-3" />
+                </button>
+              )}
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {filter === "all" ? "all" : filter}
+              </span>
+            </div>
           </div>
           {filtered.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">No guardrails match this filter.</p>
+            <p className="text-xs text-muted-foreground italic">No custom guardrails match this filter.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {filtered.map((g) => (
@@ -197,7 +205,7 @@ export default function RiskCenter() {
                     className="absolute top-3 right-3 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={(e) => {
                       e.stopPropagation();
-                      remove(g.id).then(() => toast.success("Guardrail removed."));
+                      remove(g.id).then(() => toast.success("Annotation removed."));
                     }}
                   >
                     <Trash2 className="h-3 w-3 text-muted-foreground" />
@@ -208,6 +216,8 @@ export default function RiskCenter() {
           )}
         </div>
       )}
+
+      <EventModePanel />
 
       <div className="panel p-5 space-y-3 border-status-blocked/30">
         <div className="flex items-center gap-2">
