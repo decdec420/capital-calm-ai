@@ -416,6 +416,13 @@ export default function Copilot() {
       pendingReview: expNeedsReview.slice(0, 3).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta, hypothesis: e.hypothesis })),
       recentlyAccepted: expRecent.filter((e) => e.status === "accepted").slice(0, 5).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta })),
     },
+    katrinaLatestReview: katrinaReview ? {
+      date: katrinaReview.reviewed_at,
+      brief: katrinaReview.brief_text,
+      trend: katrinaReview.win_rate_trend,
+      promote_count: (katrinaReview.promote_ids ?? []).length,
+      kill_count: (katrinaReview.kill_ids ?? []).length,
+    } : null,
   });
 
   const send = async (text: string) => {
