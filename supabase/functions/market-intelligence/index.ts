@@ -370,9 +370,26 @@ async function runCryptoIntelAnalyst(
   symbol: string,
   fundingRate: number | null,
   fearGreed: { score: number; label: string } | null,
+  newsItems: NewsItem[],
+  previousNarrative: string | null,
 ): Promise<Record<string, unknown> | null> {
+  const newsContext = newsItems.length > 0
+    ? newsItems.map((n) =>
+      `• ${n.title} (${n.source}, ${new Date(n.published_at).toUTCString()})` +
+      ((n.votes?.important ?? 0) > 0
+        ? ` [⚠️ marked important by ${n.votes!.important} users]`
+        : "")
+    ).join("\n")
+    : "No significant news in the last 12 hours.";
+
+  const narrCtx = previousNarrative
+    ? `Current running narrative: ${previousNarrative}`
+    : "First run — no prior narrative context.";
+
   const userMsg = `
 Analyze the crypto-specific environment for ${symbol}.
+
+${narrCtx}
 
 DERIVATIVES DATA:
 - Funding Rate (latest, per 8h): ${fundingRate != null ? (fundingRate * 100).toFixed(4) + "%" : "unavailable"}
@@ -381,15 +398,23 @@ DERIVATIVES DATA:
 MARKET SENTIMENT:
 - Fear & Greed Index: ${fearGreed ? `${fearGreed.score}/100 — ${fearGreed.label}` : "unavailable"}
 
+RECENT NEWS HEADLINES (last 12h):
+${newsContext}
+
 Analysis time: ${new Date().toISOString()}
 
 Produce your crypto intelligence brief. If data is unavailable, reason about
 what's typical for current conditions and clearly note the data gap.
+
+For news_flags: include ONLY material headlines that should cause the Risk Manager
+to raise its bar this session (protocol exploit, ETF news, regulatory action, major
+liquidation cascade, exchange outage, key opinion-leader crisis). Skip routine price
+commentary, generic market recaps, and clickbait. Empty array is acceptable and common.
 `.trim();
 
   return callExpert(apiKey, CRYPTO_INTEL_SYSTEM, userMsg, "submit_crypto_intel", {
     type: "object",
-    required: ["funding_rate_signal", "environment_rating", "sentiment_summary"],
+    required: ["funding_rate_signal", "environment_rating", "sentiment_summary", "news_flags"],
     additionalProperties: false,
     properties: {
       funding_rate_signal: {
@@ -410,6 +435,28 @@ what's typical for current conditions and clearly note the data gap.
         type: "string",
         description:
           "2-3 sentences. What do derivatives + sentiment say about this market? What does it mean for long vs short trades right now? Be specific.",
+      },
+      news_flags: {
+        type: "array",
+        description:
+          "Material news items. Empty array if nothing material. Each item: 1-line summary + impact direction.",
+        items: {
+          type: "object",
+          required: ["headline", "severity", "impact"],
+          additionalProperties: false,
+          properties: {
+            headline: { type: "string", description: "Short summary, ≤100 chars." },
+            severity: {
+              type: "string",
+              enum: ["info", "elevated", "high", "critical"],
+              description: "How seriously the Risk Manager should weight this.",
+            },
+            impact: {
+              type: "string",
+              enum: ["bullish", "bearish", "uncertain"],
+            },
+          },
+        },
       },
     },
   });
