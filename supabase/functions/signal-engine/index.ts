@@ -42,6 +42,11 @@ import {
 } from "../_shared/risk.ts";
 import { clampSize, notionalFromRiskPct } from "../_shared/sizing.ts";
 import {
+  resolveDoctrine,
+  type DoctrineSettingsRow,
+  type ResolvedDoctrine,
+} from "../_shared/doctrine-resolver.ts";
+import {
   appendTransition,
   transitionSignal,
   transitionTrade,
