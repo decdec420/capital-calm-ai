@@ -701,8 +701,13 @@ async function runTickForUser(
   const activeProfile: TradingProfile = getProfile(
     typeof sys.active_profile === "string" ? sys.active_profile : null,
   );
-  const MAX_CORRELATED_POSITIONS = activeProfile.maxCorrelatedPositions;
-  const RISK_PER_TRADE_PCT = activeProfile.riskPerTradePct;
+  // Per-user resolved doctrine — overrides profile presets when settings exist.
+  // Equity comes a bit later, so resolve once below where we have it.
+  const settingsRow = (doctrineRow ?? null) as DoctrineSettingsRow | null;
+  const MAX_CORRELATED_POSITIONS =
+    settingsRow?.max_correlated_positions ?? activeProfile.maxCorrelatedPositions;
+  const RISK_PER_TRADE_PCT =
+    settingsRow?.risk_per_trade_pct ?? activeProfile.riskPerTradePct;
 
   // Event mode / manual pause check — halts all symbols this tick.
   const tradingPausedUntil = sys.trading_paused_until;
