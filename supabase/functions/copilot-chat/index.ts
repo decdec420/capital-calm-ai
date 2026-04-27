@@ -142,6 +142,12 @@ Deno.serve(async (req: Request) => {
     if (userErr || !userData?.user) return json({ error: "Unauthorized" }, 401);
     const userId = userData.user.id;
 
+    // --- Rate limit: 20 req / 60s per user ---
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const rlAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const rl = await checkRateLimit(rlAdmin, userId, "copilot-chat", 20);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     // --- Input validation ---
     let payload: { conversationId?: unknown; userMessage?: unknown; context?: unknown };
     try {
