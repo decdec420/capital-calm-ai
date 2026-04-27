@@ -1081,8 +1081,8 @@ async function runTickForUser(
     };
   }
 
-  const sizeUsd = clamp.sizeUsd;
-  const fullSize = clamp.qty;
+  let sizeUsd = clamp.sizeUsd;
+  let fullSize = clamp.qty;
 
   // Stop fallback uses the strategy's stop_atr_mult so the param actually
   // changes live trades, not just backtests. We approximate ATR as 1% of
@@ -1106,6 +1106,73 @@ async function runTickForUser(
       (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
   );
   const conf = Math.max(0, Math.min(1, Number(decision.confidence ?? 0.5)));
+
+  // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
+  // Only fires when a trade is actually proposed — keeps cost low since
+  // most ticks are skips. Veto = bail out completely. reduce_size = trim
+  // the order before persisting. approve = no-op.
+  let riskVerdict: {
+    verdict: "approve" | "reduce_size" | "veto";
+    sizeMultiplier?: number;
+    reason: string;
+  } | null = null;
+  if (decision.decision === "propose_trade") {
+    riskVerdict = await runRiskManager({
+      symbol: winner.symbol,
+      side: side as "long" | "short",
+      entry,
+      stop,
+      target,
+      sizeUsd,
+      confidence: conf,
+      equity,
+      openTrades: openTrades ?? [],
+      intel,
+      LOVABLE_API_KEY,
+    });
+
+    if (riskVerdict.verdict === "veto") {
+      await admin.from("journal_entries").insert({
+        user_id: userId,
+        kind: "skip",
+        title: `Risk Manager vetoed ${winner.symbol} ${side.toUpperCase()} @ $${entry.toFixed(2)}`,
+        summary: `Risk Manager: ${riskVerdict.reason}`,
+        tags: [winner.symbol, "risk-veto", winner.regime.regime],
+      });
+      const vetoGate = gate(
+        GATE_CODES.AI_SKIP,
+        "skip",
+        `${winner.symbol}: Risk Manager veto — ${riskVerdict.reason}`,
+        { symbol: winner.symbol, riskManagerVerdict: riskVerdict },
+      );
+      await persistSnapshot(admin, userId, {
+        gateReasons: [vetoGate],
+        perSymbol,
+        chosenSymbol: winner.symbol,
+      });
+      return {
+        userId,
+        tick: "risk_vetoed",
+        symbol: winner.symbol,
+        reason: riskVerdict.reason,
+        gateReasons: [vetoGate],
+        expiredCount,
+        perSymbol,
+      };
+    }
+
+    if (riskVerdict.verdict === "reduce_size") {
+      const originalSizeUsd = sizeUsd;
+      const mult = Math.max(0.25, Math.min(0.75, riskVerdict.sizeMultiplier ?? 0.5));
+      sizeUsd = Math.max(0.25, sizeUsd * mult);
+      fullSize = entry > 0 ? sizeUsd / entry : fullSize;
+      console.log(
+        `Risk Manager reduced size $${originalSizeUsd.toFixed(2)} → $${sizeUsd.toFixed(2)} (×${mult}): ${riskVerdict.reason}`,
+      );
+      decision.reasoning = `${decision.reasoning ?? ""} [Risk Manager: ${riskVerdict.reason}]`;
+    }
+  }
+
 
   // ── Stage 5: INSERT signal row (FSM-traced) ──────────────────
   const proposedResult = transitionSignal("proposed", "proposed", {
