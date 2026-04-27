@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { anyRefusal, evaluateRiskGates, isRefusal } from "./risk.ts";
+import { anyRefusal, evaluateRiskGates } from "./risk.ts";
 
 const baseCtx = {
   symbol: "BTC-USD",
@@ -63,7 +63,7 @@ Deno.test("risk — stale candle produces a skip", () => {
   const stale = r.find((x) => x.code === "STALE_DATA");
   assertEquals(stale?.severity, "skip");
   // skips are NOT refusals
-  assertEquals(stale ? isRefusal(stale) : false, false);
+  assertEquals(stale ? anyRefusal([stale]) : false, false);
 });
 
 Deno.test("risk — wide spread produces a skip", () => {

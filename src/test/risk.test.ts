@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateRiskGates, anyRefusal, isRefusal } from "../../supabase/functions/_shared/risk";
+import { evaluateRiskGates, anyRefusal } from "../../supabase/functions/_shared/risk";
 
 function baseCtx(overrides: Partial<Parameters<typeof evaluateRiskGates>[0]> = {}) {
   return {
@@ -58,7 +58,7 @@ describe("risk gate stack", () => {
     const reasons = evaluateRiskGates(baseCtx({ hasOpenPosition: true }));
     const r = reasons.find((r) => r.code === "OPEN_POSITION");
     expect(r).toBeDefined();
-    expect(isRefusal(r!)).toBe(true);
+    expect(anyRefusal([r!])).toBe(true);
   });
 
   it("blocks new signal when one is already pending", () => {
