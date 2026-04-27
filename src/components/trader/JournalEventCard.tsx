@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
 import type { JournalEntry } from "@/lib/domain-types";
 import { ReasonChip } from "./ReasonChip";
+import { GraduationCap } from "lucide-react";
 
 const kindTone = {
   research: "candidate",
@@ -23,12 +24,36 @@ function timeAgo(iso: string) {
 }
 
 export function JournalEventCard({ entry, className }: { entry: JournalEntry; className?: string }) {
+  const isCoach = entry.tags?.includes("trade-coach");
+  const gradeTag = entry.tags?.find((t) => t.startsWith("grade_"));
+  const grade = gradeTag ? gradeTag.replace("grade_", "").toUpperCase() : null;
+  const experimentQueued = entry.tags?.includes("experiment-queued");
+
   return (
     <div className={cn("panel p-4 space-y-2 hover:border-border/80 transition-colors", className)}>
       <div className="flex items-center justify-between gap-2">
-        <StatusBadge tone={kindTone[entry.kind]} size="sm">
-          {entry.kind}
-        </StatusBadge>
+        <div className="flex items-center gap-2">
+          <StatusBadge tone={kindTone[entry.kind]} size="sm">
+            {isCoach ? (
+              <span className="inline-flex items-center gap-1">
+                <GraduationCap className="h-2.5 w-2.5" /> coach
+              </span>
+            ) : (
+              entry.kind
+            )}
+          </StatusBadge>
+          {grade && (
+            <StatusBadge
+              tone={grade === "A" ? "safe" : grade === "B" ? "candidate" : grade === "C" ? "caution" : "blocked"}
+              size="sm"
+            >
+              grade {grade}
+            </StatusBadge>
+          )}
+          {experimentQueued && (
+            <StatusBadge tone="accent" size="sm">experiment queued</StatusBadge>
+          )}
+        </div>
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground tabular">
           {timeAgo(entry.timestamp)}
         </span>
@@ -37,7 +62,7 @@ export function JournalEventCard({ entry, className }: { entry: JournalEntry; cl
       <p className="text-xs text-muted-foreground leading-relaxed">{entry.summary}</p>
       {entry.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 pt-1">
-          {entry.tags.map((t) => (
+          {entry.tags.filter((t) => !t.startsWith("grade_") && t !== "experiment-queued" && t !== "trade-coach").map((t) => (
             <ReasonChip key={t} label={t} />
           ))}
         </div>

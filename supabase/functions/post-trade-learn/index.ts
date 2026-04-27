@@ -182,6 +182,314 @@ async function refreshStrategyMetrics(
     .eq("id", strategyId);
 }
 
+// ============================================================
+// Trade Coach — the fourth expert on the desk.
+// Reviews each closed trade with the full Brain Trust context
+// active at entry, grades process (not outcome), produces a
+// 1-2 sentence lesson, and optionally queues an experiment.
+// ============================================================
+const TRADE_COACH_SYSTEM = `
+You are the Trade Coach on a professional crypto trading desk.
+Your job: after every trade closes, review it with the full context
+of WHY it was entered, HOW it behaved, and WHAT it means going forward.
+
+You are not a cheerleader. A winning trade can be a bad trade (lucky).
+A losing trade can be a good trade (right process, bad outcome).
+You evaluate PROCESS, not just outcome.
+
+You think like the greatest trading mentors:
+- Ed Seykota: discipline of the system matters more than any single trade.
+- Mark Douglas: evaluate whether entry criteria were met, not whether we won.
+- Van Tharp: what belief generated this trade? Was it correct?
+- Linda Raschke: a well-managed loss taken cleanly is a victory for the system.
+
+YOUR FRAMEWORK:
+1. ENTRY QUALITY: macro alignment, environment rating, key-level vs open space,
+   pullback vs breakout, R/R ratio at entry.
+2. TRADE BEHAVIOR: immediate move vs chop, wick stops, exit timing.
+3. REGIME/CONTEXT ACCURACY: did regime + macro bias prove correct?
+4. SYSTEM IMPROVEMENT: one HYPOTHESIS this single trade generates (one data point,
+   not a conclusion).
+5. LESSON: 1-2 sentences, plain English, specific to THIS trade.
+
+Be specific about prices, percentages, and timeframes.
+Do not write generic advice. Write analysis of THIS trade.
+`.trim();
+
+// deno-lint-ignore no-explicit-any
+async function runTradeCoach(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  t: TradeRow,
+  sig: SignalRow | null,
+  outcome: "win" | "loss" | "breakeven",
+  apiKey: string,
+): Promise<void> {
+  // Idempotency — only one coach entry per trade.
+  const { data: existingCoach } = await admin
+    .from("journal_entries")
+    .select("id")
+    .eq("user_id", t.user_id)
+    .eq("kind", "learning")
+    .filter("raw->>tradeId", "eq", t.id)
+    .filter("raw->>source", "eq", "trade-coach")
+    .maybeSingle();
+  if (existingCoach) return;
+
+  // Brain Trust brief that was active at trade time. We currently keep one
+  // row per (user, symbol) — use that as the proxy snapshot.
+  const { data: intel } = await admin
+    .from("market_intelligence")
+    .select("*")
+    .eq("user_id", t.user_id)
+    .eq("symbol", t.symbol)
+    .maybeSingle();
+
+  const entryPrice = Number(t.entry_price);
+  const exitPrice = Number(t.exit_price ?? 0);
+  const stopLoss = Number(t.stop_loss ?? 0);
+  const takeProfit = Number(t.take_profit ?? 0);
+  const pnlPct = Number(t.pnl_pct ?? 0);
+  const entryTime = new Date(t.opened_at);
+  const exitTime = new Date(t.closed_at ?? new Date());
+  const durationHours = (exitTime.getTime() - entryTime.getTime()) / 3_600_000;
+  const riskPct = entryPrice > 0 && stopLoss > 0
+    ? (Math.abs(entryPrice - stopLoss) / entryPrice) * 100
+    : 0;
+  const rewardPct = entryPrice > 0 && takeProfit > 0
+    ? (Math.abs(takeProfit - entryPrice) / entryPrice) * 100
+    : 0;
+  const rrAtEntry = riskPct > 0 ? rewardPct / riskPct : 0;
+
+  // deno-lint-ignore no-explicit-any
+  const ctxSnapshot = (sig as any)?.context_snapshot ?? null;
+  const riskVerdict = ctxSnapshot?.riskManagerVerdict
+    ? JSON.stringify(ctxSnapshot.riskManagerVerdict)
+    : "not available";
+
+  const tradeContext = `
+TRADE SUMMARY:
+- Symbol: ${t.symbol}
+- Direction: ${t.side?.toUpperCase()}
+- Entry: $${entryPrice.toFixed(2)} at ${entryTime.toISOString()}
+- Exit: $${exitPrice.toFixed(2)} at ${exitTime.toISOString()}
+- Duration: ${durationHours.toFixed(1)} hours
+- Stop loss: $${stopLoss.toFixed(2)} (${riskPct.toFixed(2)}% from entry)
+- Take profit: $${takeProfit.toFixed(2)} (${rewardPct.toFixed(2)}% from entry)
+- R/R at entry: ${rrAtEntry.toFixed(2)}:1
+- Outcome: ${outcome.toUpperCase()} | PnL: ${pnlPct.toFixed(2)}%
+- How it exited: ${t.notes ?? "unknown"}
+- Tags: ${(t.reason_tags ?? []).join(", ")}
+
+ENTRY CONTEXT (signal engine):
+- AI confidence: ${((Number(sig?.confidence ?? 0)) * 100).toFixed(0)}%
+- Setup score: ${sig?.setup_score?.toFixed?.(2) ?? "unknown"}
+- Regime at entry: ${sig?.regime ?? "unknown"}
+- AI reasoning: "${sig?.ai_reasoning ?? "not available"}"
+- Risk manager verdict: ${riskVerdict}
+
+BRAIN TRUST CONTEXT (current cached intel — proxy for entry-time):
+- Macro bias: ${intel?.macro_bias ?? "unknown"} (confidence: ${((Number(intel?.macro_confidence ?? 0)) * 100).toFixed(0)}%)
+- Market phase: ${intel?.market_phase ?? "unknown"}
+- Trend structure: ${intel?.trend_structure ?? "unknown"}
+- Environment rating: ${intel?.environment_rating ?? "unknown"}
+- Funding rate signal: ${intel?.funding_rate_signal ?? "unknown"}
+- Fear/Greed: ${intel?.fear_greed_score ?? "unknown"} (${intel?.fear_greed_label ?? "unknown"})
+- Pattern context: "${intel?.pattern_context ?? "not available"}"
+- Entry quality context: "${intel?.entry_quality_context ?? "not available"}"
+- Macro summary: "${intel?.macro_summary ?? "not available"}"
+`.trim();
+
+  const aiResp = await fetch(
+    "https://ai.gateway.lovable.dev/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: TRADE_COACH_SYSTEM },
+          {
+            role: "user",
+            content: `Analyze this closed trade and extract lessons:\n\n${tradeContext}`,
+          },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "submit_trade_analysis",
+            parameters: {
+              type: "object",
+              required: [
+                "entry_quality_grade",
+                "process_verdict",
+                "lesson",
+                "experiment_hypothesis",
+              ],
+              additionalProperties: false,
+              properties: {
+                entry_quality_grade: {
+                  type: "string",
+                  enum: ["A", "B", "C", "D"],
+                  description:
+                    "Grade entry quality on PROCESS not outcome. A=textbook, D=should not have entered.",
+                },
+                process_verdict: {
+                  type: "string",
+                  enum: [
+                    "good_process_good_outcome",
+                    "good_process_bad_outcome",
+                    "bad_process_good_outcome",
+                    "bad_process_bad_outcome",
+                  ],
+                },
+                macro_alignment: {
+                  type: "string",
+                  enum: ["well_aligned", "neutral", "fighting_macro"],
+                },
+                environment_fit: {
+                  type: "string",
+                  enum: ["excellent", "good", "poor"],
+                },
+                lesson: {
+                  type: "string",
+                  description:
+                    "1-2 sentences. Specific actionable lesson from THIS trade. Not generic.",
+                },
+                experiment_hypothesis: {
+                  type: "string",
+                  description:
+                    "Parameter/rule change to test, or 'null' if none.",
+                },
+                experiment_parameter: {
+                  type: "string",
+                  description:
+                    "One of: ema_fast, ema_slow, rsi_period, stop_atr_mult, tp_r_mult, max_order_pct. Or 'null'.",
+                },
+              },
+            },
+          },
+        }],
+        tool_choice: {
+          type: "function",
+          function: { name: "submit_trade_analysis" },
+        },
+      }),
+    },
+  );
+
+  if (!aiResp.ok) {
+    console.error("trade coach AI error", aiResp.status, await aiResp.text());
+    return;
+  }
+  const aiJson = await aiResp.json();
+  const args =
+    aiJson.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+  if (!args) return;
+  // deno-lint-ignore no-explicit-any
+  let analysis: any;
+  try {
+    analysis = JSON.parse(args);
+  } catch {
+    return;
+  }
+
+  const grade = String(analysis.entry_quality_grade ?? "C");
+  const verdict = String(analysis.process_verdict ?? "");
+  const macroAlign = String(analysis.macro_alignment ?? "neutral");
+  const lesson = String(analysis.lesson ?? "").trim();
+  const hyp = String(analysis.experiment_hypothesis ?? "").trim();
+  const param = String(analysis.experiment_parameter ?? "").trim();
+  const hasHypothesis = hyp && hyp.toLowerCase() !== "null" && param &&
+    param.toLowerCase() !== "null";
+
+  // Maybe queue an experiment from the lesson — close the loop.
+  let queuedExperimentId: string | null = null;
+  if (hasHypothesis) {
+    const { data: strategy } = await admin
+      .from("strategies")
+      .select("id,params")
+      .eq("user_id", t.user_id)
+      .eq("status", "approved")
+      .maybeSingle();
+    if (strategy) {
+      const params = (strategy.params ?? []) as Array<
+        { key: string; value: unknown }
+      >;
+      const currentParam = params.find((p) => p.key === param);
+      if (currentParam && typeof currentParam.value === "number") {
+        const lower = hyp.toLowerCase();
+        const direction =
+          lower.includes("wider") || lower.includes("larger") ||
+            lower.includes("increase") || lower.includes("raise")
+            ? 1
+            : -1;
+        const proposedValue = Number(
+          (Number(currentParam.value) * (1 + direction * 0.2)).toFixed(3),
+        );
+        const { data: exp } = await admin.from("experiments").insert({
+          user_id: t.user_id,
+          title:
+            `Coach suggestion: adjust ${param} after ${t.symbol} trade`,
+          parameter: param,
+          before_value: String(currentParam.value),
+          after_value: String(proposedValue),
+          delta: `${
+            ((proposedValue - Number(currentParam.value)) /
+              Number(currentParam.value) *
+              100).toFixed(0)
+          }%`,
+          hypothesis: hyp,
+          symbol: t.symbol,
+          status: "queued",
+          proposed_by: "coach",
+          strategy_id: strategy.id,
+        }).select("id").maybeSingle();
+        queuedExperimentId = exp?.id ?? null;
+      }
+    }
+  }
+
+  const tags = Array.from(
+    new Set([
+      "trade-coach",
+      t.symbol,
+      outcome,
+      `grade_${grade.toLowerCase()}`,
+      verdict,
+      macroAlign,
+      ...(queuedExperimentId ? ["experiment-queued"] : []),
+    ].filter(Boolean) as string[]),
+  );
+
+  await admin.from("journal_entries").insert({
+    user_id: t.user_id,
+    kind: "learning",
+    title:
+      `🎓 Coach: ${t.symbol} ${t.side.toUpperCase()} — grade ${grade}, ${
+        verdict.replace(/_/g, " ")
+      }`,
+    summary: lesson,
+    tags,
+    source: "trade-coach",
+    raw: {
+      tradeId: t.id,
+      source: "trade-coach",
+      grade,
+      processVerdict: verdict,
+      macroAlignment: macroAlign,
+      environmentFit: analysis.environment_fit ?? null,
+      lesson,
+      experimentHypothesis: hasHypothesis ? hyp : null,
+      experimentParameter: hasHypothesis ? param : null,
+      experimentId: queuedExperimentId,
+    },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -386,6 +694,17 @@ Deno.serve(async (req) => {
         await refreshStrategyMetrics(admin, t.strategy_id, t.user_id);
       } catch (e) {
         console.error("rolling metric refresh failed", e);
+      }
+    }
+
+    // Trade Coach — additive AI-powered post-trade lesson + experiment hypothesis.
+    // Best-effort: never block the journal write or fail the function on coach errors.
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (LOVABLE_API_KEY) {
+      try {
+        await runTradeCoach(admin, t, sig, outcome, LOVABLE_API_KEY);
+      } catch (e) {
+        console.error("trade coach failed (non-fatal):", e);
       }
     }
 

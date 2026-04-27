@@ -10,7 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useExperiments, type NewExperimentInput } from "@/hooks/useExperiments";
 import type { Experiment, CopilotMemoryRow, StrategyMetrics, ExperimentBacktestResult } from "@/lib/domain-types";
-import { Brain, Check, ChevronDown, FlaskConical, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
+import { Brain, Check, ChevronDown, FlaskConical, GraduationCap, MoreHorizontal, Plus, Sparkles, Trash2, X, Rocket, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -345,6 +345,7 @@ function ExperimentRow({
 }) {
   const [open, setOpen] = useState(false);
   const isCopilot = exp.proposedBy === "copilot";
+  const isCoach = exp.proposedBy === "coach";
   const bt = exp.backtestResult;
 
   return (
@@ -359,6 +360,11 @@ function ExperimentRow({
         {isCopilot && (
           <StatusBadge tone="accent" size="sm">
             <Sparkles className="h-2.5 w-2.5" /> copilot
+          </StatusBadge>
+        )}
+        {isCoach && (
+          <StatusBadge tone="accent" size="sm">
+            <GraduationCap className="h-2.5 w-2.5" /> coach
           </StatusBadge>
         )}
         <div className="min-w-0 flex-1">
