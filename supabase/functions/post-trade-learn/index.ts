@@ -26,6 +26,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// Trade Coach uses Sonnet — grades entries A-D and writes actionable lessons.
+// Runs at most 2×/day (daily trade cap). Quality of feedback matters here.
+const TRADE_COACH_MODEL = "anthropic/claude-sonnet-4-6";
+
 interface TradeRow {
   id: string;
   user_id: string;
