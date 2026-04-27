@@ -13,6 +13,7 @@
 
 import {
   CAPITAL_PRESERVATION_DOCTRINE,
+  MAX_CORRELATED_POSITIONS,
   MAX_ORDER_USD,
   SYMBOL_WHITELIST,
   validateDoctrineInvariants,
@@ -553,6 +554,52 @@ async function runTickForUser(
           "User has no system_state row.",
         ),
       ],
+      expiredCount,
+      perSymbol: [],
+    };
+  }
+
+  // Event mode / manual pause check — halts all symbols this tick.
+  const tradingPausedUntil = sys.trading_paused_until;
+  if (tradingPausedUntil && new Date(tradingPausedUntil) > new Date()) {
+    const pausedGate = gate(
+      GATE_CODES.TRADING_PAUSED_EVENT_MODE,
+      "halt",
+      `Trading paused until ${new Date(tradingPausedUntil).toLocaleString()}. Resume via Risk Center.`,
+      { resumesAt: tradingPausedUntil },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [pausedGate],
+      perSymbol: [],
+      chosenSymbol: null,
+    });
+    return {
+      userId,
+      tick: "event_mode",
+      gateReasons: [pausedGate],
+      expiredCount,
+      perSymbol: [],
+    };
+  }
+
+  // Correlation cap — count open trades across all whitelisted symbols.
+  const totalOpenTrades = (openTrades ?? []).length;
+  if (totalOpenTrades >= MAX_CORRELATED_POSITIONS) {
+    const corrGate = gate(
+      GATE_CODES.DOCTRINE_CORRELATION_BLOCK,
+      "halt",
+      `Max ${MAX_CORRELATED_POSITIONS} correlated position(s) already open across BTC/ETH/SOL.`,
+      { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [corrGate],
+      perSymbol: [],
+      chosenSymbol: null,
+    });
+    return {
+      userId,
+      tick: "correlation_cap",
+      gateReasons: [corrGate],
       expiredCount,
       perSymbol: [],
     };
