@@ -518,6 +518,45 @@ export default function Copilot() {
           <span className="text-muted-foreground/50">gemini-flash</span>
         </div>
 
+        <span className="text-border">|</span>
+
+        {/* Jessica — autonomous orchestrator */}
+        <div className="flex items-center gap-1.5">
+          {(() => {
+            const decision = system?.lastJessicaDecision ?? null;
+            const ranAt = decision?.ran_at ?? null;
+            const ageSec = ranAt
+              ? Math.floor((Date.now() - new Date(ranAt).getTime()) / 1000)
+              : null;
+            const healthy = ageSec !== null && ageSec < 90;
+            const ageLabel =
+              ageSec === null
+                ? "never"
+                : ageSec < 60
+                  ? `${ageSec}s ago`
+                  : `${Math.floor(ageSec / 60)}m ago`;
+            return (
+              <>
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    healthy ? "bg-status-safe" : "bg-muted-foreground/40",
+                  )}
+                />
+                <span>Jessica</span>
+                <span className="text-muted-foreground/50">·</span>
+                <span className="tabular">{ageLabel}</span>
+                {decision?.actions ? (
+                  <span className="text-muted-foreground/50 ml-1">
+                    {decision.actions} action{decision.actions !== 1 ? "s" : ""}
+                  </span>
+                ) : null}
+              </>
+            );
+          })()}
+        </div>
+
+
         {/* Pipeline run progress inline */}
         {pipelineStep && (
           <>
