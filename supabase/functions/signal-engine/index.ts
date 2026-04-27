@@ -258,8 +258,8 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile } = opts;
-  const MAX_ORDER_USD = profile.maxOrderUsdHardCap;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride } = opts;
+  const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
   const liveStopAtrMult = stratParams.stopAtrMult;
   const liveTpMult = stratParams.tpRMult;
