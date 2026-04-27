@@ -863,6 +863,9 @@ async function runTickForUser(
 
   // Equity & daily counters for the risk gate.
   const equity = acct ? Number(acct.equity) : 0;
+  // Resolve per-user effective doctrine caps from settings + live equity.
+  // Authoritative source for max-order USD, daily-loss USD, kill-switch floor.
+  const resolvedDoctrine: ResolvedDoctrine = resolveDoctrine(settingsRow, equity);
   // Daily realized PnL is computed on read via a SQL function — there is no
   // realized_pnl_today column on account_state. Falling back to 0 here would
   // silently disable the daily loss cap.
