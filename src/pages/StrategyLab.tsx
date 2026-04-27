@@ -643,7 +643,6 @@ function CandidateRow({
   const [expanded, setExpanded] = useState(false);
   const m = s.metrics;
   const trades = m.trades ?? 0;
-  const progress = Math.min(100, (trades / TRADES_TO_PROMOTE) * 100);
   const remaining = Math.max(0, TRADES_TO_PROMOTE - trades);
   const canForcePromote = trades >= TRADES_TO_PROMOTE;
 
@@ -745,19 +744,8 @@ function CandidateRow({
         </div>
       </div>
 
-      {/* Compact progress + headline deltas always visible */}
-      <div className="mt-2.5 grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-center">
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground">
-              {trades} of {TRADES_TO_PROMOTE} paper trades
-            </span>
-            <span className="text-muted-foreground tabular">
-              {canForcePromote ? "Ready for review" : `${remaining} to go`}
-            </span>
-          </div>
-          <Progress value={progress} className="h-1.5" />
-        </div>
+      {/* Headline deltas always visible */}
+      <div className="mt-2.5 grid grid-cols-1 md:grid-cols-[auto_auto] gap-3 items-center justify-end">
         <CompactDelta
           label="Profit/trade"
           cur={m.expectancy}

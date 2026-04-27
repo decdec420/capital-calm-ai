@@ -21,6 +21,12 @@ export function SignalExplainDialog({ signal, open, onOpenChange }: SignalExplai
 
   const fetchExplanation = async (force = false) => {
     if (!signal) return;
+    // P2-C: guard — surface a clear message if the signal ID is missing
+    // rather than sending a bad request to the edge function.
+    if (!signal.id) {
+      toast.error("Signal ID is missing — try refreshing the page.");
+      return;
+    }
     setLoading(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
