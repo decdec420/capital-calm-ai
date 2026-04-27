@@ -443,7 +443,7 @@ What is your verdict?
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: RISK_MANAGER_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMsg },
