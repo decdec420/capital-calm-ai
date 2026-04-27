@@ -9,6 +9,7 @@ import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
 import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
+import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
 import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
 import { ConversationSidebar } from "@/components/trader/ConversationSidebar";
 import ReactMarkdown from "react-markdown";
