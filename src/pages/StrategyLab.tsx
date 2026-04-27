@@ -496,7 +496,6 @@ function InTestingPanel({
     return diffs;
   }, [approved, inTesting]);
 
-  return (
   const friendly = displayNameFor(inTesting);
   const baseValueForFirstDiff = paramDiffs[0]?.before;
   const summary =
