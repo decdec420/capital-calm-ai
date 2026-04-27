@@ -1,5 +1,6 @@
 // journal-explain edge function — produces an LLM explanation for a single
 // journal entry and writes it back to the row.
+import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
