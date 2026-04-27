@@ -2,6 +2,8 @@
 // Lives here so the run-experiment edge function and the client can share
 // EXACTLY the same numbers. No DOM, no Node, no Deno imports.
 
+import { ema, rsi } from "./indicators";
+
 export interface SharedCandle { t: number; o: number; h: number; l: number; c: number; v: number }
 export interface SharedParam { key: string; value: number | string | boolean; unit?: string }
 export interface SharedMetrics {
@@ -42,38 +44,7 @@ function paramNum(params: SharedParam[], key: string, fallback: number): number 
   return Number.isFinite(n) ? n : fallback;
 }
 
-function ema(values: number[], period: number): number[] {
-  const k = 2 / (period + 1);
-  const out: number[] = [];
-  let prev = values[0];
-  for (let i = 0; i < values.length; i++) {
-    prev = i === 0 ? values[0] : values[i] * k + prev * (1 - k);
-    out.push(prev);
-  }
-  return out;
-}
-
-function rsi(values: number[], period: number): number[] {
-  const out: number[] = new Array(values.length).fill(50);
-  if (values.length < period + 1) return out;
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = values[i] - values[i - 1];
-    if (d >= 0) gains += d; else losses -= d;
-  }
-  let avgG = gains / period;
-  let avgL = losses / period;
-  out[period] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
-  for (let i = period + 1; i < values.length; i++) {
-    const d = values[i] - values[i - 1];
-    const g = d > 0 ? d : 0;
-    const l = d < 0 ? -d : 0;
-    avgG = (avgG * (period - 1) + g) / period;
-    avgL = (avgL * (period - 1) + l) / period;
-    out[i] = avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL);
-  }
-  return out;
-}
+// ema/rsi now imported from ./indicators (P4-D dedupe).
 
 function atr(candles: SharedCandle[], period: number): number[] {
   const tr: number[] = [];
