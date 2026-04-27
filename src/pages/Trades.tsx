@@ -32,6 +32,7 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Plus, TrendingUp, X } from "lucide-react";
 import type { Trade, TradeSide } from "@/lib/domain-types";
+import { formatBaseQty, formatUsd } from "@/lib/utils";
 import { toast } from "sonner";
 
 export default function Trades() {
