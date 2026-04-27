@@ -63,6 +63,60 @@ async function fetchFundingRate(symbol: Symbol): Promise<number | null> {
   }
 }
 
+// ─── CryptoPanic news fetcher (free public feed, best-effort) ────
+
+interface NewsItem {
+  title: string;
+  source: string;
+  url?: string;
+  published_at: string;
+  currencies?: Array<{ code: string; title?: string }>;
+  votes?: { positive?: number; negative?: number; important?: number };
+}
+
+async function fetchCryptoNews(symbol: Symbol): Promise<NewsItem[]> {
+  const currencyMap: Record<string, string> = {
+    "BTC-USD": "BTC",
+    "ETH-USD": "ETH",
+    "SOL-USD": "SOL",
+  };
+  const currency = currencyMap[symbol] ?? "BTC";
+  try {
+    const url =
+      `https://cryptopanic.com/api/free/v1/posts/?auth_token=free&currencies=${currency}&kind=news&public=true`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return [];
+    const data = await r.json();
+    const results = (data?.results ?? []) as Array<{
+      title?: string;
+      published_at?: string;
+      source?: { title?: string; domain?: string };
+      url?: string;
+      currencies?: Array<{ code: string; title?: string }>;
+      votes?: Record<string, number>;
+    }>;
+    return results
+      .filter((it) => it.title && it.published_at)
+      .slice(0, 8)
+      .sort((a, b) => (b.votes?.important ?? 0) - (a.votes?.important ?? 0))
+      .slice(0, 5)
+      .map((it) => ({
+        title: it.title!,
+        source: it.source?.title ?? it.source?.domain ?? "unknown",
+        url: it.url,
+        published_at: it.published_at!,
+        currencies: it.currencies,
+        votes: {
+          positive: it.votes?.positive ?? 0,
+          negative: it.votes?.negative ?? 0,
+          important: it.votes?.important ?? 0,
+        },
+      }));
+  } catch {
+    return [];
+  }
+}
+
 // ─── AI Call Helper (structured tool calling) ────────────────────
 
 async function callExpert(
