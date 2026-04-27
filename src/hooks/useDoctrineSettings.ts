@@ -63,7 +63,7 @@ export function useDoctrineSettings(): UseDoctrineSettingsResult {
   useEffect(() => {
     if (!user) return;
     const ch = supabase
-      .channel("doctrine_settings_self")
+      .channel(`doctrine_settings_self:${user.id}:${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "doctrine_settings", filter: `user_id=eq.${user.id}` },
