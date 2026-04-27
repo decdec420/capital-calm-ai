@@ -127,6 +127,7 @@ export default function StrategyLab() {
     return {
       name: source.name,
       version: v,
+      displayName: source.displayName,
       status: "candidate",
       description: `Clone of ${source.version} — tweak params and test in paper.`,
       params: source.params,
