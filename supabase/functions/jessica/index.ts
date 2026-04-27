@@ -146,21 +146,59 @@ async function checkAgentHealth(
   });
 
   // Upsert all health rows. Failures here are non-fatal — Jessica must keep going.
+  //
+  // Special handling for `signal_engine`: signal-engine itself writes this
+  // row to reflect MARKET-DATA health (e.g. Coinbase 4h fetch failed).
+  // Jessica's verdict here only reflects TICK FRESHNESS (did the engine
+  // run recently). We must not let "tick fresh → healthy" silently overwrite
+  // an active data failure. Strategy: read the existing row and keep the
+  // worst status. If signal-engine recorded failures, preserve its
+  // failure_count and last_error.
+  const STATUS_RANK: Record<AgentHealth["status"], number> = {
+    healthy: 0, stale: 1, degraded: 2, failed: 3,
+  };
   for (const h of health) {
     try {
-      await admin.from("agent_health").upsert(
-        {
-          user_id: userId,
-          agent_name: h.agent,
-          status: h.status,
-          last_success: h.status === "healthy" ? nowIso : undefined,
-          last_failure: h.status === "failed" ? nowIso : undefined,
-          failure_count: h.consecutiveFailures,
-          last_error: h.lastError,
-          checked_at: nowIso,
-        },
-        { onConflict: "user_id,agent_name" },
-      );
+      let row: Record<string, unknown> = {
+        user_id: userId,
+        agent_name: h.agent,
+        status: h.status,
+        last_success: h.status === "healthy" ? nowIso : undefined,
+        last_failure: h.status === "failed" ? nowIso : undefined,
+        failure_count: h.consecutiveFailures,
+        last_error: h.lastError,
+        checked_at: nowIso,
+      };
+
+      if (h.agent === "signal_engine") {
+        const { data: existing } = await admin
+          .from("agent_health")
+          .select("status, failure_count, last_error, last_failure, last_success")
+          .eq("user_id", userId)
+          .eq("agent_name", "signal_engine")
+          .maybeSingle();
+        if (existing) {
+          const existingRank =
+            STATUS_RANK[(existing.status as AgentHealth["status"]) ?? "healthy"] ?? 0;
+          const ourRank = STATUS_RANK[h.status];
+          // Keep the worse status. If existing is worse, also preserve its
+          // failure_count and last_error so the data-failure context survives.
+          if (existingRank > ourRank) {
+            row = {
+              ...row,
+              status: existing.status,
+              failure_count: existing.failure_count ?? h.consecutiveFailures,
+              last_error: existing.last_error ?? h.lastError,
+              last_success: existing.last_success ?? row.last_success,
+              last_failure: existing.last_failure ?? row.last_failure,
+            };
+          }
+        }
+      }
+
+      await admin
+        .from("agent_health")
+        .upsert(row, { onConflict: "user_id,agent_name" });
     } catch (e) {
       console.error(`[jessica] failed to upsert agent_health for ${h.agent}`, e);
     }

@@ -23,7 +23,13 @@ import {
   gate,
   type GateReason,
 } from "../_shared/reasons.ts";
-import { fetchCandles, type Candle, type Symbol } from "../_shared/market.ts";
+import {
+  fetchCandles,
+  fetchCandles4h,
+  MarketHealthTracker,
+  type Candle,
+  type Symbol,
+} from "../_shared/market.ts";
 import {
   computeRegime,
   TRADEABLE_REGIMES,
@@ -1856,10 +1862,20 @@ Deno.serve(async (req) => {
     // the 15m provides entry-timing momentum so the Technical Analyst can
     // tell the difference between "right setup, right time" and "right
     // setup, too early."
+    //
+    // 4h: Coinbase has no native 4h granularity — fetchCandles4h() pulls
+    // 1h candles and aggregates locally into UTC-aligned 4h buckets.
+    //
+    // Failures are accumulated into a single MarketHealthTracker and
+    // flushed per-user to agent_health.signal_engine after each user's
+    // tick. A success for one (symbol, timeframe) does NOT clear a
+    // failure for a different (symbol, timeframe) — see MarketHealthTracker.
+    const tracker = new MarketHealthTracker();
+    const fetchCtx = { tracker };
     const [candleResults1h, candleResults4h, candleResults15m] = await Promise.all([
-      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s))),
-      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 14400))),
-      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 900))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 3600, fetchCtx))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles4h(s, fetchCtx))),
+      Promise.allSettled(SYMBOLS.map((s) => fetchCandles(s, 900, fetchCtx))),
     ]);
     const candlesBySymbol = {} as Record<Symbol, Candle[]>;
     const candlesBySymbol4h = {} as Record<Symbol, Candle[]>;
@@ -1926,6 +1942,10 @@ Deno.serve(async (req) => {
             error: String(e),
           });
         }
+        // Flush per-user market-data health regardless of tick outcome.
+        // Tracker is shared across users this tick — the same candle
+        // failures apply to everyone.
+        await tracker.flushHealth(admin, u.user_id);
       }
       return new Response(
         JSON.stringify({
@@ -1967,6 +1987,7 @@ Deno.serve(async (req) => {
       candlesBySymbol15m,
       LOVABLE_API_KEY,
     );
+    await tracker.flushHealth(admin, userData.user.id);
     const status = result.tick === "ai_error" ? 500 : 200;
     return new Response(JSON.stringify(result), {
       status,
