@@ -1534,6 +1534,7 @@ Deno.serve(async (req) => {
             admin,
             u.user_id,
             candlesBySymbol,
+            candlesBySymbol4h,
             LOVABLE_API_KEY,
           );
           results.push(r);
