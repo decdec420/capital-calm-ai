@@ -61,6 +61,12 @@ const corsHeaders = {
 // Symbols come from the doctrine whitelist — single source of truth.
 const SYMBOLS = SYMBOL_WHITELIST;
 
+// ─── AI Model Assignments ──────────────────────────────────────
+// Technical Analyst stays on Flash — runs on every tick (288×/day).
+const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
+// Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
+const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
+
 // ─── Expired-pending sweep ─────────────────────────────────────
 // Marks stale pending signals as expired and appends a lifecycle
 // transition via the FSM helper.
@@ -260,7 +266,7 @@ You MUST call submit_decision. No plain text responses.
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: TECHNICAL_ANALYST_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           {
@@ -437,7 +443,7 @@ What is your verdict?
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: RISK_MANAGER_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMsg },
@@ -468,7 +474,13 @@ What is your verdict?
       }),
     });
 
-    if (!resp.ok) return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
+    if (!resp.ok) {
+      console.error(
+        `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL}, status=${resp.status})`,
+        await resp.text().catch(() => ""),
+      );
+      return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
+    }
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
@@ -478,7 +490,11 @@ What is your verdict?
       sizeMultiplier: parsed.size_multiplier,
       reason: parsed.reason,
     };
-  } catch {
+  } catch (e) {
+    console.error(
+      `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL})`,
+      e,
+    );
     return { verdict: "approve", reason: "Risk manager exception — approving by default." };
   }
 }

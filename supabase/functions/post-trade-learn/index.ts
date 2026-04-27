@@ -26,6 +26,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// Trade Coach uses Sonnet — grades entries A-D and writes actionable lessons.
+// Runs at most 2×/day (daily trade cap). Quality of feedback matters here.
+const TRADE_COACH_MODEL = "anthropic/claude-sonnet-4-6";
+
 interface TradeRow {
   id: string;
   user_id: string;
@@ -309,7 +313,7 @@ BRAIN TRUST CONTEXT (current cached intel — proxy for entry-time):
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: TRADE_COACH_MODEL,
         messages: [
           { role: "system", content: TRADE_COACH_SYSTEM },
           {
@@ -478,6 +482,7 @@ BRAIN TRUST CONTEXT (current cached intel — proxy for entry-time):
     raw: {
       tradeId: t.id,
       source: "trade-coach",
+      aiModel: TRADE_COACH_MODEL,
       grade,
       processVerdict: verdict,
       macroAlignment: macroAlign,
