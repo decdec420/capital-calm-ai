@@ -49,6 +49,51 @@ export default function Learning() {
   const [showResolved, setShowResolved] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showPromoted, setShowPromoted] = useState(false);
+  const [katrinaReview, setKatrinaReview] = useState<KatrinaReview | null>(null);
+  const [katrinaRunning, setKatrinaRunning] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("strategy_reviews")
+      .select("brief_text, reviewed_at, win_rate_trend, trades_analyzed, promote_ids, kill_ids, continue_ids")
+      .order("reviewed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data) setKatrinaReview(data as KatrinaReview);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const runKatrinaNow = async () => {
+    if (katrinaRunning) return;
+    setKatrinaRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("katrina", {
+        body: { trigger: "manual" },
+      });
+      if (error) throw error;
+      if (data?.skipped) {
+        toast.info(data.reason ?? "Not enough trades yet for a review.");
+      } else if (data?.error) {
+        toast.error(data.error);
+      } else {
+        toast.success("Katrina updated her review.");
+        const { data: fresh } = await supabase
+          .from("strategy_reviews")
+          .select("brief_text, reviewed_at, win_rate_trend, trades_analyzed, promote_ids, kill_ids, continue_ids")
+          .order("reviewed_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (fresh) setKatrinaReview(fresh as KatrinaReview);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not run Katrina.");
+    } finally {
+      setKatrinaRunning(false);
+    }
+  };
 
   const heroLine = (() => {
     const bits: string[] = [];
