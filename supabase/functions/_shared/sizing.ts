@@ -97,13 +97,16 @@ export function clampSize(input: ClampSizeInput): ClampSizeResult {
     symbol,
     minOrderUsd = 0.25,
     profile: profileInput,
+    resolved,
   } = input;
 
   const activeProfile: TradingProfile =
     typeof profileInput === "object" && profileInput
       ? profileInput
       : getProfile(typeof profileInput === "string" ? profileInput : undefined);
-  const orderCap = activeProfile.maxOrderUsdHardCap;
+  // Per-user resolved cap takes precedence over the profile preset.
+  const orderCap = resolved?.maxOrderUsd ?? activeProfile.maxOrderUsdHardCap;
+  const floorUsd = resolved?.killSwitchFloorUsd ?? KILL_SWITCH_FLOOR_USD;
 
   const reasons: GateReason[] = [];
 
