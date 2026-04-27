@@ -1310,6 +1310,7 @@ async function runTickForUser(
     LOVABLE_API_KEY,
     stratParams: liveParams,
     profile: activeProfile,
+    maxOrderUsdOverride: resolvedDoctrine.maxOrderUsd,
   });
 
   if ("error" in aiResult) {
