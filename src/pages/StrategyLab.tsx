@@ -352,30 +352,28 @@ function LivePanel({
   if (!approved) {
     return (
       <div className="panel p-5">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Live</div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Now trading</div>
         <EmptyState
           icon={<ShieldCheck className="h-5 w-5" />}
-          title="No live strategy"
-          description="Promote a candidate to set the strategy that's actually trading."
+          title="Nothing trading yet"
+          description="Promote a candidate to choose what runs with real money."
         />
       </div>
     );
   }
   const m = approved.metrics;
+  const friendly = displayNameFor(approved);
   return (
     <div className="panel p-5 space-y-4 border-status-safe/30">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <StatusBadge tone="safe" size="sm" dot>Live</StatusBadge>
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">currently trading</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-foreground">{approved.name}</h2>
-            <span className="text-sm text-muted-foreground">{approved.version}</span>
+          <StatusBadge tone="safe" size="sm" dot>Now trading</StatusBadge>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h2 className="text-xl font-semibold text-foreground">{friendly}</h2>
+            <span className="text-xs text-muted-foreground font-mono">{approved.name} {approved.version}</span>
           </div>
           {approved.description && (
-            <p className="text-xs text-muted-foreground max-w-xl">{approved.description}</p>
+            <p className="text-sm text-muted-foreground max-w-xl">{approved.description}</p>
           )}
           {promotionTitle && (
             <p className="text-[11px] text-muted-foreground italic">
@@ -415,12 +413,12 @@ function LivePanel({
         </DropdownMenu>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-border">
-        <Metric label="Expectancy" value={m.trades === 0 ? "—" : `${m.expectancy.toFixed(2)}R`} />
-        <Metric label="Win rate" value={m.trades === 0 ? "—" : `${(m.winRate * 100).toFixed(0)}%`} />
-        <Metric label="Max DD" value={m.trades === 0 ? "—" : `${(m.maxDrawdown * 100).toFixed(1)}%`} />
-        <Metric label="Sharpe" value={m.trades === 0 ? "—" : m.sharpe.toFixed(2)} />
-        <Metric label="Trades" value={m.trades === 0 ? "—" : String(m.trades)} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-border">
+        <FriendlyMetric label="Avg profit per trade" sub="Expectancy" value={m.trades === 0 ? "—" : `${m.expectancy.toFixed(2)}R`} hint="How many R you make on an average trade. Above 0 = profitable." />
+        <FriendlyMetric label="How often it wins" sub="Win rate" value={m.trades === 0 ? "—" : `${(m.winRate * 100).toFixed(0)}%`} hint="% of trades that closed in profit." />
+        <FriendlyMetric label="Worst losing streak" sub="Max drawdown" value={m.trades === 0 ? "—" : `${(m.maxDrawdown * 100).toFixed(1)}%`} hint="Largest peak-to-trough drop. Closer to 0 is better." />
+        <FriendlyMetric label="Smoothness" sub="Sharpe" value={m.trades === 0 ? "—" : m.sharpe.toFixed(2)} hint="How steady the returns are. Higher = less rollercoaster." />
+        <FriendlyMetric label="Sample size" sub="Trades" value={m.trades === 0 ? "—" : String(m.trades)} hint="More trades = more confidence in the numbers above." />
       </div>
     </div>
   );
