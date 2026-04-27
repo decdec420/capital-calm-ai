@@ -44,6 +44,11 @@ Deno.serve(async (req) => {
 
     // Fetch recent journals via service role
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Rate limit: 10 req / 60s per user
+    const rl = await checkRateLimit(admin, userId, "market-brief", 10);
+    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+
     const { data: journals } = await admin
       .from("journal_entries")
       .select("kind,title,summary,created_at")
