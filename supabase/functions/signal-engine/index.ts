@@ -492,6 +492,7 @@ async function runTickForUser(
     { data: openTrades },
     { data: pendingSignals },
     { data: recentSignals },
+    { data: intelligenceBriefs },
     patternMemory,
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -519,8 +520,27 @@ async function runTickForUser(
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(15),
+    admin
+      .from("market_intelligence")
+      .select("*")
+      .eq("user_id", userId),
     buildPatternMemory(admin, userId),
   ]);
+
+  // Index Brain Trust briefs by symbol; flag stale entries (>6h old).
+  // deno-lint-ignore no-explicit-any
+  const intelligenceBySymbol: Record<string, any> = {};
+  for (const brief of (intelligenceBriefs ?? []) as Array<{
+    symbol: string;
+    generated_at: string;
+    // deno-lint-ignore no-explicit-any
+    [k: string]: any;
+  }>) {
+    const ageHours =
+      (Date.now() - new Date(brief.generated_at).getTime()) / 3_600_000;
+    intelligenceBySymbol[brief.symbol] = { ...brief, _stale: ageHours > 6 };
+  }
+
 
   if (!sys) {
     return {
