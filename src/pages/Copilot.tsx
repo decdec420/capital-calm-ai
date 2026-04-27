@@ -584,7 +584,12 @@ export default function Copilot() {
           <AutonomyToggle />
 
           <div className="panel p-4 space-y-3">
-            <div className="text-sm font-medium text-foreground">Live context</div>
+            <div>
+              <div className="text-sm font-medium text-foreground">What Max sees</div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Auto-attached to every message you send.
+              </p>
+            </div>
 
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between gap-2">
