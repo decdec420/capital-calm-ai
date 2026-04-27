@@ -642,12 +642,17 @@ What is your verdict?
         `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL}, status=${resp.status})`,
         await resp.text().catch(() => ""),
       );
+      cbFailure();
       return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
     }
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
-    if (!args) return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
+    if (!args) {
+      cbFailure();
+      return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
+    }
     const parsed = JSON.parse(args);
+    cbSuccess();
     return {
       verdict: parsed.verdict,
       sizeMultiplier: parsed.size_multiplier,
@@ -658,6 +663,7 @@ What is your verdict?
       `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL})`,
       e,
     );
+    cbFailure();
     return { verdict: "approve", reason: "Risk manager exception — approving by default." };
   }
 }
