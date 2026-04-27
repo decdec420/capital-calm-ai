@@ -12,6 +12,8 @@
 // Jessica*  — Risk Manager. Enforces doctrine. Nothing gets through.  [risk gates in signal-engine]
 //   *Jessica plays dual role: autonomous orchestrator AND doctrine enforcer.
 // Rachel    — Trade Coach. Grades entries, drives learning.           [post-trade-learn]
+// Katrina   — Strategy Analyst. Runs the lab. Grades experiments, promotes winners,
+//             kills losers. Weekly review + trade milestone triggers.   [katrina]
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";

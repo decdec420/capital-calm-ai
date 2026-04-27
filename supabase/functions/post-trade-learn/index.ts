@@ -713,6 +713,30 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Trade-milestone trigger for Katrina (strategy review agent).
+    // Every 10th closed trade for this user fires Katrina for that user only.
+    // Fire-and-forget — never block the post-trade response.
+    try {
+      const { count } = await admin
+        .from("trades")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", t.user_id)
+        .eq("status", "closed");
+      if (count && count > 0 && count % 10 === 0) {
+        console.log(`[post-trade-learn] milestone ${count} closed trades — triggering katrina for user ${t.user_id}`);
+        fetch(`${SUPABASE_URL}/functions/v1/katrina`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SERVICE_KEY}`,
+          },
+          body: JSON.stringify({ trigger: "trade_milestone", userId: t.user_id }),
+        }).catch((err) => console.error("[post-trade-learn] katrina dispatch failed (non-fatal):", err));
+      }
+    } catch (e) {
+      console.error("[post-trade-learn] milestone check failed (non-fatal):", e);
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
