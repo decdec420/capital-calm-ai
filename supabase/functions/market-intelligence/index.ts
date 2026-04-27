@@ -229,6 +229,7 @@ async function runMacroStrategist(
   symbol: string,
   candles4h: number[][],
   candles1d: number[][],
+  previousNarrative: string | null,
 ): Promise<Record<string, unknown> | null> {
   const recent4h = candles4h.slice(-30).map((c) => ({
     time: new Date(c[0] * 1000).toISOString().slice(0, 16),
@@ -247,8 +248,17 @@ async function runMacroStrategist(
   }));
 
   const lastClose = candles4h[candles4h.length - 1]?.[4];
+  const prevNarr = previousNarrative ?? "No prior narrative — this is the first run.";
   const userMsg = `
 Analyze ${symbol} and produce your strategic brief.
+
+PREVIOUS NARRATIVE (~4h ago):
+${prevNarr}
+
+Your job: read the above, then update it based on what you see now.
+Has the outlook changed? Has a thesis been confirmed or broken?
+Return a fresh "updated_narrative" (2-3 sentences max) capturing the running story
+that will be passed to the next run in ~4 hours.
 
 DAILY CANDLES (last 14 days):
 ${JSON.stringify(recent1d, null, 2)}
@@ -271,6 +281,7 @@ Analysis time: ${new Date().toISOString()}
       "nearest_resistance",
       "key_level_notes",
       "macro_summary",
+      "updated_narrative",
     ],
     additionalProperties: false,
     properties: {
@@ -309,6 +320,11 @@ Analysis time: ${new Date().toISOString()}
         type: "string",
         description:
           "2-3 sentences. Most important thing a trader needs to know about this asset right now. Specific, actionable, no fluff. Trading desk language.",
+      },
+      updated_narrative: {
+        type: "string",
+        description:
+          "2-3 sentences. The evolving running narrative for this symbol — what is the multi-day story unfolding, and what changed (if anything) since the previous narrative? Reads like a continuous thread, not a snapshot.",
       },
     },
   });
