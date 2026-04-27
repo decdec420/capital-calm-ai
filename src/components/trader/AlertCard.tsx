@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertCircle,
@@ -7,10 +7,17 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
+  Play,
+  RefreshCw,
+  ShieldOff,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSystemState } from "@/hooks/useSystemState";
 import type { Alert, AlertSeverity } from "@/lib/domain-types";
 import { classifyAlert } from "@/lib/alert-classification";
 
