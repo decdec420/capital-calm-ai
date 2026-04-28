@@ -36,6 +36,15 @@ const ICON_BY_CODE: Record<string, typeof AlertOctagon> = {
   INSERT_ERROR: AlertOctagon,
   NO_SYSTEM_STATE: AlertOctagon,
   COOLDOWN: Clock,
+  REENTRY_COOLDOWN: Clock,
+  ANTI_TILT_LOCK: ShieldX,
+  ANTI_TILT_CAUTION: ShieldAlert,
+  ANTI_TILT_COOLDOWN: PauseOctagon,
+  CONSECUTIVE_LOSS_HARD_STOP: ShieldX,
+  BRAIN_TRUST_MOMENTUM_STALE: WifiOff,
+  DEFAULT_LONG_FALLBACK_BLOCKED: Ban,
+  TRADING_PAUSED_EVENT_MODE: PauseOctagon,
+  TRADING_PAUSED_VOLATILITY_SPIKE: AlertOctagon,
 };
 
 // Severity tone — drives the dot/border colour.
