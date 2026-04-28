@@ -2006,6 +2006,7 @@ async function runTickForUser(
         tp1_filled: false,
         strategy_id: strategyId,
         strategy_version: strategyVersion,
+        direction_basis: directionBasis,
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
