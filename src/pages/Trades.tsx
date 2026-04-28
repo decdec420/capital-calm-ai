@@ -247,7 +247,11 @@ export default function Trades() {
                 />
 
                 <div className="grid grid-cols-2 gap-3">
-                  <Cell label="Side" value={selected.side.toUpperCase()} />
+                  <Cell
+                    label="Side"
+                    value={selected.side.toUpperCase()}
+                    extra={<DirectionBasisChip basis={selected.directionBasis} />}
+                  />
                   <Cell
                     label="Size"
                     value={`${formatBaseQty(selected.size)} · ${formatUsd(selected.size * (selected.exitPrice ?? selected.entryPrice))}`}
