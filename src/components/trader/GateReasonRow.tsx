@@ -70,6 +70,20 @@ const SEVERITY_TONE: Record<GateSeverity, { ring: string; bg: string; text: stri
     dot: "bg-muted-foreground/60",
     label: "skip",
   },
+  warn: {
+    ring: "border-status-caution/40",
+    bg: "bg-status-caution/10",
+    text: "text-status-caution",
+    dot: "bg-status-caution",
+    label: "warn",
+  },
+  info: {
+    ring: "border-primary/30",
+    bg: "bg-primary/5",
+    text: "text-primary",
+    dot: "bg-primary",
+    label: "info",
+  },
 };
 
 export function gateIconFor(code: GateReasonCode): typeof AlertOctagon {
