@@ -3,6 +3,7 @@ import { SectionHeader } from "@/components/trader/SectionHeader";
 import { TradeLifecycleTimeline } from "@/components/trader/TradeLifecycleTimeline";
 import { ReasonChip } from "@/components/trader/ReasonChip";
 import { StatusBadge } from "@/components/trader/StatusBadge";
+import { DirectionBasisChip } from "@/components/trader/DirectionBasisChip";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { TagInput } from "@/components/trader/TagInput";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
