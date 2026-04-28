@@ -73,7 +73,7 @@ export const DOCTRINE_FALLBACK: DoctrineSettingsRow = {
   max_trades_per_day: 5,
   floor_pct: 0.80,
   floor_abs_min: 5,
-  consecutive_loss_limit: 2,
+  consecutive_loss_limit: 4,
   loss_cooldown_minutes: 30,
   risk_per_trade_pct: 0.01,
   scan_interval_seconds: 300,
