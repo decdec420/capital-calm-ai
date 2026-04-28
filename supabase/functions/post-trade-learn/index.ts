@@ -724,14 +724,19 @@ Deno.serve(async (req) => {
         .eq("status", "closed");
       if (count && count > 0 && count % 10 === 0) {
         console.log(`[post-trade-learn] milestone ${count} closed trades — triggering katrina for user ${t.user_id}`);
-        fetch(`${SUPABASE_URL}/functions/v1/katrina`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${SERVICE_KEY}`,
-          },
-          body: JSON.stringify({ trigger: "trade_milestone", userId: t.user_id }),
-        }).catch((err) => console.error("[post-trade-learn] katrina dispatch failed (non-fatal):", err));
+        const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
+        if (!internalSecret) {
+          console.warn("[post-trade-learn] INTERNAL_FUNCTION_SECRET missing; skipping Katrina milestone trigger");
+        } else {
+          fetch(`${SUPABASE_URL}/functions/v1/katrina`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${internalSecret}`,
+            },
+            body: JSON.stringify({ trigger: "trade_milestone", user_id: t.user_id }),
+          }).catch((err) => console.error("[post-trade-learn] katrina dispatch failed (non-fatal):", err));
+        }
       }
     } catch (e) {
       console.error("[post-trade-learn] milestone check failed (non-fatal):", e);

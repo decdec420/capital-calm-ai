@@ -176,6 +176,63 @@ export const DESK_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "list_pending_experiments",
+      description:
+        "Fetch experiment rows that are still queued/running or need operator review. Always call this before accept_experiment or reject_experiment.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "reject_experiment",
+      description:
+        "Reject an experiment and clear review flags. Use when sample quality is weak, overfit risk is high, or the hypothesis failed.",
+      parameters: {
+        type: "object",
+        properties: {
+          experiment_id: {
+            type: "string",
+            description: "UUID of the experiment row to reject.",
+          },
+          reason: {
+            type: "string",
+            description: "One-line rejection reason.",
+          },
+        },
+        required: ["experiment_id", "reason"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "accept_experiment",
+      description:
+        "Accept an experiment and clear review flags. Promotion to candidate strategy stays an explicit operator action in the UI.",
+      parameters: {
+        type: "object",
+        properties: {
+          experiment_id: {
+            type: "string",
+            description: "UUID of the experiment row to accept.",
+          },
+          reason: {
+            type: "string",
+            description: "One-line acceptance reason.",
+          },
+        },
+        required: ["experiment_id", "reason"],
+      },
+    },
+  },
 ];
 
 // ─── Tool Executor ────────────────────────────────────────────────
@@ -394,6 +451,85 @@ export async function executeTool(
           ? { success: false, error: error.message }
           : { success: true, data: data ?? [] };
         // Reads are not logged to tool_calls — only writes.
+        return result;
+      }
+
+      case "list_pending_experiments": {
+        const { data, error } = await adminClient
+          .from("experiments")
+          .select(
+            "id,title,parameter,before_value,after_value,status,proposed_by,hypothesis,needs_review,created_at",
+          )
+          .eq("user_id", userId)
+          .or("status.in.(queued,running),needs_review.eq.true")
+          .order("created_at", { ascending: false })
+          .limit(20);
+        const result: ToolCallResult = error
+          ? { success: false, error: error.message }
+          : { success: true, data: data ?? [] };
+        // Reads are not logged to tool_calls — only writes.
+        return result;
+      }
+
+      case "reject_experiment": {
+        const experimentId = args.experiment_id as string;
+        const { data: row, error: readErr } = await adminClient
+          .from("experiments")
+          .select("id,notes")
+          .eq("id", experimentId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (readErr || !row) {
+          return { success: false, error: readErr?.message ?? "Experiment not found" };
+        }
+        const stampedReason = `[${new Date().toISOString()}] ${actorShort} rejected: ${reason}`;
+        const nextNotes = row.notes ? `${row.notes}\n${stampedReason}` : stampedReason;
+        const { error } = await adminClient
+          .from("experiments")
+          .update({
+            status: "rejected",
+            needs_review: false,
+            notes: nextNotes,
+          })
+          .eq("id", experimentId)
+          .eq("user_id", userId);
+        const result: ToolCallResult = error
+          ? { success: false, error: error.message }
+          : { success: true, data: { experiment_id: experimentId, action: "rejected" } };
+        await adminClient
+          .from("tool_calls")
+          .insert({ ...logEntry, result, success: result.success });
+        return result;
+      }
+
+      case "accept_experiment": {
+        const experimentId = args.experiment_id as string;
+        const { data: row, error: readErr } = await adminClient
+          .from("experiments")
+          .select("id,notes")
+          .eq("id", experimentId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (readErr || !row) {
+          return { success: false, error: readErr?.message ?? "Experiment not found" };
+        }
+        const stampedReason = `[${new Date().toISOString()}] ${actorShort} accepted: ${reason}`;
+        const nextNotes = row.notes ? `${row.notes}\n${stampedReason}` : stampedReason;
+        const { error } = await adminClient
+          .from("experiments")
+          .update({
+            status: "accepted",
+            needs_review: false,
+            notes: nextNotes,
+          })
+          .eq("id", experimentId)
+          .eq("user_id", userId);
+        const result: ToolCallResult = error
+          ? { success: false, error: error.message }
+          : { success: true, data: { experiment_id: experimentId, action: "accepted" } };
+        await adminClient
+          .from("tool_calls")
+          .insert({ ...logEntry, result, success: result.success });
         return result;
       }
 

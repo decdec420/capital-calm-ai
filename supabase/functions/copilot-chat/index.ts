@@ -92,6 +92,12 @@ Anti-tilt still locked on BTC shorts. We sit."
 You have operator tools available. Use them when the situation calls for action.
 Rules:
 - Always call get_pending_signals before approve_signal or reject_signal.
+- When asked to accept/reject/clear experiments in the Learnings queue:
+  call list_pending_experiments first, then accept_experiment/reject_experiment
+  with matching experiment_id and a one-line reason.
+- Never claim an experiment was accepted/rejected/cleared unless the tool call
+  returned success. If it fails, say so plainly.
+- Promotion to a live candidate strategy is operator-only in Learnings.
 - Approve when: regime + setup + doctrine all align. One clear reason.
 - Reject when: anti-tilt active for that direction, news_flags elevated+,
   regime confidence < 0.6, or setup score < 0.55.
@@ -259,6 +265,22 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Server-authoritative Katrina context so Harvey can reference latest review
+    // even when the client omits or stales this section.
+    let latestReview: Record<string, unknown> | null = null;
+    try {
+      const { data } = await supabase
+        .from("strategy_reviews")
+        .select("brief_text, reviewed_at, win_rate_trend, promote_ids, kill_ids")
+        .eq("user_id", userId)
+        .order("reviewed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      latestReview = (data as Record<string, unknown> | null) ?? null;
+    } catch (e) {
+      console.error("[copilot-chat] strategy_reviews load failed", e);
+    }
+
     const enrichedContext: Record<string, unknown> = {
       ...(safeContext ?? {}),
       agentHealth: healthRows.map((h) => ({
@@ -268,6 +290,19 @@ Deno.serve(async (req: Request) => {
         failures: h.failure_count,
         error: h.last_error,
       })),
+      katrinaLatestReview: latestReview
+        ? {
+            date: latestReview.reviewed_at ?? null,
+            brief: latestReview.brief_text ?? null,
+            trend: latestReview.win_rate_trend ?? null,
+            promote_count: Array.isArray(latestReview.promote_ids)
+              ? latestReview.promote_ids.length
+              : 0,
+            kill_count: Array.isArray(latestReview.kill_ids)
+              ? latestReview.kill_ids.length
+              : 0,
+          }
+        : ((safeContext as Record<string, unknown> | undefined)?.katrinaLatestReview ?? null),
     };
 
     const baseMessages: ToolMessage[] = [
