@@ -192,9 +192,12 @@ export default function Trades() {
                     {t.closedAt && new Date(t.closedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge tone={t.side === "long" ? "safe" : "caution"} size="sm">
-                      {t.side}
-                    </StatusBadge>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <StatusBadge tone={t.side === "long" ? "safe" : "caution"} size="sm">
+                        {t.side}
+                      </StatusBadge>
+                      <DirectionBasisChip basis={t.directionBasis} />
+                    </div>
                   </TableCell>
                   <TableCell className="tabular text-sm">${t.entryPrice.toFixed(2)}</TableCell>
                   <TableCell className="tabular text-sm">{t.exitPrice !== null ? `$${t.exitPrice.toFixed(2)}` : "—"}</TableCell>
