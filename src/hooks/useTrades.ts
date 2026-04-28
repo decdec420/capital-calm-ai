@@ -15,6 +15,7 @@ function mapRow(r: any): Trade {
     id: r.id,
     symbol: r.symbol,
     side: r.side as TradeSide,
+    directionBasis: (r.direction_basis ?? null) as Trade["directionBasis"],
     size: Number(r.size),
     originalSize: r.original_size !== null && r.original_size !== undefined ? Number(r.original_size) : null,
     entryPrice: Number(r.entry_price),
