@@ -1832,6 +1832,7 @@ async function runTickForUser(
       ai_model: "google/gemini-3-flash-preview",
       strategy_id: strategyId,
       strategy_version: strategyVersion,
+      direction_basis: directionBasis,
       lifecycle_phase: "proposed",
       lifecycle_transitions: [proposedTransition],
       context_snapshot: {
