@@ -39,3 +39,14 @@ Deno.test("Copilot/Harvey — no active pause yields no instruction", () => {
 
   assertEquals(instruction, "");
 });
+
+
+Deno.test("Copilot/Harvey — flat context shape is supported", () => {
+  const instruction = buildEventModeContextInstruction({
+    tradingPausedUntil: new Date(Date.now() + 60_000).toISOString(),
+    pauseReason: "FOMC",
+  });
+
+  assertStringIncludes(instruction, "Reason code: FOMC");
+  assertStringIncludes(instruction, "Reason label: FOMC rate decision window");
+});

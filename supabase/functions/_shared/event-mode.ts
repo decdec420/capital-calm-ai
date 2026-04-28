@@ -34,6 +34,10 @@ export interface EventModeReasonContext {
 
 export const UNKNOWN_EVENT_MODE = "UNKNOWN_EVENT_MODE";
 
+/**
+ * Resolves a raw pause_reason code into normalized event-mode context.
+ * Unknown or missing codes map to UNKNOWN_EVENT_MODE.
+ */
 export function resolveEventModeReasonContext(pauseReason: string | null | undefined): EventModeReasonContext {
   const normalized = typeof pauseReason === "string" ? pauseReason.trim() : "";
   if (!normalized) {
@@ -63,6 +67,9 @@ export function resolveEventModeReasonContext(pauseReason: string | null | undef
   };
 }
 
+/**
+ * Builds the canonical TRADING_PAUSED_EVENT_MODE gate with normalized metadata.
+ */
 export function buildActiveEventModeGate(pausedUntilIso: string, pauseReason: string | null | undefined): GateReason {
   const reason = resolveEventModeReasonContext(pauseReason);
   return gate(
@@ -77,9 +84,15 @@ export function buildActiveEventModeGate(pausedUntilIso: string, pauseReason: st
 }
 
 
+/**
+ * Returns an active event-mode gate only when trading_paused_until is a valid
+ * future timestamp. Invalid timestamps are treated as inactive (fail-open).
+ */
 export function getActiveEventModeGateFromSystem(sys: { trading_paused_until?: string | null; pause_reason?: string | null }): GateReason | null {
   const pausedUntil = sys.trading_paused_until;
   if (!pausedUntil) return null;
-  if (new Date(pausedUntil) <= new Date()) return null;
+  const pauseTs = Date.parse(pausedUntil);
+  if (!Number.isFinite(pauseTs)) return null;
+  if (pauseTs <= Date.now()) return null;
   return buildActiveEventModeGate(pausedUntil, sys.pause_reason);
 }

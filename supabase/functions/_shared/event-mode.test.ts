@@ -56,3 +56,13 @@ Deno.test("event mode reason resolver — unknown reason code stays explicit and
   assertEquals(reason.code, UNKNOWN_EVENT_MODE);
   assertEquals(reason.known, false);
 });
+
+
+Deno.test("signal-engine event mode — malformed paused-until does not halt trading", () => {
+  const gate = getActiveEventModeGateFromSystem({
+    trading_paused_until: "invalid-date",
+    pause_reason: "FOMC",
+  });
+
+  assertEquals(gate, null);
+});
