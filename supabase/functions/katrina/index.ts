@@ -15,7 +15,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-internal-function-secret",
 };
 
 // Katrina gets flash-level depth — strategy analysis benefits from careful
@@ -410,6 +410,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const internalSecretHeader = req.headers.get("x-internal-function-secret")?.trim() ?? "";
 
   let body: Json = {};
   try {
@@ -423,7 +424,10 @@ Deno.serve(async (req: Request) => {
   const targetUserId = typeof body.user_id === "string" ? body.user_id : null;
 
   const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
-  if (internalSecret && bearer === internalSecret) {
+  const validInternalSecret = internalSecret &&
+    (bearer === internalSecret || internalSecretHeader === internalSecret);
+  const isServiceRoleDispatch = bearer === serviceRoleKey;
+  if (validInternalSecret && (bearer === internalSecret || isServiceRoleDispatch)) {
     if (!targetUserId) {
       return new Response(JSON.stringify({ error: "Missing user_id" }), {
         status: 400,

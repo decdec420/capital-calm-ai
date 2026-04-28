@@ -725,14 +725,25 @@ Deno.serve(async (req) => {
       if (count && count > 0 && count % 10 === 0) {
         console.log(`[post-trade-learn] milestone ${count} closed trades — triggering katrina for user ${t.user_id}`);
         const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
+        const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+          Deno.env.get("SERVICE_KEY") ??
+          "";
         if (!internalSecret) {
           console.warn("[post-trade-learn] INTERNAL_FUNCTION_SECRET missing; skipping Katrina milestone trigger");
+        } else if (!serviceRoleKey) {
+          console.warn(
+            "[post-trade-learn] SUPABASE_SERVICE_ROLE_KEY/SERVICE_KEY missing; skipping Katrina milestone trigger",
+          );
         } else {
           fetch(`${SUPABASE_URL}/functions/v1/katrina`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${internalSecret}`,
+              // Supabase function gateway expects a JWT unless verify_jwt = false.
+              // Use service-role JWT for gateway auth and pass the internal shared
+              // secret separately for Katrina's internal dispatch path.
+              Authorization: `Bearer ${serviceRoleKey}`,
+              "x-internal-function-secret": internalSecret,
             },
             body: JSON.stringify({ trigger: "trade_milestone", user_id: t.user_id }),
           }).catch((err) => console.error("[post-trade-learn] katrina dispatch failed (non-fatal):", err));
