@@ -3,7 +3,7 @@
 // Triggers:
 //   - Weekly cron: Sundays 08:00 UTC (vault-stored katrina_cron_token)
 //   - Trade milestone: every 10th closed trade per user (called from post-trade-learn
-//     with the service-role key + { trigger: "trade_milestone", userId })
+//     with INTERNAL_FUNCTION_SECRET + { trigger: "trade_milestone", user_id })
 //   - Manual: any signed-in user can POST with their JWT (single-user run)
 //
 // Reads experiments + closed trades + Rachel's coach grades for the last 30 days,
@@ -18,9 +18,11 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// Pro-tier model: Katrina runs once a week (or every 10 trades). Latency is
-// not the constraint — depth of reasoning over 30 days of trades is.
-const KATRINA_MODEL = "google/gemini-2.5-pro";
+// Katrina gets flash-level depth — strategy analysis benefits from careful
+// reasoning, and she only runs once a week or every 10 trades.
+const KATRINA_MODEL = "google/gemini-2.5-flash";
+const COACH_JOURNAL_KIND = "learning";
+const COACH_JOURNAL_SOURCE = "trade-coach";
 
 const KATRINA_SYSTEM = `
 You are Katrina — the strategy analyst on this trading desk.
@@ -37,13 +39,13 @@ Your output answers three questions:
 Voice:
 - Write like a partner presenting at a firm review. Precise. No filler.
 - Lead with the strongest finding, not the summary.
-- Cite specific win rates, R-multiples, and regime context.
+- Cite specific win rates, P&L, grade distribution, and regime context when available.
 - If sample size is too small (< 5 trades per strategy), say so and don't over-conclude.
 - 3-5 sentences for the brief_text. Longer structured analysis goes in raw_analysis.
 
 You are not Louis — you don't obsess over the numbers for their own sake.
 You are not Harvey — you're not here to close anything.
-You are here to make sure the desk promotes strategies that actually have edge,
+You're here to make sure the desk promotes strategies that actually have edge,
 and retires the ones that are burning capital on hope.
 `.trim();
 
@@ -83,12 +85,13 @@ async function buildKatrinaContext(
       .order("closed_at", { ascending: false })
       .limit(100),
 
-    // Rachel writes coach lessons as journal_entries with source='trade-coach'.
-    // The grade lives in raw.grade.
+    // Confirmed from post-trade-learn: coach rows are journal_entries kind="learning"
+    // with source="trade-coach", and grade in raw.grade.
     admin.from("journal_entries")
-      .select("raw, created_at")
+      .select("raw, created_at, kind, source")
       .eq("user_id", userId)
-      .eq("source", "trade-coach")
+      .eq("kind", COACH_JOURNAL_KIND)
+      .eq("source", COACH_JOURNAL_SOURCE)
       .gte("created_at", thirtyDaysAgo)
       .order("created_at", { ascending: false })
       .limit(100),
@@ -107,7 +110,6 @@ async function buildKatrinaContext(
   const coachEntries = coachEntriesRes.data ?? [];
   const lastReview = lastReviewRes.data;
 
-  // Build a name lookup: strategy_id -> "name vV (status)"
   const stratById = new Map<string, string>();
   for (const s of strategies as Array<Json>) {
     const id = String(s.id);
@@ -116,8 +118,6 @@ async function buildKatrinaContext(
     stratById.set(id, label);
   }
 
-  // Bucket trades by strategy: prefer strategies join (via strategy_id),
-  // fall back to the trades.strategy_version text bucket.
   type Bucket = {
     label: string;
     strategy_id: string | null;
@@ -137,7 +137,10 @@ async function buildKatrinaContext(
       buckets[key] = {
         label: sid ? (stratById.get(sid) ?? `strategy ${sid.slice(0, 8)}`) : versionText,
         strategy_id: sid,
-        wins: 0, losses: 0, flat: 0, totalPnl: 0,
+        wins: 0,
+        losses: 0,
+        flat: 0,
+        totalPnl: 0,
         bySymbol: {},
       };
     }
@@ -147,6 +150,7 @@ async function buildKatrinaContext(
     else if (pnl < 0) b.losses++;
     else b.flat++;
     b.totalPnl += pnl;
+
     const sym = String(t.symbol ?? "?");
     if (!b.bySymbol[sym]) b.bySymbol[sym] = { wins: 0, losses: 0, pnl: 0 };
     if (pnl > 0) b.bySymbol[sym].wins++;
@@ -154,15 +158,20 @@ async function buildKatrinaContext(
     b.bySymbol[sym].pnl += pnl;
   }
 
-  // Grade distribution from Rachel
-  const grades: Record<string, number> = { A: 0, B: 0, C: 0, D: 0 };
+  const grades: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 };
   for (const e of coachEntries as Array<Json>) {
-    const raw = (e.raw ?? {}) as Json;
-    const g = String(raw.grade ?? "").toUpperCase();
+    const raw = (e.raw as Json | null) ?? null;
+    const g = String(
+      raw?.grade ??
+      raw?.coach_grade ??
+      raw?.coachGrade ??
+      raw?.execution_grade ??
+      raw?.executionGrade ??
+      "",
+    ).toUpperCase();
     if (g in grades) grades[g]++;
   }
 
-  // Trend: split last 30d in halves (15+15) and compare win rate
   let firstWindowWr: number | null = null;
   let secondWindowWr: number | null = null;
   if (closedTrades.length >= 6) {
@@ -173,9 +182,11 @@ async function buildKatrinaContext(
       const pnl = Number(t.pnl ?? 0);
       const win = pnl > 0;
       if (closedMs >= cutoffMs) {
-        secondTot++; if (win) secondWins++;
+        secondTot++;
+        if (win) secondWins++;
       } else {
-        firstTot++; if (win) firstWins++;
+        firstTot++;
+        if (win) firstWins++;
       }
     }
     if (firstTot > 0) firstWindowWr = firstWins / firstTot;
@@ -252,11 +263,10 @@ async function runKatrinaForUser(
   const summary = (context.summary ?? {}) as Json;
   const totalTrades = Number(summary.total_closed_trades ?? 0);
 
-  // Don't bother with fewer than 3 closed trades — not enough to say anything.
   if (totalTrades < 3) {
     return {
       skipped: true,
-      reason: `only ${totalTrades} closed trade(s) in last 30 days — not enough data for a review`,
+      reason: "fewer than 3 closed trades — not enough data for a review",
     };
   }
 
@@ -316,19 +326,31 @@ Return a structured JSON object with these exact keys:
   }
 
   const briefText = String(analysis.brief_text ?? "Review incomplete — model returned no narrative.");
-  const promoteIds = Array.isArray(analysis.promote_ids) ? (analysis.promote_ids as string[]).filter((x) => typeof x === "string") : [];
-  const killIds = Array.isArray(analysis.kill_ids) ? (analysis.kill_ids as string[]).filter((x) => typeof x === "string") : [];
-  const continueIds = Array.isArray(analysis.continue_ids) ? (analysis.continue_ids as string[]) .filter((x) => typeof x === "string") : [];
+  const promoteIds = Array.isArray(analysis.promote_ids)
+    ? (analysis.promote_ids as string[]).filter((x) => typeof x === "string")
+    : [];
+  const killIds = Array.isArray(analysis.kill_ids)
+    ? (analysis.kill_ids as string[]).filter((x) => typeof x === "string")
+    : [];
+  const continueIds = Array.isArray(analysis.continue_ids)
+    ? (analysis.continue_ids as string[]).filter((x) => typeof x === "string")
+    : [];
   const topRegime = analysis.top_regime == null ? null : String(analysis.top_regime);
   const worstRegime = analysis.worst_regime == null ? null : String(analysis.worst_regime);
   const trendRaw = String(analysis.win_rate_trend ?? "stable");
-  const trend = (["improving", "stable", "declining"].includes(trendRaw) ? trendRaw : "stable");
+  const trend = ["improving", "stable", "declining"].includes(trendRaw)
+    ? trendRaw
+    : "stable";
+
+  const normalizedTrigger = ["weekly_cron", "trade_milestone", "manual"].includes(triggerType)
+    ? triggerType
+    : "manual";
 
   const { data: reviewRow, error: insertErr } = await admin
     .from("strategy_reviews")
     .insert({
       user_id: userId,
-      trigger_type: triggerType,
+      trigger_type: normalizedTrigger,
       trades_analyzed: totalTrades,
       brief_text: briefText,
       promote_ids: promoteIds,
@@ -352,7 +374,7 @@ Return a structured JSON object with these exact keys:
 
   return {
     review_id: reviewRow?.id,
-    trigger: triggerType,
+    trigger: normalizedTrigger,
     trades_analyzed: totalTrades,
     brief: briefText,
     trend,
@@ -390,25 +412,40 @@ Deno.serve(async (req: Request) => {
   const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
 
   let body: Json = {};
-  try { body = await req.json() as Json; } catch { /* empty body OK */ }
+  try {
+    body = await req.json() as Json;
+  } catch {
+    body = {};
+  }
   const triggerType = (typeof body.trigger === "string" && ["weekly_cron", "trade_milestone", "manual"].includes(body.trigger))
     ? body.trigger
     : "manual";
-  const targetUserId = typeof body.userId === "string" ? body.userId : null;
+  const targetUserId = typeof body.user_id === "string" ? body.user_id : null;
 
-  // ── Privileged caller paths: vault cron token OR service-role key ──
-  // Both bypass JWT and may either fan out or target a single user.
-  let privileged = bearer === serviceRoleKey;
-  if (!privileged) {
-    try {
-      const { data: cronTok } = await admin.rpc("get_katrina_cron_token");
-      if (cronTok && bearer === cronTok) privileged = true;
-    } catch {
-      // RPC missing — only service-role works.
+  const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
+  if (internalSecret && bearer === internalSecret) {
+    if (!targetUserId) {
+      return new Response(JSON.stringify({ error: "Missing user_id" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+    const result = await runKatrinaForUser(targetUserId, admin, lovableApiKey, "trade_milestone");
+    return new Response(JSON.stringify({ ok: true, ...result }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
-  if (privileged) {
+  let cronAuthorized = false;
+  try {
+    const { data: cronTok } = await admin.rpc("get_katrina_cron_token");
+    if (cronTok && bearer === cronTok) cronAuthorized = true;
+  } catch {
+    // RPC missing — cron mode unavailable.
+  }
+
+  if (cronAuthorized) {
     const results: Array<Json> = [];
     let users: Array<{ user_id: string }>;
     if (targetUserId) {
@@ -432,7 +469,6 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // ── JWT path: single signed-in user, manual trigger only ──
   const userClient = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   });
