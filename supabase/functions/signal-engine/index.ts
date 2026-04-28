@@ -1574,7 +1574,50 @@ async function runTickForUser(
   }
 
   // ── Stage 4: derive entry/stop, then size by % risk ──────────
-  const side = decision.side ?? "long";
+  // Direction transparency: distinguish an active engine choice from a
+  // silent default. If the AI omitted `side`, we used to default to
+  // "long" — now we mark that as a fallback and refuse to propose the
+  // trade so users never see a silent default-long entry. The signal
+  // is dropped with a gate reason the operator can inspect.
+  const aiSide = decision.side === "long" || decision.side === "short" ? decision.side : null;
+  const side: "long" | "short" = aiSide ?? "long";
+  const directionBasis: "engine_chose_long" | "engine_chose_short" | "default_long_fallback" =
+    aiSide === "long"
+      ? "engine_chose_long"
+      : aiSide === "short"
+        ? "engine_chose_short"
+        : "default_long_fallback";
+
+  if (decision.decision === "propose_trade" && directionBasis === "default_long_fallback") {
+    const fallbackGate = gate(
+      GATE_CODES.DEFAULT_LONG_FALLBACK_BLOCKED,
+      "block",
+      `${winner.symbol}: AI proposed a trade without picking a side — refusing to default to long.`,
+      { symbol: winner.symbol },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [fallbackGate],
+      perSymbol,
+      chosenSymbol: winner.symbol,
+    });
+    await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "skip",
+      title: `Engine refused ${winner.symbol} — no explicit side`,
+      summary:
+        "The AI proposed a trade but did not specify long or short. Silent default-long is disabled; the trade was dropped.",
+      tags: [winner.symbol, "default-long-fallback", "blocked"],
+    });
+    return {
+      userId,
+      tick: "default_long_fallback_blocked",
+      symbol: winner.symbol,
+      gateReasons: [fallbackGate],
+      expiredCount,
+      perSymbol,
+    };
+  }
+
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
 
   // ── Coach: penalize confidence if recent (symbol, side) has bled ──
@@ -1789,6 +1832,7 @@ async function runTickForUser(
       ai_model: "google/gemini-3-flash-preview",
       strategy_id: strategyId,
       strategy_version: strategyVersion,
+      direction_basis: directionBasis,
       lifecycle_phase: "proposed",
       lifecycle_transitions: [proposedTransition],
       context_snapshot: {
@@ -1962,6 +2006,7 @@ async function runTickForUser(
         tp1_filled: false,
         strategy_id: strategyId,
         strategy_version: strategyVersion,
+        direction_basis: directionBasis,
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,

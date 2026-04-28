@@ -15,6 +15,7 @@ function mapRow(r: any): TradeSignal {
     id: r.id,
     symbol: r.symbol,
     side: r.side as TradeSide,
+    directionBasis: (r.direction_basis ?? null) as TradeSignal["directionBasis"],
     confidence: Number(r.confidence),
     setupScore: Number(r.setup_score),
     regime: r.regime,

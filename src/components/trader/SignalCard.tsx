@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { TradeSignal } from "@/lib/domain-types";
 import { cn } from "@/lib/utils";
+import { DirectionBasisChip } from "@/components/trader/DirectionBasisChip";
 
 interface SignalCardProps {
   signal: TradeSignal;
@@ -103,6 +104,7 @@ export function SignalCard({ signal, onDecided, busy: controlledBusy, onDecide }
           <StatusBadge tone={sideTone} size="sm" dot>
             {signal.side}
           </StatusBadge>
+          <DirectionBasisChip basis={signal.directionBasis} />
           <StatusBadge
             tone={isExpiring ? "blocked" : isUrgent ? "caution" : "neutral"}
             size="sm"

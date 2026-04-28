@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { TradeLifecycleTimeline } from "@/components/trader/TradeLifecycleTimeline";
 import { ReasonChip } from "@/components/trader/ReasonChip";
 import { StatusBadge } from "@/components/trader/StatusBadge";
+import { DirectionBasisChip } from "@/components/trader/DirectionBasisChip";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { TagInput } from "@/components/trader/TagInput";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -191,9 +192,12 @@ export default function Trades() {
                     {t.closedAt && new Date(t.closedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge tone={t.side === "long" ? "safe" : "caution"} size="sm">
-                      {t.side}
-                    </StatusBadge>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <StatusBadge tone={t.side === "long" ? "safe" : "caution"} size="sm">
+                        {t.side}
+                      </StatusBadge>
+                      <DirectionBasisChip basis={t.directionBasis} />
+                    </div>
                   </TableCell>
                   <TableCell className="tabular text-sm">${t.entryPrice.toFixed(2)}</TableCell>
                   <TableCell className="tabular text-sm">{t.exitPrice !== null ? `$${t.exitPrice.toFixed(2)}` : "—"}</TableCell>
@@ -243,7 +247,11 @@ export default function Trades() {
                 />
 
                 <div className="grid grid-cols-2 gap-3">
-                  <Cell label="Side" value={selected.side.toUpperCase()} />
+                  <Cell
+                    label="Side"
+                    value={selected.side.toUpperCase()}
+                    extra={<DirectionBasisChip basis={selected.directionBasis} />}
+                  />
                   <Cell
                     label="Size"
                     value={`${formatBaseQty(selected.size)} · ${formatUsd(selected.size * (selected.exitPrice ?? selected.entryPrice))}`}
@@ -322,12 +330,15 @@ export default function Trades() {
   );
 }
 
-function Cell({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "safe" | "blocked" }) {
+function Cell({ label, value, tone = "default", extra }: { label: string; value: string; tone?: "default" | "safe" | "blocked"; extra?: ReactNode }) {
   const color = tone === "safe" ? "text-status-safe" : tone === "blocked" ? "text-status-blocked" : "text-foreground";
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`text-sm tabular ${color}`}>{value}</div>
+      <div className={`text-sm tabular ${color} flex items-center gap-1.5 flex-wrap`}>
+        <span>{value}</span>
+        {extra}
+      </div>
     </div>
   );
 }

@@ -292,6 +292,7 @@ Deno.serve(async (req) => {
         user_id: userId,
         symbol: sig.symbol,
         side: sig.side,
+        direction_basis: sig.direction_basis ?? null,
         size,
         original_size: size,
         entry_price: entry,

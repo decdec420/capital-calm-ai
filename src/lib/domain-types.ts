@@ -58,7 +58,7 @@ export type GuardrailType =
 
 // Structured gate reason emitted by the engine. UI switches on `code` for
 // icon + tone; `message` is the operator-readable line.
-export type GateSeverity = "halt" | "block" | "skip";
+export type GateSeverity = "halt" | "block" | "skip" | "warn" | "info";
 
 export type GateReasonCode =
   | "KILL_SWITCH"
@@ -220,6 +220,7 @@ export interface Trade {
   id: string;
   symbol: string;
   side: TradeSide;
+  directionBasis: DirectionBasis | null;
   size: number;
   originalSize: number | null;
   entryPrice: number;
@@ -349,6 +350,14 @@ export interface Candle {
 
 export type AutonomyLevel = "manual" | "assisted" | "autonomous";
 
+/** How the engine arrived at the trade direction. Distinguishes an
+ * active long/short choice from a silent default-long fallback so
+ * users can spot low-conviction "default" entries in the history. */
+export type DirectionBasis =
+  | "engine_chose_long"
+  | "engine_chose_short"
+  | "default_long_fallback";
+
 export type SignalStatus = "pending" | "approved" | "rejected" | "expired" | "executed" | "halted";
 export type SignalDecidedBy = "user" | "auto" | "expired" | "system";
 
@@ -356,6 +365,7 @@ export interface TradeSignal {
   id: string;
   symbol: string;
   side: TradeSide;
+  directionBasis: DirectionBasis | null;
   confidence: number; // 0..1
   setupScore: number; // 0..1
   regime: string;
