@@ -104,6 +104,7 @@ export function SignalCard({ signal, onDecided, busy: controlledBusy, onDecide }
           <StatusBadge tone={sideTone} size="sm" dot>
             {signal.side}
           </StatusBadge>
+          <DirectionBasisChip basis={signal.directionBasis} />
           <StatusBadge
             tone={isExpiring ? "blocked" : isUrgent ? "caution" : "neutral"}
             size="sm"
