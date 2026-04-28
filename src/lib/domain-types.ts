@@ -350,6 +350,14 @@ export interface Candle {
 
 export type AutonomyLevel = "manual" | "assisted" | "autonomous";
 
+/** How the engine arrived at the trade direction. Distinguishes an
+ * active long/short choice from a silent default-long fallback so
+ * users can spot low-conviction "default" entries in the history. */
+export type DirectionBasis =
+  | "engine_chose_long"
+  | "engine_chose_short"
+  | "default_long_fallback";
+
 export type SignalStatus = "pending" | "approved" | "rejected" | "expired" | "executed" | "halted";
 export type SignalDecidedBy = "user" | "auto" | "expired" | "system";
 
