@@ -357,6 +357,7 @@ export interface TradeSignal {
   id: string;
   symbol: string;
   side: TradeSide;
+  directionBasis: DirectionBasis | null;
   confidence: number; // 0..1
   setupScore: number; // 0..1
   regime: string;
