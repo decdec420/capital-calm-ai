@@ -220,6 +220,7 @@ export interface Trade {
   id: string;
   symbol: string;
   side: TradeSide;
+  directionBasis: DirectionBasis | null;
   size: number;
   originalSize: number | null;
   entryPrice: number;
