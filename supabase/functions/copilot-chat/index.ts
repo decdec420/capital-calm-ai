@@ -13,6 +13,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
+import { buildEventModeContextInstruction } from "./event-mode-context.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +38,7 @@ const AGENT_HEALTH_TTL_MS = 60_000;
 
 const buildSystemPrompt = (context?: Record<string, unknown>) => {
   const ctxBlock = context ? JSON.stringify(context, null, 2) : "{}";
+  const eventModeInstruction = buildEventModeContextInstruction(context);
   return `You are Harvey — the operator intelligence running inside this trading system.
 
 You are not a chatbot. You are not a financial advisor. You are not a helper.
@@ -122,7 +124,10 @@ Strategy performance questions:
   cite the date and trend. Don't reinvent her analysis; reference it. If she flagged
   promotions or kills, mention the counts.
 
-Current system context (JSON):
+${eventModeInstruction ? `Event mode instruction:
+${eventModeInstruction}
+
+` : ""}Current system context (JSON):
 ${ctxBlock}`;
 };
 

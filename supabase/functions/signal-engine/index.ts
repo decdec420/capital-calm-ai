@@ -24,6 +24,9 @@ import {
   type GateReason,
 } from "../_shared/reasons.ts";
 import {
+  getActiveEventModeGateFromSystem,
+} from "../_shared/event-mode.ts";
+import {
   fetchCandles,
   fetchCandles4h,
   MarketHealthTracker,
@@ -786,14 +789,11 @@ async function runTickForUser(
     settingsRow?.risk_per_trade_pct ?? activeProfile.riskPerTradePct;
 
   // Event mode / manual pause check — halts all symbols this tick.
-  const tradingPausedUntil = sys.trading_paused_until;
-  if (tradingPausedUntil && new Date(tradingPausedUntil) > new Date()) {
-    const pausedGate = gate(
-      GATE_CODES.TRADING_PAUSED_EVENT_MODE,
-      "halt",
-      `Trading paused until ${new Date(tradingPausedUntil).toLocaleString()}. Resume via Risk Center.`,
-      { resumesAt: tradingPausedUntil },
-    );
+  const pausedGate = getActiveEventModeGateFromSystem({
+    trading_paused_until: sys.trading_paused_until,
+    pause_reason: sys.pause_reason ?? null,
+  });
+  if (pausedGate) {
     await persistSnapshot(admin, userId, {
       gateReasons: [pausedGate],
       perSymbol: [],

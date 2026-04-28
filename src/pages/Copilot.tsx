@@ -383,6 +383,8 @@ export default function Copilot() {
     autonomy: system?.autonomyLevel,
     liveTradingEnabled: system?.liveTradingEnabled,
     killSwitchEngaged: system?.killSwitchEngaged,
+    tradingPausedUntil: system?.tradingPausedUntil,
+    pauseReason: system?.pauseReason,
     account: account ? { equity: account.equity, balanceFloor: account.balanceFloor } : null,
     engineSnapshot: snapshot
       ? {
