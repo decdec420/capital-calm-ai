@@ -72,6 +72,52 @@ export function classifyAlert(alert: Alert): ClassifiedAlert {
     };
   }
 
+  // ---- Anti-tilt (consecutive losses) ----
+  if (/anti.?tilt|consecutive loss|cooldown.*loss|loss.*hard.?stop/.test(hay)) {
+    const hardStop = /hard.?stop|locked/.test(hay);
+    return {
+      category: "system",
+      categoryLabel: CATEGORY_LABEL.system,
+      summary:
+        message ||
+        (hardStop
+          ? "Anti-tilt hard stop engaged after consecutive losses."
+          : "Anti-tilt safety triggered after consecutive losses."),
+      what:
+        message ||
+        "The engine tracks consecutive losing trades. After 2 it warns (caution), after 3 it cools off, and after 4 it hard-stops new entries until you reset.",
+      why: hardStop
+        ? "Hard stop prevents tilt-driven revenge trading. No new entries fire until the loss streak is acknowledged or the daily window resets."
+        : "Cooldown is a forced pause to break the streak. Existing positions still run; the engine simply won't open new ones for the cooldown window.",
+      fixes: [
+        "Open Risk Center to see the live streak count and configured limit.",
+        "Review the recent losses in Trades — was it bad luck, a regime shift, or a strategy issue?",
+        hardStop
+          ? "Adjust the consecutive_loss_limit or daily caps in Settings if 4 is too tight, then reset to resume."
+          : "Wait out the cooldown, or pause manually if you want a longer break.",
+      ],
+      primaryAction: { label: "Open Risk Center", to: "/risk" },
+    };
+  }
+
+  // ---- Brain Trust momentum stale ----
+  if (/brain trust|momentum.*stale|stale.*momentum|short.?horizon/.test(hay)) {
+    return {
+      category: "system",
+      categoryLabel: CATEGORY_LABEL.system,
+      summary: message || "Brain Trust short-horizon momentum is stale.",
+      what:
+        "The signal engine refused to propose a trade because the latest 1h/4h momentum read from the Brain Trust (Mike & Louis) is missing or older than 2 hours.",
+      why: "Without a fresh short-horizon read, Harvey/Jessica can't confirm direction safely. The engine fails closed rather than guess.",
+      fixes: [
+        "Open Copilot and trigger a Brain Trust refresh (market intelligence run) to repopulate momentum reads.",
+        "Confirm the market-intelligence cron is running — if it's silent, that's the underlying issue.",
+        "Once a fresh read lands the next engine tick will resume normal proposals.",
+      ],
+      primaryAction: { label: "Open Copilot", to: "/copilot" },
+    };
+  }
+
   // ---- Kill-switch ----
   if (/kill[- ]?switch/.test(hay)) {
     return {
