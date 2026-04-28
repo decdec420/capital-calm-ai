@@ -30,8 +30,8 @@ describe("Risk Center Event Mode panel", () => {
   it("shows both local and UTC resume timestamp labels", () => {
     render(<EventModePanel />);
 
-    expect(screen.getByText(/Resumes at \(Local\):/i)).toBeInTheDocument();
-    expect(screen.getByText(/Resumes at \(UTC\):/i)).toBeInTheDocument();
+    expect(screen.getByText(/Resumes at \(Local\):/i)).toBeTruthy();
+    expect(screen.getByText(/Resumes at \(UTC\):/i)).toBeTruthy();
   });
 
   it("resume flow clears both pause timestamp and pause reason fields", async () => {
