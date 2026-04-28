@@ -330,7 +330,7 @@ export default function Trades() {
   );
 }
 
-function Cell({ label, value, tone = "default", extra }: { label: string; value: string; tone?: "default" | "safe" | "blocked"; extra?: React.ReactNode }) {
+function Cell({ label, value, tone = "default", extra }: { label: string; value: string; tone?: "default" | "safe" | "blocked"; extra?: ReactNode }) {
   const color = tone === "safe" ? "text-status-safe" : tone === "blocked" ? "text-status-blocked" : "text-foreground";
   return (
     <div>
