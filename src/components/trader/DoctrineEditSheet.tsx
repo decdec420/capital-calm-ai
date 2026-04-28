@@ -323,6 +323,14 @@ function FieldRow({
         </span>
         {derived && <span className="tabular">≈ {derived}</span>}
       </div>
+      {field === "consecutive_loss_limit" && (
+        <p className="text-[10px] leading-snug text-muted-foreground border-t border-border pt-1.5">
+          Stepped anti-tilt: <span className="text-status-caution">caution</span> kicks in 2 losses
+          before this limit, <span className="text-status-caution">cooldown</span> 1 loss before,
+          and <span className="text-status-blocked">hard stop</span> at the limit. Daily-loss cap
+          and balance floor can still halt earlier.
+        </p>
+      )}
     </div>
   );
 }
