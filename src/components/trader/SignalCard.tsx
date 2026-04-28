@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { TradeSignal } from "@/lib/domain-types";
 import { cn } from "@/lib/utils";
+import { DirectionBasisChip } from "@/components/trader/DirectionBasisChip";
 
 interface SignalCardProps {
   signal: TradeSignal;
