@@ -390,14 +390,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function EventModePanel() {
+export function EventModePanel() {
   const { data: system, update } = useSystemState();
   const pausedUntil = system?.tradingPausedUntil ? new Date(system.tradingPausedUntil) : null;
   const active = pausedUntil && pausedUntil > new Date();
 
   const pauseFor = async (hours: number) => {
     try {
-      await update({ tradingPausedUntil: new Date(Date.now() + hours * 3600000).toISOString() });
+      await update({
+        tradingPausedUntil: new Date(Date.now() + hours * 3600000).toISOString(),
+        pauseReason: "OPERATOR_MANUAL",
+      });
       toast.success(`Trading paused for ${hours}h.`);
     } catch {
       toast.error("Couldn't pause trading.");
@@ -406,7 +409,7 @@ function EventModePanel() {
 
   const resumeNow = async () => {
     try {
-      await update({ tradingPausedUntil: null });
+      await update({ tradingPausedUntil: null, pauseReason: null });
       toast.success("Trading resumed.");
     } catch {
       toast.error("Couldn't resume.");
@@ -440,7 +443,8 @@ function EventModePanel() {
       </div>
       {active && pausedUntil && (
         <p className="text-xs text-status-caution">
-          Resumes at {pausedUntil.toLocaleString()}
+          <span>Resumes at (Local): {pausedUntil.toLocaleString()}</span>
+          <span className="block">Resumes at (UTC): {pausedUntil.toUTCString()}</span>
         </p>
       )}
     </div>

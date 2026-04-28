@@ -181,6 +181,8 @@ export interface SystemState {
   paramsWiredLive: boolean;
   /** When set in the future, signal engine will not propose new trades. */
   tradingPausedUntil: string | null;
+  /** Optional reason code for active event mode pause. */
+  pauseReason: string | null;
   /** Active trading profile — controls per-order/daily caps and scan cadence. */
   activeProfile: "sentinel" | "active" | "aggressive";
   /** Jessica's most recent autonomous decision summary (set by the jessica edge fn). */
