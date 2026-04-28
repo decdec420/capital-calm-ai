@@ -725,11 +725,15 @@ Deno.serve(async (req) => {
       if (count && count > 0 && count % 10 === 0) {
         console.log(`[post-trade-learn] milestone ${count} closed trades — triggering katrina for user ${t.user_id}`);
         const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
-        const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+        const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+          Deno.env.get("SERVICE_KEY") ??
+          "";
         if (!internalSecret) {
           console.warn("[post-trade-learn] INTERNAL_FUNCTION_SECRET missing; skipping Katrina milestone trigger");
         } else if (!serviceRoleKey) {
-          console.warn("[post-trade-learn] SUPABASE_SERVICE_ROLE_KEY missing; skipping Katrina milestone trigger");
+          console.warn(
+            "[post-trade-learn] SUPABASE_SERVICE_ROLE_KEY/SERVICE_KEY missing; skipping Katrina milestone trigger",
+          );
         } else {
           fetch(`${SUPABASE_URL}/functions/v1/katrina`, {
             method: "POST",
