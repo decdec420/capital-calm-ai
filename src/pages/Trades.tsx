@@ -330,12 +330,15 @@ export default function Trades() {
   );
 }
 
-function Cell({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "safe" | "blocked" }) {
+function Cell({ label, value, tone = "default", extra }: { label: string; value: string; tone?: "default" | "safe" | "blocked"; extra?: React.ReactNode }) {
   const color = tone === "safe" ? "text-status-safe" : tone === "blocked" ? "text-status-blocked" : "text-foreground";
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`text-sm tabular ${color}`}>{value}</div>
+      <div className={`text-sm tabular ${color} flex items-center gap-1.5 flex-wrap`}>
+        <span>{value}</span>
+        {extra}
+      </div>
     </div>
   );
 }
