@@ -80,7 +80,7 @@ export function resolveDoctrine(
     killSwitchFloorUsd,
     floorPct: s.floor_pct ?? 0.80,
     riskPerTradePct: s.risk_per_trade_pct ?? 0.01,
-    consecutiveLossLimit: s.consecutive_loss_limit ?? 2,
+    consecutiveLossLimit: s.consecutive_loss_limit ?? 4,
     lossCooldownMinutes: s.loss_cooldown_minutes ?? 30,
     scanIntervalSeconds: s.scan_interval_seconds ?? 300,
     maxCorrelatedPositions: s.max_correlated_positions ?? 3,
