@@ -58,7 +58,7 @@ export type GuardrailType =
 
 // Structured gate reason emitted by the engine. UI switches on `code` for
 // icon + tone; `message` is the operator-readable line.
-export type GateSeverity = "halt" | "block" | "skip";
+export type GateSeverity = "halt" | "block" | "skip" | "warn" | "info";
 
 export type GateReasonCode =
   | "KILL_SWITCH"
