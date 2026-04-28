@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { TradeLifecycleTimeline } from "@/components/trader/TradeLifecycleTimeline";
 import { ReasonChip } from "@/components/trader/ReasonChip";
