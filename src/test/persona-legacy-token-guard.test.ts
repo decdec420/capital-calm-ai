@@ -11,9 +11,13 @@ const BANNED_TOKENS = ["Jessica", "Harvey", "Mike", "Louis", "Suits"];
 const TECHNICAL_ALLOWLIST_PATTERNS: RegExp[] = [
   /jessica_autonomous/gi,
   /harvey_chat/gi,
+  /lastJessicaDecision/g,
+  /jessica_heartbeat/gi,
+  /agentHealth\["jessica"\]/g,
+  /healthDot\([^)]*jessica[^)]*\)/gi,
   /\bjessica\b(?=\s*[:=])/gi,
   /\bharvey\b(?=\s*[:=])/gi,
-  /\b(migration|migrations|supabase|edge\s*function|db\s*field|column)\b/gi,
+  /\b(migration|migrations|supabase|edge\s*(function|fn)|db\s*field|column)\b/gi,
 ];
 
 function walk(dirPath: string): string[] {
