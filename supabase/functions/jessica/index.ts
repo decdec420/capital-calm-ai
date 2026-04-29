@@ -1,15 +1,15 @@
-// jessica — The managing partner. Autonomous orchestrator.
+// jessica — Bobby Axelrod. Autonomous desk commander. Orchestrator.
 // Cron: every 1 minute.
-// Jessica reads full system context, decides what the desk does, executes tools,
+// Bobby reads full system context, decides what the desk does, executes tools,
 // logs every decision to tool_calls with actor='jessica_autonomous'.
 //
-// ─── The Suits Desk ──────────────────────────────────────────────
-// Jessica  — Managing Partner. Runs the firm.                  [this function]
-// Harvey   — Senior Partner. The closer. Talks to operator.    [copilot-chat]
-// Donna    — Operations. Runs the engine tick.                 [signal-engine]
-// Mike     — Pattern Recognition Specialist.                   [Brain Trust Expert 2]
-// Louis    — Crypto Intel Analyst.                             [Brain Trust Expert 3]
-// Rachel   — Trade Coach. Grades entries.                      [post-trade-learn]
+// ─── Axe Capital Trading Desk ────────────────────────────────────
+// Bobby    — Desk Commander. Makes every call.                 [this function]
+// Wags     — COO. Talks to the operator. Keeps the machine running. [copilot-chat]
+// Taylor   — Chief Quant. Scores setups (signal), reviews strategies (katrina).
+// Mafee    — Pattern Recognition. Spots setups.               [Brain Trust Expert 3]
+// Dollar Bill — Crypto Intel. Funding, sentiment, news.       [Brain Trust Expert 2]
+// Wendy    — Performance Coach. Grades entries, drives learning. [post-trade-learn]
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
@@ -21,8 +21,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// Flash for latency — Jessica runs every 60 seconds. She doesn't need deep
-// analysis here; Harvey, Mike, and Louis did that. Her job is: read their
+// Flash for latency — Bobby runs every 60 seconds. He doesn't need deep
+// analysis here; the Brain Trust and Taylor did that. His job is: read their
 // output, decide what to do right now, and do it.
 // Pinned to a GA stable release (MED-1). Change only when intentionally
 // upgrading and verifying tool-call schema compatibility.
@@ -69,46 +69,48 @@ function jessicaCbFailure(): void {
 
 
 const JESSICA_SYSTEM = `
-You are Jessica — the managing partner of this trading operation.
+You are Bobby — the desk commander at Axe Capital.
 
-This is your scheduled reasoning tick. No user is present. Your only outputs
-are tool calls. If no action is warranted, say so in one sentence.
+This is your autonomous tick. No one is watching. You read the board, you make the call.
+Your only outputs are tool calls. If no action is warranted, say so in one sentence.
 
-Your role:
-You run the desk. Harvey talks to the operator. Donna runs the engine. Mike and
-Louis read the market. Rachel grades the trades. You decide when each of them
-works and when they sit.
+Your desk:
+Wags keeps the operator informed and the machine running. Taylor scores setups and
+signals every minute. The Brain Trust reads the market every 4 hours. Wendy grades
+every trade after it closes. You decide when each of them moves — and when they sit.
 
 Decision framework (in order, every tick):
 1. SAFETY — Is the system halted, paused, or equity near floor?
-   If yes: confirm state, sit, do not fire anything into a wall.
+   If yes: sit. Do not fire anything into a wall. Bobby doesn't throw money at a locked door.
 
 2. BRAIN TRUST STALENESS — Is market_intelligence older than 5 hours for any symbol?
-   If yes: run_brain_trust. We don't trade on stale context.
+   If yes: run_brain_trust. Axe Capital does not trade on stale intel.
 
-3. PENDING SIGNALS — Are there pending trade signals?
+3. PENDING SIGNALS — Are there pending trade signals from Taylor?
    Call get_pending_signals first, then evaluate each:
    - APPROVE when: regime aligns with signal direction (confidence ≥ 0.65),
      setup_score ≥ 0.55, no active anti-tilt for that direction, no critical news flags.
-   - REJECT when: any of the above conditions fail. State which one.
-   - When in doubt: reject. The next tick is 60 seconds away.
+   - REJECT when: any of the above conditions fail. State which one. No vague reasons.
+   - When in doubt: reject. Taylor ticks again in 60 seconds.
+   - In paper mode: be willing to approve setups with confidence ≥ 0.55 and setup_score ≥ 0.45
+     to build pattern data faster. The cost of a wrong paper trade is a data point, not a loss.
 
 4. ENGINE TICK — Are conditions favorable and last tick was >90 seconds ago?
-   run_engine_tick. Let Donna score the current setup.
+   run_engine_tick. Let Taylor score the current setup.
 
 5. PAUSE — Are there 2+ critical/high news flags, OR 3+ consecutive stop-outs in 2h?
-   pause_bot for 60 minutes. State exactly why.
+   pause_bot for 60 minutes. State exactly why. Bobby calls timeouts with precision, not fear.
 
 6. SIT — None of the above. Say why in one sentence. Next tick in 60 seconds.
 
-Hard rules — these are not negotiable:
+Hard rules — Bobby doesn't break these:
 - Never fire run_engine_tick if last tick was <90 seconds ago.
 - Never approve_signal without calling get_pending_signals first.
 - Never pause for more than 120 minutes autonomously. Longer requires the operator.
-- Never call set_autonomy. That's the operator's decision.
-- Capital preservation beats everything. When in doubt, sit.
+- Never call set_autonomy. That's the operator's call.
+- Capital preservation beats alpha. Always. When in doubt, sit.
 - You are not the engine. You are not the risk manager. They do their jobs.
-  Your job is to decide WHEN to call them — and when to leave them alone.
+  Your job is to decide WHEN to deploy them — and when to leave them alone.
 
 HEALTH RECOVERY: agent_health in context shows current agent status.
 - If brain_trust is 'failed' or 'degraded': run_brain_trust immediately
@@ -118,9 +120,9 @@ HEALTH RECOVERY: agent_health in context shows current agent status.
 `.trim();
 
 // ─── Agent Health Check (Layer 1 watchdog) ──────────────────────────
-// Jessica inspects each agent's freshness on every tick and writes a row
-// to agent_health. Postgres separately watches Jessica herself via the
-// check_jessica_heartbeat() pg_cron job (Layer 2).
+// Bobby inspects each agent's freshness on every tick and writes a row
+// to agent_health. Postgres separately watches Bobby (via jessica function)
+// using the check_jessica_heartbeat() pg_cron job (Layer 2).
 
 interface AgentHealth {
   agent: string;
@@ -138,7 +140,7 @@ async function checkAgentHealth(
   const nowIso = new Date().toISOString();
   const health: AgentHealth[] = [];
 
-  // ── Brain Trust (Mike + Louis via market-intelligence) ──
+  // ── Brain Trust (Dollar Bill + Mafee via market-intelligence) ──
   const intelStaleness = (context.brain_trust as Record<string, unknown> | undefined)
     ?.staleness_minutes as Record<string, number> | undefined;
   const stalenessValues = intelStaleness ? Object.values(intelStaleness) : [];
@@ -158,7 +160,7 @@ async function checkAgentHealth(
       : null,
   });
 
-  // ── Signal Engine (Donna) ──
+  // ── Signal Engine (Taylor) ──
   const engineAgeSeconds =
     ((context.engine as Record<string, unknown> | undefined)?.last_tick_seconds_ago as number | undefined) ?? 9999;
   const engineAgeMinutes = Math.floor(engineAgeSeconds / 60);
@@ -177,8 +179,8 @@ async function checkAgentHealth(
       : null,
   });
 
-  // ── Jessica's self-report (the heartbeat row is written separately by Postgres) ──
-  // This row reflects "Jessica says she's running." The pg_cron heartbeat
+  // ── Bobby's self-report (the heartbeat row is written separately by Postgres) ──
+  // This row reflects "Bobby says he's running." The pg_cron heartbeat
   // writes a separate row called 'jessica_heartbeat' from outside the runtime.
   health.push({
     agent: "jessica",
@@ -270,7 +272,7 @@ async function buildContext(
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("account_state").select("equity,balance_floor,start_of_day_equity").eq("user_id", userId).maybeSingle(),
     admin.from("trades").select("symbol,side,unrealized_pnl,opened_at").eq("user_id", userId).eq("status", "open"),
-    admin.from("trade_signals").select("id,symbol,side,confidence,setup_score,ai_reasoning,created_at").eq("user_id", userId).eq("status", "pending").order("created_at", { ascending: false }).limit(5),
+    admin.from("trade_signals").select("id,symbol,side,confidence,setup_score,ai_reasoning,created_at,expires_at").eq("user_id", userId).eq("status", "pending").gte("expires_at", new Date().toISOString()).order("created_at", { ascending: false }).limit(5),
     admin.from("market_intelligence").select("symbol,macro_bias,macro_confidence,market_phase,environment_rating,news_flags,generated_at").eq("user_id", userId),
     admin.from("tool_calls").select("tool_name,called_at,success,reason,actor").eq("user_id", userId).order("called_at", { ascending: false }).limit(10),
     admin.from("trades").select("symbol,side,outcome,pnl,closed_at").eq("user_id", userId).eq("status", "closed").order("closed_at", { ascending: false }).limit(5),
@@ -469,7 +471,7 @@ async function runJessicaForUser(
   if (brainTrustHealth &&
       (brainTrustHealth.status === "failed" || brainTrustHealth.status === "degraded")) {
     console.log(
-      `[jessica] Brain Trust ${brainTrustHealth.status} (${brainTrustHealth.lastSuccessMinutesAgo}m stale) — auto-refreshing before tick`,
+      `[jessica/bobby] Brain Trust ${brainTrustHealth.status} (${brainTrustHealth.lastSuccessMinutesAgo}m stale) — auto-refreshing before tick`,
     );
     try {
       await executeTool(

@@ -57,7 +57,7 @@ export function AIInsightPanel({
                 isAi ? "text-primary/90" : "text-muted-foreground",
               )}
             >
-              {isAi ? "Harvey's Read" : "Computed Read"}
+              {isAi ? "Bobby's Read" : "Computed Read"}
             </span>
             {isAi && (
               <span className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-primary/15 text-primary">

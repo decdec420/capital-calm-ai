@@ -9,12 +9,18 @@
 //                  old approved, candidate becomes approved.
 //                  Only ONE promotion per cron run per user; if
 //                  multiple pass, the largest expectancy margin wins.
-//   - retired    → reached ≥100 trades and lost on at least one
+//   - retired    → reached ≥ MIN_TRADES and lost on at least one
 //                  bar (expectancy / win rate / sharpe / drawdown).
 //   - paused     → drawdown blew up by >20pp; needs a human call.
 //   - skipped    → not enough trades yet, or in cooldown window.
 //
-// A user-wide 7-day cooldown applies to auto-promotions only;
+// Paper mode (flood gates): lower trade minimum + shorter cooldown
+// so the system learns faster. Live mode keeps full safety bars.
+//
+//   Paper:  MIN_TRADES = 30,  COOLDOWN_DAYS = 1
+//   Live:   MIN_TRADES = 100, COOLDOWN_DAYS = 7
+//
+// A user-wide cooldown applies to auto-promotions only;
 // "Run check now" from the UI bypasses the cooldown.
 //
 // Always stamps `system_state.last_evaluated_at` so the UI can
@@ -106,18 +112,24 @@ async function evaluateForUser(
     return { userId, evaluated: 0, results: [] as CandidateResult[], skipped: "no_approved_baseline" };
   }
 
+  // Paper mode flood gates: lower bars so the system builds pattern data faster.
+  // Live mode keeps full safety bars.
+  const { data: sysState } = await admin
+    .from("system_state")
+    .select("last_auto_promoted_at, mode")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isPaper = ((sysState as { mode?: string } | null)?.mode ?? "paper") !== "live";
+  const minTrades = isPaper ? 30 : MIN_TRADES_TO_EVALUATE;   // paper: 30, live: 100
+  const cooldownDays = isPaper ? 1 : COOLDOWN_DAYS;          // paper: 1 day, live: 7 days
+
   // Cooldown: applies to auto (cron) only.
   let cooldownDaysRemaining = 0;
   if (isCron) {
-    const { data: state } = await admin
-      .from("system_state")
-      .select("last_auto_promoted_at")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const last = (state as { last_auto_promoted_at: string | null } | null)?.last_auto_promoted_at;
+    const last = (sysState as { last_auto_promoted_at?: string | null } | null)?.last_auto_promoted_at;
     if (last) {
       const ageMs = Date.now() - new Date(last).getTime();
-      const cooldownMs = COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+      const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
       if (ageMs < cooldownMs) {
         cooldownDaysRemaining = Math.ceil((cooldownMs - ageMs) / (24 * 60 * 60 * 1000));
       }
@@ -136,13 +148,13 @@ async function evaluateForUser(
 
   for (const c of candidates) {
     const trades = metric(c, "trades");
-    if (trades < MIN_TRADES_TO_EVALUATE) {
+    if (trades < minTrades) {
       results.push({
         candidate: c.version,
         outcome: "skipped",
         reason: "not_enough_trades",
         trades,
-        need: MIN_TRADES_TO_EVALUATE,
+        need: minTrades,
       });
       continue;
     }
@@ -246,7 +258,7 @@ async function evaluateForUser(
       userId,
       "info",
       `🚀 Strategy auto-promoted to ${winner.row.version}`,
-      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades. Auto-promotions paused for ${COOLDOWN_DAYS} days.`,
+      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades. Auto-promotions paused for ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`,
     );
 
     // Mark the winner's "ready" entry as "promoted"; remaining "ready"
@@ -262,7 +274,7 @@ async function evaluateForUser(
           outcome: "skipped",
           reason: "cooldown",
           trades: r.trades,
-          cooldown_days_remaining: COOLDOWN_DAYS,
+          cooldown_days_remaining: cooldownDays,
         };
       }
     }

@@ -95,7 +95,7 @@ export function ProfilePicker() {
           Trading Profile
         </h3>
         <p className="text-xs text-muted-foreground mt-1">
-          How aggressively Harvey scans the market and sizes orders. Tightening
+          How aggressively Taylor scores setups and sizes orders. Tightening
           changes apply instantly; any field that loosens risk waits 24h.
           Symbol whitelist and live-arming approval stay locked at every tier.
         </p>

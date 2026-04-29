@@ -150,7 +150,7 @@ export function AlertCard({
       {/* Expanded body */}
       {expanded && (
         <div className="border-t border-border px-3 py-3 space-y-3">
-          {cls.category === "cron_health" && <JessicaTriage alert={alert} />}
+          {cls.category === "cron_health" && <BobbyTriage alert={alert} />}
 
           <Section label="What" body={cls.what} />
           <Section label="Why it matters" body={cls.why} />
@@ -263,16 +263,16 @@ function Section({ label, body }: { label: string; body: string }) {
 
 /**
  * Live triage block for cron_health alerts. Reads current system state
- * (bot, kill-switch, last Jessica decision) and the heartbeat agent_health
+ * (bot, kill-switch, last Bobby decision) and the heartbeat agent_health
  * row, then offers the three actions that actually clear this class of
- * alert: resume bot, disarm kill-switch, run Jessica now.
+ * alert: resume bot, disarm kill-switch, run Bobby now.
  *
- * "Run Jessica now" closes the loop:
+ * "Run Bobby now" closes the loop:
  *  - if heartbeat goes healthy + tick is fresh → auto-dismiss the alert.
  *  - if invoke succeeds but heartbeat still bad → escalate inline.
  *  - if invoke itself fails → show system-outage state inline.
  */
-function JessicaTriage({ alert }: { alert: Alert }) {
+function BobbyTriage({ alert }: { alert: Alert }) {
   const { user } = useAuth();
   const { data: system, update, refetch } = useSystemState();
   const { dismiss } = useAlerts();
@@ -431,14 +431,14 @@ function JessicaTriage({ alert }: { alert: Alert }) {
 
   const onCopyDiagnostic = async () => {
     const lines = [
-      `Jessica heartbeat diagnostic — ${new Date().toISOString()}`,
+      `Bobby heartbeat diagnostic — ${new Date().toISOString()}`,
       `User id: ${user?.id ?? "(not signed in)"}`,
       `Alert id: ${alert.id}`,
       `Alert title: ${alert.title}`,
       `Alert created: ${alert.timestamp}`,
       `Bot status: ${system.bot}`,
       `Kill-switch engaged: ${system.killSwitchEngaged}`,
-      `Last Jessica tick: ${ranAt ?? "never"} (${ageLabel})`,
+      `Last Bobby tick: ${ranAt ?? "never"} (${ageLabel})`,
       `Last decision actions: ${actions}`,
       `Heartbeat agent status: ${hbStatus ?? "unknown"}`,
       `Heartbeat last error: ${hbError ?? "none"}`,
@@ -458,7 +458,7 @@ function JessicaTriage({ alert }: { alert: Alert }) {
     <div className="rounded-md border border-border bg-secondary/30 p-2.5 space-y-2">
       <div className="flex items-center gap-2 text-xs">
         <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
-        <span className="font-medium text-foreground">Jessica</span>
+        <span className="font-medium text-foreground">Bobby</span>
         <span className="text-muted-foreground">·</span>
         <span className="tabular text-foreground/90">last tick {ageLabel}</span>
         <span className="text-muted-foreground">·</span>
@@ -504,7 +504,7 @@ function JessicaTriage({ alert }: { alert: Alert }) {
       {escalation === "still_failing" && (
         <div className="rounded border border-status-blocked/40 bg-status-blocked/10 p-2 space-y-1.5">
           <p className="text-[11px] font-medium text-status-blocked">
-            Manual kick succeeded but heartbeat is still failing — Jessica can run, but the watchdog is not seeing it.
+            Manual kick succeeded but heartbeat is still failing — Bobby can run, but the watchdog is not seeing it.
           </p>
           {escalationDetail && (
             <p className="text-[11px] text-foreground/80 italic break-words">{escalationDetail}</p>
@@ -515,7 +515,7 @@ function JessicaTriage({ alert }: { alert: Alert }) {
       {escalation === "unreachable" && (
         <div className="rounded border border-status-blocked/40 bg-status-blocked/10 p-2 space-y-1.5">
           <p className="text-[11px] font-medium text-status-blocked">
-            Edge function unreachable — Jessica is offline. This is a system-level outage, not just heartbeat lag.
+            Edge function unreachable — Bobby is offline. This is a system-level outage, not just heartbeat lag.
           </p>
           {escalationDetail && (
             <p className="text-[11px] text-foreground/80 italic break-words">{escalationDetail}</p>
@@ -538,7 +538,7 @@ function JessicaTriage({ alert }: { alert: Alert }) {
         )}
         <Button size="sm" variant="outline" onClick={onKick} disabled={busy !== null}>
           <RefreshCw className={cn("h-3.5 w-3.5 mr-1", busy === "kick" && "animate-spin")} />
-          {busy === "kick" ? "Running…" : "Run Jessica now"}
+          {busy === "kick" ? "Running…" : "Run Bobby now"}
         </Button>
         {escalation && (
           <>

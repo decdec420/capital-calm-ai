@@ -79,7 +79,7 @@ export default function Learning() {
       } else if (data?.error) {
         toast.error(data.error);
       } else {
-        toast.success("Katrina updated her review.");
+        toast.success("Taylor updated her strategy brief.");
         const { data: fresh } = await supabase
           .from("strategy_reviews")
           .select("brief_text, reviewed_at, win_rate_trend, trades_analyzed, promote_ids, kill_ids, continue_ids")
@@ -89,7 +89,7 @@ export default function Learning() {
         if (fresh) setKatrinaReview(fresh as KatrinaReview);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not run Katrina.");
+      toast.error(err instanceof Error ? err.message : "Could not run Taylor's review.");
     } finally {
       setKatrinaRunning(false);
     }
@@ -667,7 +667,7 @@ function KatrinaPanel({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-foreground">Katrina's Review</span>
+              <span className="text-sm font-semibold text-foreground">Taylor's Strategy Brief</span>
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Strategy Lab</span>
             </div>
             {review ? (
@@ -697,7 +697,7 @@ function KatrinaPanel({
               </>
             ) : (
               <p className="text-xs text-muted-foreground mt-2 leading-relaxed max-w-xl">
-                Katrina's first review runs Sunday at 08:00 UTC, or after your 10th closed trade — whichever comes first. You can also run her now if you have at least 3 closed trades in the last 30 days.
+                Taylor's first strategy brief runs Sunday at 08:00 UTC, or after your 10th closed trade — whichever comes first. You can also run it now if you have at least 3 closed trades in the last 30 days.
               </p>
             )}
           </div>

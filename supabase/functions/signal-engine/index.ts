@@ -299,6 +299,9 @@ async function decideForSymbol(opts: {
   profile: TradingProfile;
   /** Per-user resolved per-order USD cap. Overrides profile when present. */
   maxOrderUsdOverride?: number;
+  /** Paper mode flood gates: lower the confidence bar — a wrong paper trade
+   * is a data point, not a real loss. Defaults to false (live thresholds). */
+  isPaper?: boolean;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -314,7 +317,7 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride } = opts;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride, isPaper } = opts;
   const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
   // Circuit breaker: skip AI entirely if the gateway has been failing.
@@ -395,7 +398,7 @@ DECISION HIERARCHY (work through all of these before deciding):
 6. SKIP CRITERIA (these override everything — skip if ANY are true):
    - No clear trend on 4h timeframe
    - 4h and 1h trends are opposed (fighting the intermediate trend)
-   - setupScore < 0.55 (not enough quality signals aligning)
+   - setupScore < ${isPaper ? "0.45" : "0.55"} (not enough quality signals aligning)
    - Volatility is extreme (crypto flash crashes happen fast)
    - Outside of prime liquidity: only trade 07:00-23:00 UTC
 
@@ -412,10 +415,18 @@ STOPS AND TARGETS:
 - If the natural stop placement puts you more than 2.5% from entry, the
   setup is too extended. Skip it.
 
+${isPaper ? `
+PAPER MODE — FLOOD GATES OPEN:
+You are running in paper mode. A wrong trade is a data point, not a loss.
+Lower your confidence threshold to 0.55 (vs 0.65 in live). Accept setups that
+are directionally sound even if not textbook. The goal right now is to build
+pattern data faster. Propose trades on B+ setups, not just A+.
+Still skip chop and broken setups — but don't wait for perfection.
+` : `
 A SKIP IS NOT FAILURE. Most ticks should be skips.
 The edge is in the quality of trades taken, not the quantity.
 "The money is made in the waiting." — Jesse Livermore
-
+`}
 You MUST call submit_decision. No plain text responses.
 `.trim();
 
@@ -786,6 +797,13 @@ async function runTickForUser(
     settingsRow?.max_correlated_positions ?? activeProfile.maxCorrelatedPositions;
   const RISK_PER_TRADE_PCT =
     settingsRow?.risk_per_trade_pct ?? activeProfile.riskPerTradePct;
+
+  // Paper mode flood gates: in paper mode lower setup_score and confidence bars
+  // so Taylor proposes more setups and the system builds pattern data faster.
+  // Live mode keeps full bars. Default to paper when mode is not explicitly "live".
+  const isPaper = ((sys as { mode?: string } | null)?.mode ?? "paper") !== "live";
+  const MIN_SETUP_SCORE = isPaper ? 0.45 : 0.55;   // paper: 0.45, live: 0.55
+  const MIN_CONFIDENCE = isPaper ? 0.55 : 0.65;     // paper: 0.55, live: 0.65
 
   // Event mode / manual pause check — halts all symbols this tick.
   const pausedGate = getActiveEventModeGateFromSystem({
@@ -1242,7 +1260,7 @@ async function runTickForUser(
     (c) =>
       !c.lockGate &&
       TRADEABLE_REGIMES.has(c.regime.regime) &&
-      c.regime.setupScore >= 0.55,
+      c.regime.setupScore >= MIN_SETUP_SCORE,
   );
   tradable.sort((a, b) => {
     const pbA = a.regime.pullback ? 1 : 0;
@@ -1288,12 +1306,12 @@ async function runTickForUser(
           ),
         ];
       }
-      if (c.regime.setupScore < 0.55) {
+      if (c.regime.setupScore < MIN_SETUP_SCORE) {
         return [
           gate(
             GATE_CODES.LOW_SETUP_SCORE,
             "skip",
-            `${c.symbol}: setup ${c.regime.setupScore.toFixed(2)} below 0.55.`,
+            `${c.symbol}: setup ${c.regime.setupScore.toFixed(2)} below ${MIN_SETUP_SCORE.toFixed(2)}.`,
             { symbol: c.symbol, setupScore: c.regime.setupScore },
           ),
         ];
@@ -1513,6 +1531,7 @@ async function runTickForUser(
     stratParams: liveParams,
     profile: activeProfile,
     maxOrderUsdOverride: resolvedDoctrine.maxOrderUsd,
+    isPaper,
   });
 
   if ("error" in aiResult) {
@@ -1847,6 +1866,10 @@ async function runTickForUser(
         activeNewsFlags: summarizeNewsFlags(intel?.news_flags).active,
       },
       status: "pending",
+      // TTL: signal is valid for 30 minutes. Bobby's pending-signal query
+      // filters expires_at > NOW(), so stale signals from before a pause
+      // window are automatically invisible on resume.
+      expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     })
     .select()
     .single();

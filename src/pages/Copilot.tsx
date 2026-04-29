@@ -290,7 +290,7 @@ export default function Copilot() {
         setIntelTimestamps(map);
       }
 
-      // Step 2: Signal Engine (Donna)
+      // Step 2: Signal Engine (Taylor)
       setPipelineStep("engine");
       const engineRes = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-engine`,
@@ -303,11 +303,11 @@ export default function Copilot() {
         const e = await engineRes.json().catch(() => ({}));
         setPipelineStep("error");
         setPipelineError((e as { error?: string }).error ?? "Engine failed");
-        toast.error("Donna failed — check function logs.");
+        toast.error("Taylor signal engine failed — check function logs.");
         return;
       }
 
-      // Step 3: Harvey briefing
+      // Step 3: Wags briefing
       setPipelineStep("briefing");
       const tick = (engineJson.tick as string) ?? "unknown";
       const reasons = Array.isArray(engineJson.gateReasons)
@@ -315,9 +315,9 @@ export default function Copilot() {
         : [];
       const firstReason = reasons[0]?.message ?? null;
       const pipelinePrompt = [
-        `[Pipeline run complete — Brain Trust refreshed, Donna ticked]`,
+        `[Pipeline run complete — Brain Trust refreshed, Taylor ticked]`,
         `Engine result: ${tick}${firstReason ? ` — ${firstReason}` : ""}.`,
-        `Give me your two-sentence Harvey briefing on what this means for the next window.`,
+        `Give me your two-sentence Wags briefing on what this means for the next window.`,
       ].join(" ");
 
       if (activeId) {
@@ -430,7 +430,7 @@ export default function Copilot() {
   const send = async (text: string) => {
     if (!text.trim()) return;
     if (streaming) {
-      toast.info("Hold on — Harvey is still answering.");
+      toast.info("Hold on — Wags is still on it.");
       return;
     }
 
@@ -580,7 +580,7 @@ export default function Copilot() {
 
         <span className="text-border">|</span>
 
-        {/* Signal Engine (Donna) */}
+        {/* Signal Engine (Taylor) */}
         <div className="flex items-center gap-1.5">
           <span className={cn(
             "w-1.5 h-1.5 rounded-full",
@@ -591,24 +591,24 @@ export default function Copilot() {
                   ? "bg-status-safe" : "bg-muted-foreground/40"
             )
           )} />
-          <span>Donna</span>
+          <span>Taylor</span>
           <span className="text-muted-foreground/50">·</span>
           <span className="tabular">{formatAge(lastEngineRun)}</span>
         </div>
 
         <span className="text-border">|</span>
 
-        {/* Harvey */}
+        {/* Wags */}
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-status-safe" />
-          <span>Harvey</span>
+          <span>Wags</span>
           <span className="text-muted-foreground/50">·</span>
           <span className="text-muted-foreground/50">gemini-flash</span>
         </div>
 
         <span className="text-border">|</span>
 
-        {/* Jessica — autonomous orchestrator. Dot uses worst of (jessica, jessica_heartbeat). */}
+        {/* Bobby — autonomous orchestrator. Dot uses worst of (jessica, jessica_heartbeat). */}
         <div className="flex items-center gap-1.5">
           {(() => {
             const decision = system?.lastJessicaDecision ?? null;
@@ -622,7 +622,7 @@ export default function Copilot() {
                 : ageSec < 60
                   ? `${ageSec}s ago`
                   : `${Math.floor(ageSec / 60)}m ago`;
-            // Pick the worse of Jessica's self-report and Postgres' heartbeat view.
+            // Pick the worse of Bobby's self-report and Postgres' heartbeat view.
             const severity = (s?: string) =>
               s === "failed" ? 3 : s === "degraded" ? 2 : s === "stale" ? 1 : 0;
             const self = agentHealth["jessica"]?.status;
@@ -634,7 +634,7 @@ export default function Copilot() {
             return (
               <>
                 <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
-                <span>Jessica</span>
+                <span>Bobby</span>
                 <span className="text-muted-foreground/50">·</span>
                 <span className="tabular">{ageLabel}</span>
                 {decision?.actions ? (
@@ -654,7 +654,7 @@ export default function Copilot() {
             <span className="text-border">|</span>
             <div className="flex items-center gap-2 ml-1">
               {(["braintrust", "engine", "briefing"] as const).map((step, i) => {
-                const labels = { braintrust: "Brain Trust", engine: "Donna", briefing: "Harvey" };
+                const labels = { braintrust: "Brain Trust", engine: "Taylor", briefing: "Wags" };
                 const stepOrder = ["braintrust", "engine", "briefing", "done"];
                 const currentIdx = stepOrder.indexOf(pipelineStep);
                 const done = pipelineStep === "done" || currentIdx > i;
@@ -937,7 +937,7 @@ export default function Copilot() {
 
           <div className="panel p-4 space-y-3">
             <div>
-              <div className="text-sm font-medium text-foreground">What Harvey sees</div>
+              <div className="text-sm font-medium text-foreground">What Wags sees</div>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 Auto-attached to every message you send.
               </p>

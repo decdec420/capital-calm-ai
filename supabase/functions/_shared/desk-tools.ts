@@ -1,19 +1,23 @@
 // _shared/desk-tools.ts
 // The desk's shared operator toolset — schemas + executors.
-// Used by: Harvey (copilot-chat, interactive) and Jessica (jessica, autonomous).
+// Used by: Wags (copilot-chat, interactive) and Bobby (jessica, autonomous).
 // Every write action is logged to tool_calls with actor, tool name, args, result, reason.
 //
-// ─── The Suits Desk ──────────────────────────────────────────────
-// Harvey    — Copilot chat. The operator talks to him. The closer.   [copilot-chat]
-// Jessica   — Autonomous orchestrator. Runs the firm. Calls the shots. [jessica]
-// Mike      — Pattern Recognition Specialist. Spots setups.           [Brain Trust Expert 2]
-// Louis     — Crypto Intel Analyst. Funding, sentiment, news.         [Brain Trust Expert 3]
-// Donna     — Signal Engine. Scores setups, proposes entries.         [signal-engine]
-// Jessica*  — Risk Manager. Enforces doctrine. Nothing gets through.  [risk gates in signal-engine]
-//   *Jessica plays dual role: autonomous orchestrator AND doctrine enforcer.
-// Rachel    — Trade Coach. Grades entries, drives learning.           [post-trade-learn]
-// Katrina   — Strategy Analyst. Runs the lab. Grades experiments, promotes winners,
-//             kills losers. Weekly review + trade milestone triggers.   [katrina]
+// ─── Axe Capital Trading Desk ────────────────────────────────────
+// Bobby     — Desk Commander. Autonomous orchestrator. Makes every call. [jessica]
+// Wags      — COO. Operator interface. The operator talks to Wags.      [copilot-chat]
+// Taylor    — Chief Quant / CIO. Two modes:
+//               Signal mode: scores setups, proposes entries.           [signal-engine]
+//               Review mode: grades strategies, promotes/kills.         [katrina]
+// Mafee     — Pattern Recognition. Spots setups, reads chart structure. [Brain Trust Expert 3]
+// Dollar Bill — Crypto Intel. Funding, sentiment, news, environment.    [Brain Trust Expert 2]
+// Hall      — Macro Strategist. Trend structure, market phase, bias.    [Brain Trust Expert 1]
+// Chuck     — Risk Manager. Binary veto. Enforces doctrine.             [risk gates in signal-engine]
+// Wendy     — Performance Coach. Grades entries, drives learning.       [post-trade-learn]
+//
+// TRADE AUTHORITY: Only Bobby (jessica_autonomous) and Wags (harvey_chat) can
+// execute trade tools. The trade reaches Bobby because it was already vetted
+// by Taylor's signal engine and Chuck's risk veto.
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -46,7 +50,7 @@ export const DESK_TOOLS = [
     function: {
       name: "run_engine_tick",
       description:
-        "Fire Donna (signal engine) now, off-schedule. Use when conditions just changed and waiting for the next cron tick would miss the window.",
+        "Fire Taylor (signal engine) now, off-schedule. Use when conditions just changed and waiting for the next cron tick would miss the window.",
       parameters: {
         type: "object",
         properties: {
@@ -64,7 +68,7 @@ export const DESK_TOOLS = [
     function: {
       name: "approve_signal",
       description:
-        "Approve a pending trade signal. The signal still flows through Jessica's doctrine gates — this is NOT a bypass.",
+        "Approve a pending trade signal. The signal still flows through Chuck's doctrine gates (risk manager veto in signal-engine) — this is NOT a bypass.",
       parameters: {
         type: "object",
         properties: {
@@ -113,7 +117,7 @@ export const DESK_TOOLS = [
         properties: {
           minutes: {
             type: "number",
-            description: "Minutes to pause. Max 120 (2 hours). Jessica is not permitted to suspend trading for longer than 2 hours autonomously.",
+            description: "Minutes to pause. Max 120 (2 hours). Bobby is not permitted to suspend trading for longer than 2 hours autonomously.",
           },
           reason: {
             type: "string",
@@ -261,10 +265,21 @@ export async function executeTool(
 ): Promise<ToolCallResult> {
   const { userId, token, supabaseUrl, supabaseAnonKey, serviceRoleKey, actor } = context;
 
+  // Trade authority gate: only Bobby (jessica_autonomous) and Wags (harvey_chat)
+  // may execute desk tools. Any other actor is rejected before touching state.
+  const AUTHORISED_ACTORS: readonly string[] = ["harvey_chat", "jessica_autonomous"];
+  if (!AUTHORISED_ACTORS.includes(actor)) {
+    return {
+      success: false,
+      error: `Trade authority denied: unknown actor "${actor}". Only Bobby and Wags may execute desk tools.`,
+    };
+  }
+
   const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
   const reason = (args.reason as string) ?? (args.reasoning as string) ?? "no reason provided";
-  const actorShort = actor === "harvey_chat" ? "harvey" : "jessica";
+  // actorShort used in audit logs. Maps technical actor IDs → display names.
+  const actorShort = actor === "harvey_chat" ? "wags" : "bobby";
 
   const logEntry = {
     user_id: userId,
