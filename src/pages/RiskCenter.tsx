@@ -137,7 +137,7 @@ export default function RiskCenter() {
         </button>
       </div>
 
-      {/* Trading profile — sets how aggressive Harvey can be */}
+      {/* Trading profile — sets how aggressive the operator mode can be */}
       <div className="panel p-5">
         <ProfilePicker />
       </div>
