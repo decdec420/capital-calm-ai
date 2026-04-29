@@ -115,7 +115,7 @@ export function useSystemState() {
    * the cast. */
   const acknowledgeLiveMoney = async () => {
     if (!user) return;
-    const { error } = await supabase.rpc("acknowledge_live_money");
+    const { error } = await (supabase.rpc as any)("acknowledge_live_money");
     if (error) throw error;
     await refetch();
   };
