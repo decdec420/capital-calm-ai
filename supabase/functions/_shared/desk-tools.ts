@@ -220,7 +220,7 @@ export const DESK_TOOLS = [
     function: {
       name: "propose_doctrine_change",
       description:
-        "Propose a change to the trading doctrine — risk profile, position sizing, session filters, or strategy parameters. The change queues for 24 hours before auto-applying so the operator can review or veto. Use when the operator says things like 'make Taylor more aggressive on BTC', 'tighten the stop', or asks to tune any doctrine parameter.",
+        "Apply a change to the trading doctrine immediately — risk profile, position sizing, session filters, or strategy parameters. Use when the operator says things like 'make Taylor more aggressive on BTC', 'switch to active mode', 'tighten the stop', or asks to tune any doctrine parameter. Change takes effect right now and is logged to the audit trail.",
       parameters: {
         type: "object",
         properties: {
@@ -568,25 +568,49 @@ export async function executeTool(
         const changeSummary = args.change_summary as string;
         const rationale = args.rationale as string;
         const parameters = (args.parameters as Record<string, unknown>) ?? {};
-        const applyAfter = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        await appendSystemEvent("doctrine_proposal", {
+
+        // Apply known parameters immediately to system_state.
+        // active_profile is the primary tunable doctrine lever.
+        const VALID_PROFILES = ["sentinel", "active", "aggressive"];
+        const dbPatch: Record<string, unknown> = {};
+        if (parameters.active_profile && VALID_PROFILES.includes(parameters.active_profile as string)) {
+          dbPatch.active_profile = parameters.active_profile;
+        }
+
+        let applyError: string | undefined;
+        if (Object.keys(dbPatch).length > 0) {
+          const { error: patchErr } = await adminClient
+            .from("system_state")
+            .update(dbPatch)
+            .eq("user_id", userId);
+          if (patchErr) applyError = patchErr.message;
+        }
+
+        // Log the change as implemented (not queued).
+        await appendSystemEvent("doctrine_change", {
           change_summary: changeSummary,
           rationale,
           parameters,
-          apply_after: applyAfter,
-          proposed_by: actorShort,
+          applied: Object.keys(dbPatch).length > 0 && !applyError,
+          applied_by: actorShort,
         });
-        const result: ToolCallResult = {
-          success: true,
-          data: {
-            status: "queued",
-            change_summary: changeSummary,
-            apply_after: applyAfter,
-          },
-        };
+
+        const result: ToolCallResult = applyError
+          ? { success: false, error: applyError }
+          : {
+              success: true,
+              data: {
+                status: "applied",
+                change_summary: changeSummary,
+                parameters_set: dbPatch,
+              },
+            };
         await adminClient
           .from("tool_calls")
-          .insert({ ...logEntry, result, success: true });
+          .insert({ ...logEntry, result, success: result.success });
+        if (result.success) {
+          await appendAudit("doctrine_change", { change_summary: changeSummary, rationale, parameters: dbPatch });
+        }
         return result;
       }
 
