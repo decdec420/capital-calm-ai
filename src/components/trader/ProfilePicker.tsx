@@ -185,9 +185,9 @@ export function ProfilePicker() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-baseline">
-      <dt className="text-muted-foreground text-[11px]">{label}</dt>
-      <dd className="text-foreground">{value}</dd>
+    <div className="flex justify-between items-baseline gap-3">
+      <dt className="text-muted-foreground text-[11px] whitespace-nowrap">{label}</dt>
+      <dd className="text-foreground text-right tabular-nums truncate">{value}</dd>
     </div>
   );
 }
