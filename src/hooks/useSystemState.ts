@@ -94,13 +94,13 @@ export function useSystemState() {
     ];
     const auditPayload: Record<string, unknown> = {};
     for (const k of auditKeys) {
-      if (k in dbPatch) auditPayload[k] = dbPatch[k];
+      if ((k as string) in dbPatch) auditPayload[k as string] = (dbPatch as Record<string, unknown>)[k as string];
     }
     if (Object.keys(auditPayload).length > 0) {
-      supabase
+      (supabase as any)
         .from("system_events")
         .insert({ user_id: user.id, event_type: "state_changed", actor: "operator", payload: auditPayload })
-        .then(({ error: evtErr }) => {
+        .then(({ error: evtErr }: { error: { message: string } | null }) => {
           if (evtErr) console.warn("[useSystemState] system_events insert failed:", evtErr.message);
         });
     }
