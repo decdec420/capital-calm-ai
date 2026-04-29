@@ -46,7 +46,8 @@ export type WatchedTable =
   | "trades"
   | "market_intelligence"
   | "doctrine_settings"
-  | "pending_doctrine_changes";
+  | "pending_doctrine_changes"
+  | "experiments";
 
 const WATCHED_TABLES: WatchedTable[] = [
   "system_state",
@@ -57,6 +58,7 @@ const WATCHED_TABLES: WatchedTable[] = [
   "market_intelligence",
   "doctrine_settings",
   "pending_doctrine_changes",
+  "experiments",
 ];
 
 // ── Context ───────────────────────────────────────────────────
