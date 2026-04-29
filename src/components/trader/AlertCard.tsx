@@ -283,7 +283,7 @@ function BobbyTriage({ alert }: { alert: Alert }) {
    * Escalation state surfaced after a manual kick:
    *  - null            → no escalation, normal triage display
    *  - 'still_failing' → invoke worked but heartbeat is still bad
-   *  - 'unreachable'   → invoke itself errored — Jessica is offline
+   *  - 'unreachable'   → invoke itself errored — Bobby is offline
    */
   const [escalation, setEscalation] = useState<null | "still_failing" | "unreachable">(null);
   const [escalationDetail, setEscalationDetail] = useState<string | null>(null);
@@ -412,7 +412,7 @@ function BobbyTriage({ alert }: { alert: Alert }) {
         return;
       }
 
-      // Invoke worked, but the watchdog still doesn't see Jessica.
+      // Invoke worked, but the watchdog still doesn't see Bobby.
       setEscalation("still_failing");
       setEscalationDetail(
         hb?.last_error ??

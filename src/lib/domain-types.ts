@@ -191,7 +191,7 @@ export interface SystemState {
   pauseReason: string | null;
   /** Active trading profile — controls per-order/daily caps and scan cadence. */
   activeProfile: "sentinel" | "active" | "aggressive";
-  /** Jessica's most recent autonomous decision summary (set by the jessica edge fn). */
+  /** Bobby's most recent autonomous decision summary (set by the jessica edge fn). */
   lastJessicaDecision: {
     ran_at: string;
     actions: number;

@@ -178,3 +178,15 @@ Taylor scores a setup → Chuck vetoes or passes → Bobby approves → Trade ex
 ```
 
 Only `jessica_autonomous` and `harvey_chat` may call `executeTool()`. Any other actor is rejected at the authority gate before touching any state.
+
+---
+
+## Legacy Persona Token Policy (UI Guardrail)
+
+To keep user-facing product language aligned with current branding, the frontend test suite enforces a static token guard:
+
+- **Banned in UI-facing files:** `Jessica`, `Harvey`, `Mike`, `Louis`, `Suits`
+- **UI-facing scope:** `src/components/**`, `src/pages/**`, `src/lib/**`, `src/hooks/**`, `src/contexts/**` (`.ts` / `.tsx`)
+- **Allowed technical-only contexts:** migrations, Supabase/function actor IDs, DB field names, and function/object key style references such as `jessica_autonomous`, `harvey_chat`, and assignment-like technical keys.
+
+CI will fail when banned legacy names are introduced in user-visible frontend code outside approved technical contexts.
