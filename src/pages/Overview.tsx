@@ -5,7 +5,10 @@ import { StatusBadge } from "@/components/trader/StatusBadge";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { DailyBriefPanel } from "@/components/trader/DailyBriefPanel";
+import { DeskRosterStrip } from "@/components/trader/DeskRosterStrip";
+import { DoctrineProposalBanner } from "@/components/trader/DoctrineProposalBanner";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
+import { useStrategies } from "@/hooks/useStrategies";
 
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
@@ -60,6 +63,7 @@ function FreshnessDot({ timestamp }: { timestamp: number | null }) {
 export default function Overview() {
   const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
+  const { approved: approvedStrategy, candidates: candidateStrategies } = useStrategies();
   const { open, closed } = useTrades();
   
   const { guardrails } = useGuardrails();
@@ -223,16 +227,7 @@ export default function Overview() {
         />
       )}
 
-      {system?.tradingPausedUntil && new Date(system.tradingPausedUntil) > new Date() && (
-        <div className="panel p-3 border-status-caution/40 bg-status-caution/5 flex items-center gap-3">
-          <Zap className="h-4 w-4 text-status-caution shrink-0" />
-          <div className="flex-1 text-xs">
-            <span className="font-medium text-foreground">Event Mode active</span>
-            <span className="text-muted-foreground"> — no new trades until {new Date(system.tradingPausedUntil).toLocaleTimeString()}.</span>
-          </div>
-          <Link to="/risk" className="text-xs text-primary hover:underline shrink-0">Resume early</Link>
-        </div>
-      )}
+      {/* Trading pause — shown inline in DailyBriefPanel above */}
 
       {/* Hero strip */}
       <div className="panel p-5 flex flex-wrap items-center gap-4 bg-gradient-surface">
@@ -431,7 +426,14 @@ export default function Overview() {
       {/* Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
-          <DailyBriefPanel />
+          <DoctrineProposalBanner />
+
+          <DailyBriefPanel
+            jessicaDecision={system?.lastJessicaDecision ?? null}
+            pendingSignalsCount={pendingSignals.length}
+            tradingPausedUntil={system?.tradingPausedUntil ?? null}
+            pauseReason={system?.pauseReason ?? null}
+          />
 
           <AIInsightPanel
             title="Today's market brief"
@@ -446,6 +448,11 @@ export default function Overview() {
           />
 
           <MarketIntelligencePanel />
+
+          <DeskRosterStrip
+            approved={approvedStrategy}
+            candidates={candidateStrategies}
+          />
 
           {openPosition && (
             <Link

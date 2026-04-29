@@ -218,6 +218,32 @@ export const DESK_TOOLS = [
   {
     type: "function",
     function: {
+      name: "propose_doctrine_change",
+      description:
+        "Propose a change to the trading doctrine — risk profile, position sizing, session filters, or strategy parameters. The change queues for 24 hours before auto-applying so the operator can review or veto. Use when the operator says things like 'make Taylor more aggressive on BTC', 'tighten the stop', or asks to tune any doctrine parameter.",
+      parameters: {
+        type: "object",
+        properties: {
+          change_summary: {
+            type: "string",
+            description: "Plain-English one-sentence summary of what is changing. e.g. 'Switch active_profile from sentinel to aggressive for BTC sessions.'",
+          },
+          parameters: {
+            type: "object",
+            description: "Key-value pairs of the specific settings being changed (optional but recommended).",
+          },
+          rationale: {
+            type: "string",
+            description: "One-line reason for the change.",
+          },
+        },
+        required: ["change_summary", "rationale"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "accept_experiment",
       description:
         "Accept an experiment and clear review flags. Promotion to candidate strategy stays an explicit operator action in the UI.",
@@ -535,6 +561,32 @@ export async function executeTool(
         await adminClient
           .from("tool_calls")
           .insert({ ...logEntry, result, success: result.success });
+        return result;
+      }
+
+      case "propose_doctrine_change": {
+        const changeSummary = args.change_summary as string;
+        const rationale = args.rationale as string;
+        const parameters = (args.parameters as Record<string, unknown>) ?? {};
+        const applyAfter = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        await appendSystemEvent("doctrine_proposal", {
+          change_summary: changeSummary,
+          rationale,
+          parameters,
+          apply_after: applyAfter,
+          proposed_by: actorShort,
+        });
+        const result: ToolCallResult = {
+          success: true,
+          data: {
+            status: "queued",
+            change_summary: changeSummary,
+            apply_after: applyAfter,
+          },
+        };
+        await adminClient
+          .from("tool_calls")
+          .insert({ ...logEntry, result, success: true });
         return result;
       }
 

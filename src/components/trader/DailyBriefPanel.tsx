@@ -1,7 +1,8 @@
 import { useDailyBrief, type SessionBias } from "@/hooks/useDailyBrief";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/trader/StatusBadge";
-import { AlertTriangle, Eye, RefreshCw, Sparkles, Sun } from "lucide-react";
+import { AlertTriangle, Bot, Eye, RefreshCw, Sparkles, Sun, Zap } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 const BIAS_META: Record<
@@ -30,8 +31,31 @@ function relativeAge(iso: string | undefined): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export function DailyBriefPanel() {
+export interface DailyBriefPanelProps {
+  /** Bobby's most recent autonomous decision from system_state.last_jessica_decision */
+  jessicaDecision?: {
+    ran_at: string;
+    actions: number;
+    decision: string;
+    action_log?: Array<{ tool: string; success?: boolean }>;
+  } | null;
+  /** How many pending trade signals need a decision */
+  pendingSignalsCount?: number;
+  /** ISO timestamp of an active trading pause */
+  tradingPausedUntil?: string | null;
+  /** Human-readable pause reason */
+  pauseReason?: string | null;
+}
+
+export function DailyBriefPanel({
+  jessicaDecision,
+  pendingSignalsCount = 0,
+  tradingPausedUntil,
+  pauseReason,
+}: DailyBriefPanelProps = {}) {
   const { brief, loading, generating, generate, isToday } = useDailyBrief();
+
+  const isPaused = !!tradingPausedUntil && new Date(tradingPausedUntil) > new Date();
 
   const handleGenerate = async () => {
     try {
@@ -101,6 +125,53 @@ export function DailyBriefPanel() {
           {generating ? "Briefing…" : brief ? "Refresh" : "Generate brief"}
         </Button>
       </div>
+
+      {/* Bobby's last call — Feature 1: plain-English event explanation */}
+      {jessicaDecision && (
+        <div className="relative rounded-md bg-muted/30 border border-border/40 px-3 py-2.5 flex items-start gap-2.5">
+          <Bot className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">
+                Bobby's last call
+              </span>
+              <span className="text-[10px] text-muted-foreground tabular">
+                {relativeAge(jessicaDecision.ran_at)}
+                {jessicaDecision.actions > 0 && ` · ${jessicaDecision.actions} action${jessicaDecision.actions === 1 ? "" : "s"} taken`}
+              </span>
+            </div>
+            <p className="text-xs text-foreground leading-snug">{jessicaDecision.decision}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Trading pause warning */}
+      {isPaused && (
+        <div className="relative rounded-md bg-status-caution/10 border border-status-caution/30 px-3 py-2 flex items-center gap-2">
+          <Zap className="h-3.5 w-3.5 text-status-caution shrink-0" />
+          <div className="flex-1 text-xs">
+            <span className="font-medium text-foreground">Event Mode active</span>
+            <span className="text-muted-foreground">
+              {" "}— paused until {new Date(tradingPausedUntil!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {pauseReason ? ` (${pauseReason})` : ""}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Pending signals nudge */}
+      {pendingSignalsCount > 0 && (
+        <Link
+          to="/copilot"
+          className="relative flex items-center gap-2 rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-xs hover:border-primary/40 transition-colors"
+        >
+          <span className="h-2 w-2 rounded-full bg-primary animate-pulse shrink-0" />
+          <span className="text-foreground font-medium">
+            {pendingSignalsCount} pending signal{pendingSignalsCount === 1 ? "" : "s"}
+          </span>
+          <span className="text-muted-foreground">— needs your review →</span>
+        </Link>
+      )}
 
       {/* Body */}
       <div className="relative">

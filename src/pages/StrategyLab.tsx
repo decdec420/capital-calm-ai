@@ -48,6 +48,8 @@ import { fetchCandlesAndBacktest } from "@/lib/backtest";
 import { ParamEditor } from "@/components/trader/ParamEditor";
 import { Link } from "react-router-dom";
 import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel";
+import { PipelineFlowBanner } from "@/components/trader/PipelineFlowBanner";
+import { StrategyGradeBadge } from "@/components/trader/StrategyGradeBadge";
 import { displayNameFor, autoSummaryFromVersion } from "@/lib/strategy-naming";
 
 const TRADES_TO_PROMOTE = 100;
@@ -234,6 +236,16 @@ export default function StrategyLab() {
         }
       />
 
+      {/* Feature 4: Backtest-first UX loop — shows the 5-stage pipeline */}
+      <PipelineFlowBanner
+        activeStage={
+          strategies.length === 0          ? 0           // no strategies → "Idea" stage
+          : !approved                       ? 3           // candidates only → "Paper test"
+          : inTestingList.length > 0        ? 3           // candidates in paper → "Paper test"
+          : 4                                             // approved, no candidates → "Live"
+        }
+      />
+
       {loading ? (
         <p className="text-xs text-muted-foreground italic">Loading…</p>
       ) : strategies.length === 0 ? (
@@ -391,6 +403,7 @@ function LivePanel({
           <div className="flex items-baseline gap-2 flex-wrap">
             <h2 className="text-xl font-semibold text-foreground">{friendly}</h2>
             <span className="text-xs text-muted-foreground font-mono">{approved.name} {approved.version}</span>
+            <StrategyGradeBadge metrics={approved.metrics} size="sm" />
           </div>
           {approved.description && (
             <p className="text-sm text-muted-foreground max-w-xl">{approved.description}</p>
@@ -674,6 +687,7 @@ function CandidateRow({
             <span className="text-base font-medium text-foreground truncate">{summary}</span>
             <span className="text-[11px] text-muted-foreground font-mono">{s.name} {s.version}</span>
             {isDuplicate && <StatusBadge tone="caution" size="sm">duplicate</StatusBadge>}
+            <StrategyGradeBadge metrics={s.metrics} size="sm" />
           </div>
           <p className="text-xs text-muted-foreground">
             Variant of <span className="text-foreground">{friendly}</span>
