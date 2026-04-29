@@ -120,12 +120,11 @@ export function ProfilePicker() {
           return (
             <Card
               key={p.id}
-              className={`p-4 transition-colors cursor-pointer ${
+              className={`p-4 transition-colors ${
                 isActive
                   ? "border-primary bg-primary/5"
                   : "border-border hover:border-muted-foreground/40"
               }`}
-              onClick={() => handleSelect(p.id)}
             >
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2 min-w-0">
