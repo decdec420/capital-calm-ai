@@ -21,6 +21,18 @@
 
 ---
 
+## Legacy Technical Names
+
+These technical IDs are intentionally unchanged for compatibility with deployed edge functions, logs, and historical data:
+
+| Technical ID | Product persona | Notes |
+|--------------|-----------------|-------|
+| `jessica` | **Bobby** (Desk Commander) | Legacy function/agent key retained by design. |
+| `harvey_chat` | **Wags** (COO operator interface) | Legacy chat actor ID retained by design. |
+| `katrina` | **Taylor** (Chief Quant/CIO review path) | Legacy review pipeline name retained by design. |
+
+---
+
 ## Tool Reference
 
 ### `run_brain_trust`

@@ -445,7 +445,7 @@ export default function Copilot() {
     }
 
     appendLocalMessage({ role: "user", content: text });
-    // Seed an empty assistant bubble immediately so the user sees Harvey "thinking"
+    // Seed an empty assistant bubble immediately so the user sees Wags "thinking"
     // even before the first SSE token arrives. updateLastAssistant will fill it in.
     appendLocalMessage({ role: "assistant", content: "" });
     setInput("");
