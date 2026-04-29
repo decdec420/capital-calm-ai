@@ -52,22 +52,22 @@ export function classifyAlert(alert: Alert): ClassifiedAlert {
   const hay = `${title} ${message}`.toLowerCase();
 
   // ---- Cron / heartbeat ----
-  // No primary/secondary nav actions: AlertCard renders a live Jessica
+  // No primary/secondary nav actions: AlertCard renders a live Bobby
   // triage block + inline actions (Resume bot, Disarm kill-switch, Run
-  // Jessica now) for this category. Nav would be a dead end.
+  // Bobby now) for this category. Nav would be a dead end.
   if (/heartbeat|cron may be down|never recorded a decision/.test(hay)) {
     return {
       category: "cron_health",
       categoryLabel: CATEGORY_LABEL.cron_health,
-      summary: message || "Jessica hasn't ticked recently.",
+      summary: message || "Bobby hasn't checked in recently.",
       what:
         message ||
-        "Jessica — the autonomous decision agent that runs every minute — hasn't reported a tick within her expected window.",
-      why: "While Jessica is silent, no new signals are generated and automated lifecycle steps (approvals, exits, learning) pause. Open positions are still tracked but won't be re-evaluated until ticks resume.",
+        "Bobby — the autonomous decision agent that runs every minute — hasn't reported a tick within the expected window.",
+      why: "While Bobby is silent, no new signals are generated and automated lifecycle steps (approvals, exits, learning) pause. Open positions are still tracked but won't be re-evaluated until ticks resume.",
       fixes: [
         "Check the live status block above. If the bot is paused or the kill-switch is engaged, this is expected — start the bot and the alert clears within a minute.",
-        "Otherwise, click Run Jessica now to kick a tick. If it succeeds, the heartbeat resets immediately.",
-        "If Run Jessica now fails, the edge function itself is down — open Copilot to check agent logs or contact support.",
+        "Otherwise, click Run Bobby now to kick a tick. If it succeeds, the heartbeat resets immediately.",
+        "If Run Bobby now fails, the edge function itself is down — open Copilot to check agent logs or contact support.",
       ],
     };
   }
@@ -107,8 +107,8 @@ export function classifyAlert(alert: Alert): ClassifiedAlert {
       categoryLabel: CATEGORY_LABEL.system,
       summary: message || "Brain Trust short-horizon momentum is stale.",
       what:
-        "The signal engine refused to propose a trade because the latest 1h/4h momentum read from the Brain Trust (Mike & Louis) is missing or older than 2 hours.",
-      why: "Without a fresh short-horizon read, Harvey/Jessica can't confirm direction safely. The engine fails closed rather than guess.",
+        "The signal engine refused to propose a trade because the latest 1h/4h momentum read from the Brain Trust (Wags & Taylor) is missing or older than 2 hours.",
+      why: "Without a fresh short-horizon read, Bobby and Wags can't confirm direction safely. The engine fails closed rather than guess.",
       fixes: [
         "Open Copilot and trigger a Brain Trust refresh (market intelligence run) to repopulate momentum reads.",
         "Confirm the market-intelligence cron is running — if it's silent, that's the underlying issue.",
