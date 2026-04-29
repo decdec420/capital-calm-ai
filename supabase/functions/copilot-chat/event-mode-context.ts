@@ -28,7 +28,7 @@ function readPauseFields(context?: Record<string, unknown>): { tradingPausedUnti
 }
 
 /**
- * Returns a deterministic instruction block for Harvey when event mode is active.
+ * Returns a deterministic instruction block for Wags when event mode is active.
  * Empty string means no active pause instruction should be injected into the prompt.
  */
 export function buildEventModeContextInstruction(context?: Record<string, unknown>): string {
