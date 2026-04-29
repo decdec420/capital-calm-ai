@@ -44,9 +44,10 @@ export function useAccountState() {
       return;
     }
     refetch();
-    useTableChanges("account_state", refetch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useTableChanges("account_state", refetch);
 
   /**
    * Update the settings fields on account_state.

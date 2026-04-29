@@ -96,9 +96,10 @@ export function useTrades() {
       return;
     }
     refetch();
-    useTableChanges("trades", refetch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useTableChanges("trades", refetch);
 
   const create = async (input: NewTradeInput) => {
     if (!user) throw new Error("Not signed in");
