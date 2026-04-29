@@ -278,7 +278,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Server-authoritative Katrina context so Harvey can reference latest review
+    // Server-authoritative Katrina context so Wags can reference latest review
     // even when the client omits or stales this section.
     let latestReview: Record<string, unknown> | null = null;
     try {
@@ -552,7 +552,7 @@ Deno.serve(async (req: Request) => {
         supabaseUrl,
         supabaseAnonKey,
         serviceRoleKey: SERVICE_ROLE_KEY,
-        actor: "harvey_chat",
+        actor: "wags_chat",
       });
       toolResults.push({
         role: "tool",
