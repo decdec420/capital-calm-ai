@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import type {
   Experiment,
   ExperimentStatus,
@@ -93,6 +94,8 @@ export function useExperiments() {
     refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useTableChanges("experiments", refetch);
 
   const create = async (input: NewExperimentInput) => {
     if (!user) throw new Error("Not signed in");
