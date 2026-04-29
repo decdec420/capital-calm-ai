@@ -110,6 +110,43 @@ async function runMarkToMarket(
     return { processed: 0, error: openErr.message };
   }
   const trades: OpenTradeRow[] = openTrades ?? [];
+
+  // ── broker_failed alert sweep (cron path only) ───────────────────────
+  // Surfaces any trade rows stuck in 'broker_failed' status so the operator
+  // learns about unreconciled broker errors via Telegram rather than
+  // discovering them manually. Only alerts for rows created in the last
+  // 5 minutes so we don't spam on every tick for a pre-existing failure.
+  // broker_failed rows are naturally excluded from the open trades query
+  // above — they are never processed by the MTM engine.
+  if (!opts.userId) {
+    try {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: failedRows } = await admin
+        .from("trades")
+        .select("id,user_id,symbol,side,notes,created_at")
+        .eq("status", "broker_failed")
+        .gte("created_at", fiveMinAgo);
+      for (const row of failedRows ?? []) {
+        console.error("[mark-to-market] broker_failed trade detected:", row);
+        await admin.rpc("notify_telegram", {
+          p_user_id: row.user_id,
+          p_event_type: "broker_failed",
+          p_severity: "high",
+          p_title: `⚠️ Broker order failed — ${row.symbol} ${row.side?.toUpperCase?.() ?? ""}`,
+          p_message:
+            `Trade ${row.id} is stuck in broker_failed status.\n` +
+            `Error: ${row.notes ?? "unknown"}\n` +
+            `Check Coinbase for an unrecorded position and reconcile manually.`,
+        }).catch((e: unknown) => {
+          console.error("notify_telegram (broker_failed) failed:", e);
+        });
+      }
+    } catch (e) {
+      // Non-fatal — don't let an alert sweep failure block the MTM tick.
+      console.error("broker_failed sweep error (non-fatal):", e);
+    }
+  }
+
   if (trades.length === 0) {
     return { processed: 0, updates: 0, closed: 0, tp1Fills: 0 };
   }

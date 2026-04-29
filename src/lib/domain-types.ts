@@ -16,7 +16,13 @@ export type StrategyStatus = "approved" | "candidate" | "archived";
 
 export type TradeSide = "long" | "short";
 export type TradeOutcome = "win" | "loss" | "breakeven" | "open";
-export type TradeStatus = "open" | "closed";
+export type TradeStatus =
+  | "open"
+  | "closed"
+  | "broker_pending"   // pre-inserted before broker call (two-phase write)
+  | "broker_failed"    // broker call failed; row kept for operator reconciliation
+  | "closing"          // MTM optimistic-lock sentinel; never surfaced in UI
+  | "cancelled";       // operator-cancelled before fill
 export type TradePhase = "candidate" | "entered" | "monitored" | "exited" | "archived";
 
 export type AlertSeverity = "info" | "warning" | "critical";

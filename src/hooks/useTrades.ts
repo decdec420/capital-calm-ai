@@ -170,6 +170,10 @@ export function useTrades() {
 
   const open = trades.filter((t) => t.status === "open");
   const closed = trades.filter((t) => t.status === "closed");
+  // broker_failed: rows where the auto-execute broker call failed after the
+  // trade was pre-inserted (two-phase write pattern). These represent potential
+  // Coinbase positions that were never confirmed — they need manual reconciliation.
+  const brokerFailed = trades.filter((t) => t.status === "broker_failed");
 
-  return { trades, open, closed, loading, error, create, close, remove, refetch };
+  return { trades, open, closed, brokerFailed, loading, error, create, close, remove, refetch };
 }

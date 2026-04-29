@@ -1925,58 +1925,27 @@ async function runTickForUser(
     const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
     if (winner.regime.pullback) tags.push("pullback");
 
-    // ── LIVE MODE: place broker BUY before writing DB ──────────────────
-    // Fail-safe: if broker throws, skip this auto-execute entirely.
-    // The signal stays proposed so the operator can approve manually.
-    let liveEntry = entry;
-    let liveSize = fullSize;
-    let brokerOrderId: string | null = null;
+    // ── Two-phase write — ghost-trade & idempotency fix ────────────────
+    //
+    // CRIT-1 (ghost trade): the old pattern called placeMarketBuy() first,
+    // then inserted the DB row. If the INSERT failed after a successful fill
+    // we had a real Coinbase position with no DB record — undetectable and
+    // unrecoverable without manual reconciliation.
+    //
+    // CRIT-2 (idempotency): crypto.randomUUID() was called at invocation
+    // time. A Deno cold-start mid-execution would fire a second BUY with a
+    // brand-new clientOrderId, doubling the position size.
+    //
+    // Fix: derive clientOrderId deterministically from signalRow.id so every
+    // retry uses the same Coinbase idempotency key.  Pre-insert a
+    // 'broker_pending' trade row BEFORE touching the broker.  On success,
+    // UPDATE to 'open' with actual fill data.  On failure, UPDATE to
+    // 'broker_failed' so the operator can reconcile.  Either way there is
+    // always a DB row — ghost trades are impossible.
+    const clientOrderId = signalRow.id; // deterministic: same UUID on retry
 
-    if (liveEnabled && !liveBlockedByAck) {
-      try {
-        const creds = await getBrokerCredentials(admin);
-        const fill = await placeMarketBuy(
-          creds,
-          winner.symbol,
-          sizeUsd.toFixed(2),
-          crypto.randomUUID(),
-        );
-        liveEntry = fill.fillPrice;
-        liveSize = fill.filledBaseSize;
-        brokerOrderId = fill.orderId;
-        console.log(
-          `[signal-engine] LIVE BUY auto-executed ${winner.symbol} ` +
-            `@ $${liveEntry} size=${liveSize} orderId=${brokerOrderId}`,
-        );
-      } catch (brokerErr) {
-        console.error(
-          `[signal-engine] LIVE auto-execute broker failed for ${winner.symbol} — ` +
-            `signal left as 'proposed' for manual approval:`,
-          brokerErr,
-        );
-        // Skip auto-execute — don't insert a phantom trade
-        return {
-          userId,
-          tick: "proposed",
-          symbol: winner.symbol,
-          signalId: signalRow.id,
-          autonomy,
-          confidence: conf,
-          sizeUsd,
-          clampedBy: clamp.clampedBy,
-          gateReasons: [{
-            code: GATE_CODES.BROKER_ORDER_FAILED,
-            severity: "block" as const,
-            message: `Live auto-execute blocked: broker BUY failed for ${winner.symbol}.`,
-            meta: { error: String(brokerErr) },
-          }],
-          expiredCount,
-          perSymbol,
-        };
-      }
-    }
-
-    // Trade lifecycle: initial phase always "entered"
+    // Trade lifecycle seed — built before the broker call so the pending row
+    // carries a complete audit trail from the moment of intent.
     const tradeEnteredResult = transitionTrade("entered", "entered", {
       actor: "auto",
       reason: `Auto-approved (${autonomy}, conf ${(conf * 100).toFixed(0)}%)`,
@@ -1991,15 +1960,16 @@ async function runTickForUser(
           reason: `Auto-approved (${autonomy})`,
         };
 
-    const { data: tradeRow } = await admin
+    // ── PHASE 1: pre-insert 'broker_pending' row BEFORE broker call ──────
+    const { data: pendingTradeRow, error: pendingInsertErr } = await admin
       .from("trades")
       .insert({
         user_id: userId,
         symbol: winner.symbol,
         side,
-        size: liveSize,
-        original_size: liveSize,
-        entry_price: liveEntry,
+        size: fullSize,           // estimated; updated to fill qty after broker
+        original_size: fullSize,
+        entry_price: entry,       // estimated; updated to fill price after broker
         stop_loss: stop,
         take_profit: target,
         tp1_price: tp1,
@@ -2010,13 +1980,124 @@ async function runTickForUser(
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
-        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`,
-        broker_order_id: brokerOrderId,
-        status: "open",
+        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""} · awaiting broker confirmation`,
+        broker_order_id: clientOrderId, // pre-set for reconciliation; replaced with fill orderId on success
+        status: "broker_pending",
         outcome: "open",
       })
       .select()
       .single();
+
+    if (pendingInsertErr || !pendingTradeRow) {
+      console.error(
+        "[signal-engine] PHASE-1 pre-insert failed — aborting auto-execute:",
+        pendingInsertErr,
+      );
+      // Signal stays proposed; operator can approve manually.
+      await persistSnapshot(admin, userId, {
+        gateReasons: [{
+          code: GATE_CODES.INSERT_ERROR,
+          severity: "block" as const,
+          message: `Auto-execute pre-insert failed: ${pendingInsertErr?.message ?? "unknown"}`,
+          meta: { signalId: signalRow.id },
+        }],
+        perSymbol,
+        chosenSymbol: winner.symbol,
+      });
+      return {
+        userId,
+        tick: "proposed",
+        symbol: winner.symbol,
+        signalId: signalRow.id,
+        autonomy,
+        confidence: conf,
+        sizeUsd,
+        clampedBy: clamp.clampedBy,
+        gateReasons: [],
+        expiredCount,
+        perSymbol,
+      };
+    }
+
+    // ── PHASE 2: call broker (live) or promote directly (paper) ──────────
+    let liveEntry = entry;
+    let liveSize = fullSize;
+    let brokerOrderId: string | null = null;
+
+    if (liveEnabled && !liveBlockedByAck) {
+      try {
+        const creds = await getBrokerCredentials(admin);
+        const fill = await placeMarketBuy(
+          creds,
+          winner.symbol,
+          sizeUsd.toFixed(2),
+          clientOrderId, // deterministic — safe to retry; Coinbase rejects duplicates
+        );
+        liveEntry = fill.fillPrice;
+        liveSize = fill.filledBaseSize;
+        brokerOrderId = fill.orderId;
+        console.log(
+          `[signal-engine] LIVE BUY auto-executed ${winner.symbol} ` +
+            `@ $${liveEntry} size=${liveSize} orderId=${brokerOrderId}`,
+        );
+        // Promote pending → open with actual fill data
+        await admin
+          .from("trades")
+          .update({
+            status: "open",
+            entry_price: liveEntry,
+            size: liveSize,
+            original_size: liveSize,
+            broker_order_id: brokerOrderId,
+            notes: `LIVE Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""} · Coinbase orderId: ${brokerOrderId}`,
+          })
+          .eq("id", pendingTradeRow.id);
+      } catch (brokerErr) {
+        console.error(
+          `[signal-engine] LIVE auto-execute broker failed for ${winner.symbol} — ` +
+            `trade ${pendingTradeRow.id} marked broker_failed for manual reconciliation:`,
+          brokerErr,
+        );
+        // Mark pre-inserted row as failed so operator can reconcile against Coinbase.
+        await admin
+          .from("trades")
+          .update({
+            status: "broker_failed",
+            notes: `Broker call failed: ${String(brokerErr)}`,
+          })
+          .eq("id", pendingTradeRow.id);
+        return {
+          userId,
+          tick: "proposed",
+          symbol: winner.symbol,
+          signalId: signalRow.id,
+          autonomy,
+          confidence: conf,
+          sizeUsd,
+          clampedBy: clamp.clampedBy,
+          gateReasons: [{
+            code: GATE_CODES.BROKER_ORDER_FAILED,
+            severity: "block" as const,
+            message: `Live auto-execute blocked: broker BUY failed for ${winner.symbol}.`,
+            meta: { error: String(brokerErr), tradeId: pendingTradeRow.id },
+          }],
+          expiredCount,
+          perSymbol,
+        };
+      }
+    } else {
+      // Paper mode: no broker call — promote pending → open immediately.
+      await admin
+        .from("trades")
+        .update({
+          status: "open",
+          notes: `Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}`,
+        })
+        .eq("id", pendingTradeRow.id);
+    }
+
+    // Alias used by downstream signal-update + journal code.
+    const tradeRow = pendingTradeRow;
 
     // Signal: proposed → executed
     const sigExecuted = transitionSignal("proposed", "approved", {
