@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { AccountState } from "@/lib/domain-types";
@@ -43,17 +44,7 @@ export function useAccountState() {
       return;
     }
     refetch();
-    const channel = supabase
-      .channel(`account_state:${user.id}:${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "account_state", filter: `user_id=eq.${user.id}` },
-        () => refetch(),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    useTableChanges("account_state", refetch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 

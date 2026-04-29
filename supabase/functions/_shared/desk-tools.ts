@@ -113,7 +113,7 @@ export const DESK_TOOLS = [
         properties: {
           minutes: {
             type: "number",
-            description: "Minutes to pause. Max 480 (8 hours).",
+            description: "Minutes to pause. Max 120 (2 hours). Jessica is not permitted to suspend trading for longer than 2 hours autonomously.",
           },
           reason: {
             type: "string",
@@ -386,7 +386,7 @@ export async function executeTool(
       }
 
       case "pause_bot": {
-        const minutes = Math.min(Math.max(Number(args.minutes ?? 60), 1), 480);
+        const minutes = Math.min(Math.max(Number(args.minutes ?? 60), 1), 120);
         const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
         const { error } = await adminClient
           .from("system_state")

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -114,24 +115,8 @@ export function useMarketIntelligence() {
     setLoading(true);
     load();
 
-    // Realtime refresh when the cron (or another tab) updates the briefs.
-    const channel = supabase
-      .channel(`market_intelligence:${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "market_intelligence",
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => load(),
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Realtime refresh delegated to shared subscription manager (HIGH-6).
+    useTableChanges("market_intelligence", load);
   }, [user, load]);
 
   /** Trigger an on-demand brain trust run for all 3 symbols. */

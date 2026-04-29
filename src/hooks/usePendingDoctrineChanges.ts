@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -47,20 +48,8 @@ export function usePendingDoctrineChanges() {
     void refetch();
   }, [refetch]);
 
-  useEffect(() => {
-    if (!user) return;
-    const ch = supabase
-      .channel("pending_doctrine_self")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pending_doctrine_changes", filter: `user_id=eq.${user.id}` },
-        () => void refetch(),
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(ch);
-    };
-  }, [user, refetch]);
+  // Delegated to shared subscription manager (HIGH-6).
+  useTableChanges("pending_doctrine_changes", refetch);
 
   const cancel = useCallback(
     async (id: string) => {

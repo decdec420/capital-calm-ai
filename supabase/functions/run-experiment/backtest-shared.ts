@@ -7,6 +7,11 @@
 // (last-value), while the backtester needs an array aligned to `values`.
 import { ema } from "../_shared/regime.ts";
 
+// Transaction-cost model — keep in sync with src/lib/backtest.ts DEFAULT_COSTS.
+// Two taker legs (entry + exit) + two slippage legs.
+const TAKER_FEE_BPS = 40;  // 40 bps per leg
+const SLIPPAGE_BPS   =  5;  //  5 bps per leg
+
 export interface SharedCandle { t: number; o: number; h: number; l: number; c: number; v: number }
 export interface SharedParam { key: string; value: number | string | boolean; unit?: string }
 export interface SharedMetrics {
@@ -28,15 +33,24 @@ export interface SharedTrade {
   entryPrice: number;
   exitT: number;
   exitPrice: number;
+  /** Net P&L in R units (after fees + slippage). This is what the metrics are built on. */
   pnlR: number;
+  /** Gross P&L in R units (before fees + slippage). */
+  grossPnlR: number;
   pnlPct: number;
+  /** Round-trip taker fees as % of notional (both legs). */
+  feesPaidPct: number;
+  /** Round-trip slippage as % of notional (both legs). */
+  slippagePct: number;
 }
 export interface SharedBacktestResult {
   metrics: SharedMetrics;
   trades: SharedTrade[];
   candleCount: number;
   equityCurve: number[];
-  // Sample stdev of pnlR — used by the run-experiment significance check.
+  /** Equity curve before fee/slippage deduction — shows cost drag vs gross. */
+  grossEquityCurve: number[];
+  // Sample stdev of pnlR (net) — used by the run-experiment significance check.
   pnlRStdev: number;
 }
 
@@ -94,6 +108,7 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
     trades: [],
     candleCount: candles.length,
     equityCurve: [],
+    grossEquityCurve: [],
     pnlRStdev: 0,
   };
   if (candles.length < 50) return empty;
@@ -134,9 +149,21 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
       if (exitPrice !== null) {
         const sideMult = position.side === "long" ? 1 : -1;
         const pnlPrice = (exitPrice - position.entryPrice) * sideMult;
-        const pnlR = position.risk > 0 ? pnlPrice / position.risk : 0;
+        const grossPnlR = position.risk > 0 ? pnlPrice / position.risk : 0;
         const pnlPct = (pnlPrice / position.entryPrice) * 100;
-        trades.push({ side: position.side, entryT: position.entryT, entryPrice: position.entryPrice, exitT: c.t, exitPrice, pnlR, pnlPct });
+        // Cost model: two taker legs + two slippage legs (entry and exit).
+        // costPrice is expressed in the same price units as pnlPrice.
+        const feesPaidPct  = (TAKER_FEE_BPS * 2) / 100;  // e.g. 0.80 %
+        const slippagePct  = (SLIPPAGE_BPS  * 2) / 100;  // e.g. 0.10 %
+        const costPrice    = position.entryPrice * (feesPaidPct + slippagePct) / 100;
+        const costR        = position.risk > 0 ? costPrice / position.risk : 0;
+        const pnlR         = grossPnlR - costR;
+        trades.push({
+          side: position.side,
+          entryT: position.entryT, entryPrice: position.entryPrice,
+          exitT: c.t, exitPrice,
+          pnlR, grossPnlR, pnlPct, feesPaidPct, slippagePct,
+        });
         position = null;
       }
     }
@@ -189,10 +216,14 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
   // negative fraction in [-1, 0] like the rest of the codebase expects.
   const RISK_PER_TRADE = 0.01;
   const equityCurve: number[] = [];
+  const grossEquityCurve: number[] = [];
   let equity = 1.0;
+  let grossEquity = 1.0;
   for (const t of trades) {
-    equity = Math.max(0, equity * (1 + t.pnlR * RISK_PER_TRADE));
+    equity      = Math.max(0, equity      * (1 + t.pnlR      * RISK_PER_TRADE));
+    grossEquity = Math.max(0, grossEquity * (1 + t.grossPnlR * RISK_PER_TRADE));
     equityCurve.push(equity);
+    grossEquityCurve.push(grossEquity);
   }
   // Cumulative-R curve (kept for charts and the OOS expectancy delta).
   const curve: number[] = [];
@@ -237,6 +268,7 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
     trades,
     candleCount: candles.length,
     equityCurve: curve,
+    grossEquityCurve,
     pnlRStdev: Number(stdev.toFixed(4)),
   };
 }

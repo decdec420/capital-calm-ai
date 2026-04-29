@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Alert, AlertSeverity } from "@/lib/domain-types";
@@ -36,17 +37,7 @@ export function useAlerts() {
       return;
     }
     refetch();
-    const channel = supabase
-      .channel(`alerts:${user.id}:${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "alerts", filter: `user_id=eq.${user.id}` },
-        () => refetch(),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    useTableChanges("alerts", refetch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 

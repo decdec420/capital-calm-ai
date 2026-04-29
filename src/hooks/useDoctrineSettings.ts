@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAccountState } from "@/hooks/useAccountState";
@@ -59,21 +60,9 @@ export function useDoctrineSettings(): UseDoctrineSettingsResult {
     void refetch();
   }, [refetch]);
 
-  // Realtime so DoctrineEditSheet sees changes immediately + cron activations
-  useEffect(() => {
-    if (!user) return;
-    const ch = supabase
-      .channel(`doctrine_settings_self:${user.id}:${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "doctrine_settings", filter: `user_id=eq.${user.id}` },
-        () => void refetch(),
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(ch);
-    };
-  }, [user, refetch]);
+  // Realtime so DoctrineEditSheet sees changes immediately + cron activations.
+  // Delegated to shared subscription manager (HIGH-6).
+  useTableChanges("doctrine_settings", refetch);
 
   const equity = account?.equity ?? 0;
   const resolved = useMemo(() => resolveDoctrine(settings, equity), [settings, equity]);

@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/trader/AppLayout";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ExplainModeProvider } from "@/contexts/ExplainModeContext";
+import { RealtimeSubscriptionProvider } from "@/hooks/useRealtimeSubscriptions";
 import { ProtectedRoute } from "@/components/trader/ProtectedRoute";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
@@ -32,6 +33,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <RealtimeSubscriptionProvider>
           <ExplainModeProvider>
             <Routes>
             <Route path="/auth" element={<Auth />} />
@@ -67,6 +69,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
           </ExplainModeProvider>
+          </RealtimeSubscriptionProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

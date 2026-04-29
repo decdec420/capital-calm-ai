@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type {
@@ -66,17 +67,7 @@ export function useSignals() {
       return;
     }
     refetch();
-    const channel = supabase
-      .channel(`signals:${user.id}:${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "trade_signals", filter: `user_id=eq.${user.id}` },
-        () => refetch(),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    useTableChanges("trade_signals", refetch);
   }, [user?.id]);
 
   const now = Date.now();
