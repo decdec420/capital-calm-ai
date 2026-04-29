@@ -11,17 +11,17 @@
 import type { Candle } from "./market.ts";
 
 export type RegimeLabel =
-
-// MED-8: Single source of truth for the trending-regime drift threshold.
-// Import this in backtest-shared.ts and src/lib/backtest.ts so all three
-// paths agree on when a market is 'trending enough' to trade.
-export const REGIME_DRIFT_THRESHOLD = 0.55;
   | "trending_up"
   | "trending_down"
   | "range"
   | "chop"
   | "breakout"
   | "no_trade";
+
+// MED-8: Single source of truth for the trending-regime drift threshold.
+// Import this in backtest-shared.ts and src/lib/backtest.ts so all three
+// paths agree on when a market is 'trending enough' to trade.
+export const REGIME_DRIFT_THRESHOLD = 0.55;
 
 export type VolatilityState = "low" | "normal" | "elevated" | "extreme";
 
