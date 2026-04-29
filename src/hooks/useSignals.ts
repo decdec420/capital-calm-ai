@@ -67,8 +67,10 @@ export function useSignals() {
       return;
     }
     refetch();
-    useTableChanges("trade_signals", refetch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useTableChanges("trade_signals", refetch);
 
   const now = Date.now();
   const pending = signals.filter((s) => s.status === "pending" && new Date(s.expiresAt).getTime() > now);
