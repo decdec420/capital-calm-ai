@@ -85,6 +85,26 @@ export function useSystemState() {
     if (patch.activeProfile) dbPatch.active_profile = patch.activeProfile;
     const { error } = await supabase.from("system_state").update(dbPatch).eq("user_id", user.id);
     if (error) throw error;
+
+    // MED-6: Append to system_events audit trail for risk-posture changes.
+    // Best-effort — never block the UI action on audit write failure.
+    const auditKeys: (keyof typeof dbPatch)[] = [
+      "kill_switch_engaged", "live_trading_enabled", "autonomy_level",
+      "bot", "mode", "trading_paused_until",
+    ];
+    const auditPayload: Record<string, unknown> = {};
+    for (const k of auditKeys) {
+      if (k in dbPatch) auditPayload[k] = dbPatch[k];
+    }
+    if (Object.keys(auditPayload).length > 0) {
+      supabase
+        .from("system_events")
+        .insert({ user_id: user.id, event_type: "state_changed", actor: "operator", payload: auditPayload })
+        .then(({ error: evtErr }) => {
+          if (evtErr) console.warn("[useSystemState] system_events insert failed:", evtErr.message);
+        });
+    }
+
     await refetch();
   };
 
@@ -95,8 +115,7 @@ export function useSystemState() {
    * the cast. */
   const acknowledgeLiveMoney = async () => {
     if (!user) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabase.rpc as any)("acknowledge_live_money");
+    const { error } = await supabase.rpc("acknowledge_live_money");
     if (error) throw error;
     await refetch();
   };

@@ -11,6 +11,11 @@
 import type { Candle } from "./market.ts";
 
 export type RegimeLabel =
+
+// MED-8: Single source of truth for the trending-regime drift threshold.
+// Import this in backtest-shared.ts and src/lib/backtest.ts so all three
+// paths agree on when a market is 'trending enough' to trade.
+export const REGIME_DRIFT_THRESHOLD = 0.55;
   | "trending_up"
   | "trending_down"
   | "range"
@@ -140,7 +145,7 @@ export function computeRegime(
   const rangePct = ((high - low) / low) * 100;
   const driftRatio = Math.abs(pctChange) / Math.max(rangePct, 0.01);
   let regime: RegimeLabel = "range";
-  if (driftRatio > 0.55) regime = pctChange > 0 ? "trending_up" : "trending_down";
+  if (driftRatio > REGIME_DRIFT_THRESHOLD) regime = pctChange > 0 ? "trending_up" : "trending_down"; // MED-8
   else if (rangePct < 0.8) regime = "chop";
 
   const prior20High = Math.max(...candles.slice(-21, -1).map((c) => c.h));

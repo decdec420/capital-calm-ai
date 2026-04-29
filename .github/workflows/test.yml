@@ -48,3 +48,24 @@ jobs:
 
       - name: Test
         run: bun run test
+
+  deno-test:
+    name: Deno edge-function tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Run broker tests
+        # --allow-env: Deno.env reads in the test setup path
+        # --no-check:  skip full type-check (tsc handles that in the bun job)
+        run: |
+          deno test --allow-env --no-check \
+            supabase/functions/_shared/broker.test.ts

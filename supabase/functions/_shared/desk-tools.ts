@@ -292,6 +292,24 @@ export async function executeTool(
     }
   };
 
+  // MED-6: Append an immutable row to system_events for every state-changing
+  // Jessica action so the operator has a chronological audit trail.
+  const appendSystemEvent = async (
+    eventType: string,
+    payload: Record<string, unknown>,
+  ) => {
+    try {
+      await adminClient.from("system_events").insert({
+        user_id: userId,
+        event_type: eventType,
+        actor: actorShort,
+        payload,
+      });
+    } catch (e) {
+      console.error("[desk-tools] system_events insert failed", e);
+    }
+  };
+
   try {
     switch (toolName) {
       case "run_brain_trust": {
@@ -400,6 +418,7 @@ export async function executeTool(
           .insert({ ...logEntry, result, success: result.success });
         if (result.success) {
           await appendAudit("bot_paused", { paused_until: until, minutes, reason });
+          await appendSystemEvent("bot_paused", { paused_until: until, minutes, reason });
         }
         return result;
       }
@@ -417,6 +436,7 @@ export async function executeTool(
           .insert({ ...logEntry, result, success: result.success });
         if (result.success) {
           await appendAudit("bot_resumed", { reason });
+          await appendSystemEvent("bot_resumed", { reason });
         }
         return result;
       }
@@ -435,6 +455,7 @@ export async function executeTool(
           .insert({ ...logEntry, result, success: result.success });
         if (result.success) {
           await appendAudit("autonomy_changed", { level, reason });
+          await appendSystemEvent("autonomy_changed", { level, reason });
         }
         return result;
       }

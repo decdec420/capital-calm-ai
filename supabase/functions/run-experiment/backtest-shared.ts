@@ -5,7 +5,7 @@
 // P4-D: `ema` is canonical in ../_shared/regime.ts (same array signature).
 // `rsi` stays local because regime.ts's `rsi` returns a single scalar
 // (last-value), while the backtester needs an array aligned to `values`.
-import { ema } from "../_shared/regime.ts";
+import { ema, REGIME_DRIFT_THRESHOLD } from "../_shared/regime.ts";
 
 // Transaction-cost model — keep in sync with src/lib/backtest.ts DEFAULT_COSTS.
 // Two taker legs (entry + exit) + two slippage legs.
@@ -151,11 +151,14 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
         const pnlPrice = (exitPrice - position.entryPrice) * sideMult;
         const grossPnlR = position.risk > 0 ? pnlPrice / position.risk : 0;
         const pnlPct = (pnlPrice / position.entryPrice) * 100;
-        // Cost model: two taker legs + two slippage legs (entry and exit).
-        // costPrice is expressed in the same price units as pnlPrice.
-        const feesPaidPct  = (TAKER_FEE_BPS * 2) / 100;  // e.g. 0.80 %
-        const slippagePct  = (SLIPPAGE_BPS  * 2) / 100;  // e.g. 0.10 %
-        const costPrice    = position.entryPrice * (feesPaidPct + slippagePct) / 100;
+        // MED-9: Directional cost model — applied at actual per-leg prices.
+        // Long: overpay entry (+slip), undersell exit (-slip). Short: reversed.
+        // Total = (entryPrice + exitPrice) × (feePerLeg + slipPerLeg)
+        const feesPaidPct  = (TAKER_FEE_BPS * 2) / 100;  // round-trip % for UI display
+        const slippagePct  = (SLIPPAGE_BPS  * 2) / 100;  // round-trip % for UI display
+        const feePerLeg    = TAKER_FEE_BPS / 10_000;
+        const slipPerLeg   = SLIPPAGE_BPS  / 10_000;
+        const costPrice    = (position.entryPrice + exitPrice) * (feePerLeg + slipPerLeg);
         const costR        = position.risk > 0 ? costPrice / position.risk : 0;
         const pnlR         = grossPnlR - costR;
         trades.push({
@@ -184,7 +187,7 @@ export function runSharedBacktest(candles: SharedCandle[], params: SharedParam[]
       const winPctChange = ((winCloses[winCloses.length - 1] - winCloses[0]) / winCloses[0]) * 100;
       const rangePct = ((winHigh - winLow) / Math.max(winLow, 1e-9)) * 100;
       const driftRatio = Math.abs(winPctChange) / Math.max(rangePct, 0.01);
-      if (driftRatio < 0.40) continue;
+      if (driftRatio < REGIME_DRIFT_THRESHOLD) continue; // MED-8: matches live engine threshold
       if (rangePct < 0.8 && Math.abs(winPctChange) < 0.3) continue;
 
       const crossUp = prevFast <= prevSlow && curFast > curSlow && r > 50 && r < 75;

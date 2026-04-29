@@ -1417,6 +1417,7 @@ export type Database = {
         }[]
       }
       check_jessica_heartbeat: { Args: never; Returns: undefined }
+      acknowledge_live_money: { Args: Record<PropertyKey, never>; Returns: undefined }
       get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }
       get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }

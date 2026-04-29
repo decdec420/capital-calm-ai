@@ -47,6 +47,13 @@ export const DEFAULT_COSTS: BacktestCosts = {
   slippageBps: 5,
 };
 
+// MED-8: Regime gate threshold — must match REGIME_DRIFT_THRESHOLD in
+// supabase/functions/_shared/regime.ts (0.55). The live engine classifies
+// regimes with driftRatio > 0.55; the backtest skips candles below this
+// floor so it only fires where the live engine would trade.
+// ⚠ If you change this, change _shared/regime.ts and backtest-shared.ts too.
+export const REGIME_DRIFT_THRESHOLD = 0.55;
+
 export interface WalkForwardSplit {
   fromT: number;
   toT: number;
@@ -137,11 +144,16 @@ export function runBacktest(
         const grossPnlPrice = (exitPrice - position.entryPrice) * sideMult;
 
         // Fee + slippage: both costs apply on each side. Slippage worsens
-        // the fill adversely by `slippageBps` of the price; fees take
-        // `takerFeeBps` of the notional on each leg.
-        const feeFrac = (costs.takerFeeBps * 2) / 10_000;
-        const slipFrac = (costs.slippageBps * 2) / 10_000;
-        const costPrice = (Math.abs(position.entryPrice) + Math.abs(exitPrice)) * (feeFrac + slipFrac) * 0.5;
+        // MED-9: Directional slippage — applied per leg at actual leg prices.
+        // Long: buy entry at +slip, sell exit at -slip.  Short: reversed.
+        // Fees are taker on both legs. Formula derivation:
+        //   entryCost = entryPrice × (feeLeg + slipLeg)
+        //   exitCost  = exitPrice  × (feeLeg + slipLeg)
+        //   costTotal = (entryPrice + exitPrice) × (feeLeg + slipLeg)
+        // where feeFrac/slipFrac below are per-leg fractions (not doubled).
+        const feeFrac  = costs.takerFeeBps / 10_000; // per leg
+        const slipFrac = costs.slippageBps / 10_000; // per leg
+        const costPrice = (Math.abs(position.entryPrice) + Math.abs(exitPrice)) * (feeFrac + slipFrac);
         const netPnlPrice = grossPnlPrice - costPrice;
 
         const grossPnlR = position.risk > 0 ? grossPnlPrice / position.risk : 0;
@@ -175,7 +187,7 @@ export function runBacktest(
       const winPctChange = ((winCloses[winCloses.length - 1] - winCloses[0]) / winCloses[0]) * 100;
       const rangePct = ((winHigh - winLow) / Math.max(winLow, 1e-9)) * 100;
       const driftRatio = Math.abs(winPctChange) / Math.max(rangePct, 0.01);
-      if (driftRatio < 0.40) continue;
+      if (driftRatio < REGIME_DRIFT_THRESHOLD) continue;
       if (rangePct < 0.8 && Math.abs(winPctChange) < 0.3) continue;
 
       const crossUp = prevFast <= prevSlow && curFast > curSlow && r > 50 && r < 75;
@@ -250,6 +262,15 @@ export function runBacktest(
   const stdev = Math.sqrt(variance);
   const sharpe = stdev > 0 ? (mean / stdev) * Math.sqrt(trades.length) : 0;
 
+  // MED-3: profitFactor, avgWin, avgLoss — parity with backtest-shared metrics.
+  const winnersArr = trades.filter((t) => t.pnlR > 0);
+  const losersArr  = trades.filter((t) => t.pnlR < 0);
+  const grossProfit = winnersArr.reduce((s, t) => s + t.pnlR, 0);
+  const grossLoss   = Math.abs(losersArr.reduce((s, t) => s + t.pnlR, 0));
+  const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 999 : 1) : grossProfit / grossLoss;
+  const avgWin  = winnersArr.length > 0 ? grossProfit / winnersArr.length : 0;
+  const avgLoss = losersArr.length  > 0 ? grossLoss  / losersArr.length  : 0;
+
   return {
     metrics: {
       expectancy: Number(expectancy.toFixed(3)),
@@ -257,6 +278,9 @@ export function runBacktest(
       maxDrawdown: Number(maxDrawdown.toFixed(3)),
       sharpe: Number(sharpe.toFixed(3)),
       trades: trades.length,
+      profitFactor: Number(profitFactor.toFixed(2)),
+      avgWin: Number(avgWin.toFixed(3)),
+      avgLoss: Number(avgLoss.toFixed(3)),
     },
     trades,
     candleCount: candles.length,

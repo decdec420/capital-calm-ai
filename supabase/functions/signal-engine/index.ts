@@ -113,8 +113,7 @@ function cbFailure(): void {
     CB_STATE.state = "open";
     CB_STATE.openedAt = Date.now();
     console.error(
-      `[signal-engine] circuit breaker: OPEN after ${CB_STATE.failures} consecutive AI failures. ` +
-        `Skipping AI calls for ${RESET_AFTER_MS / 1000}s.`,
+      `[signal-engine] circuit breaker OPEN after ${CB_STATE.failures} failures — pausing ${RESET_AFTER_MS/1000}s`,
     );
   }
 }
@@ -321,7 +320,7 @@ async function decideForSymbol(opts: {
   // Circuit breaker: skip AI entirely if the gateway has been failing.
   // The caller treats { error } as AI_ERROR → lock gate (fail-safe).
   if (!cbAllow()) {
-    console.warn(`[signal-engine] ${symbol}: circuit breaker open — skipping AI analysis`);
+    log("warn", "gate_refused", { fn: "signal-engine", symbol, code: "CIRCUIT_OPEN" });
     return { error: "circuit_open" };
   }
 

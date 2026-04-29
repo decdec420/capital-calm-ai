@@ -24,6 +24,7 @@ import {
   placeMarketBuy,
   placeMarketSell,
 } from "../_shared/broker.ts";
+import { log } from "../_shared/logger.ts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -77,15 +78,12 @@ Deno.serve(async (req) => {
       ? await placeMarketBuy(creds, productId, quoteSize!, clientOrderId)
       : await placeMarketSell(creds, productId, baseSize!, clientOrderId);
 
-    console.log(
-      `[broker-execute] ${action.toUpperCase()} ${productId} — ` +
-        `fillPrice $${fill.fillPrice} filledBase ${fill.filledBaseSize}`,
-    );
+    log("info", "broker_fill", { fn: "broker-execute", action: action.toUpperCase(), productId, fillPrice: fill.fillPrice, filledBase: fill.filledBaseSize });
 
     return json({ ok: true, fill });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error("[broker-execute] error:", message);
+    log("error", "broker_execute_error", { fn: "broker-execute", message });
     return json({ ok: false, error: message }, 502);
   }
 });

@@ -13,6 +13,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
+import { log } from "../_shared/logger.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,7 +24,49 @@ const corsHeaders = {
 // Flash for latency — Jessica runs every 60 seconds. She doesn't need deep
 // analysis here; Harvey, Mike, and Louis did that. Her job is: read their
 // output, decide what to do right now, and do it.
-const JESSICA_MODEL = "google/gemini-3-flash-preview";
+// Pinned to a GA stable release (MED-1). Change only when intentionally
+// upgrading and verifying tool-call schema compatibility.
+const JESSICA_MODEL = "google/gemini-2.0-flash-001";
+// ─── AI gateway circuit breaker (MED-12) ─────────────────────────────────────
+// Jessica runs every 60 seconds. If the AI gateway is down, crashing every tick
+// wastes Deno cold-start budget and floods the error log. After 3 consecutive
+// failures we open the breaker for 5 minutes, then probe once (half-open).
+const JESSICA_CB_STATE = {
+  failures: 0,
+  openedAt: 0 as number,
+  state: "closed" as "closed" | "open" | "half-open",
+};
+const JESSICA_CB_THRESHOLD = 3;
+const JESSICA_CB_RESET_MS  = 5 * 60_000; // 5 minutes
+
+function jessicaCbAllow(): boolean {
+  if (JESSICA_CB_STATE.state === "closed") return true;
+  if (JESSICA_CB_STATE.state === "open") {
+    if (Date.now() - JESSICA_CB_STATE.openedAt >= JESSICA_CB_RESET_MS) {
+      JESSICA_CB_STATE.state = "half-open";
+      console.log("[jessica] circuit breaker: half-open — probing AI gateway");
+      return true;
+    }
+    return false;
+  }
+  return true; // half-open: allow probe
+}
+function jessicaCbSuccess(): void {
+  if (JESSICA_CB_STATE.state !== "closed") {
+    console.log("[jessica] circuit breaker: closed — AI gateway recovered");
+  }
+  JESSICA_CB_STATE.failures = 0;
+  JESSICA_CB_STATE.state = "closed";
+}
+function jessicaCbFailure(): void {
+  JESSICA_CB_STATE.failures += 1;
+  if (JESSICA_CB_STATE.state === "half-open" || JESSICA_CB_STATE.failures >= JESSICA_CB_THRESHOLD) {
+    JESSICA_CB_STATE.state = "open";
+    JESSICA_CB_STATE.openedAt = Date.now();
+    log("error", "jessica_cb_open", { fn: "jessica", failures: JESSICA_CB_STATE.failures, pauseMin: JESSICA_CB_RESET_MS / 60_000 });
+  }
+}
+
 
 const JESSICA_SYSTEM = `
 You are Jessica — the managing partner of this trading operation.
@@ -382,6 +425,35 @@ async function runJessicaForUser(
     return { skipped: true, reason: "equity_critical_near_floor" };
   }
 
+  // ── MED-13: Coinbase API health probe ────────────────────────────────────────
+  // If Coinbase is unreachable, Jessica must not auto-approve signals or fire
+  // engine ticks that would produce un-executable proposals. A lightweight
+  // best_bid_ask probe confirms connectivity before any trading logic runs.
+  try {
+    const coinbaseProbe = await fetch(
+      "https://api.coinbase.com/api/v3/brokerage/best_bid_ask?product_ids=BTC-USD",
+      { signal: AbortSignal.timeout(4_000) },
+    );
+    if (!coinbaseProbe.ok) {
+      console.error(`[jessica] Coinbase health probe failed: HTTP ${coinbaseProbe.status}`);
+      try {
+        await admin.rpc("notify_telegram", {
+          p_severity: "high",
+          p_title: "Coinbase API unreachable",
+          p_message: `Jessica health probe returned HTTP ${coinbaseProbe.status}. Engine ticks blocked.`,
+          p_user_id: userId,
+        });
+      } catch { /* telegram is best-effort */ }
+      await writeHeartbeat(true, "coinbase_unreachable", 0, "Coinbase probe failed — sitting.");
+      return { skipped: true, reason: "coinbase_unreachable" };
+    }
+  } catch (probeErr) {
+    const msg = probeErr instanceof Error ? probeErr.message : String(probeErr);
+    console.error("[jessica] Coinbase health probe threw:", msg);
+    await writeHeartbeat(true, "coinbase_probe_error", 0, `Coinbase probe error: ${msg}`);
+    return { skipped: true, reason: "coinbase_probe_error" };
+  }
+
   // ── Health check pass — inspect each agent and write to agent_health ──
   const agentHealth = await checkAgentHealth(admin, userId, context);
   (context as Record<string, unknown>).agent_health = agentHealth.map((h) => ({
@@ -435,6 +507,13 @@ async function runJessicaForUser(
   const actionsLog: Array<{ tool: string; args: unknown; result: unknown }> = [];
   let finalDecision = "No action — conditions don't warrant a move this tick.";
 
+  // Circuit breaker guard (MED-12)
+  if (!jessicaCbAllow()) {
+    console.warn("[jessica] circuit breaker open — skipping AI reasoning this tick");
+    await writeHeartbeat(true, "circuit_breaker_open", 0, "AI gateway circuit breaker open — sitting.");
+    return { skipped: true, reason: "circuit_breaker_open" };
+  }
+
   for (let round = 0; round < 3; round++) {
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -454,6 +533,7 @@ async function runJessicaForUser(
 
     if (!res.ok) {
       console.error("[jessica] AI call failed:", res.status, await res.text().catch(() => ""));
+      jessicaCbFailure();
       break;
     }
 
@@ -463,6 +543,7 @@ async function runJessicaForUser(
     const assistantContent = choice?.message?.content ?? "";
 
     if (toolCalls.length === 0) {
+      jessicaCbSuccess();
       finalDecision = assistantContent || "Sitting — no action warranted this tick.";
       break;
     }
@@ -523,9 +604,7 @@ async function runJessicaForUser(
     console.error("[jessica] failed to update last_jessica_decision", e);
   }
 
-  console.log(
-    `[jessica] user=${userId} actions=${actionsLog.length} decision="${finalDecision.slice(0, 100)}"`,
-  );
+  log("info", "jessica_tick", { fn: "jessica", userId, actions: actionsLog.length, decision: finalDecision.slice(0, 100) });
 
   return {
     actions: actionsLog.length,
