@@ -37,9 +37,10 @@ export function useAlerts() {
       return;
     }
     refetch();
-    useTableChanges("alerts", refetch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useTableChanges("alerts", refetch);
 
   const create = async (input: { severity: AlertSeverity; title: string; message: string }) => {
     if (!user) throw new Error("Not signed in");
