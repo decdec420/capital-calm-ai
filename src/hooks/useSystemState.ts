@@ -67,9 +67,10 @@ export function useSystemState() {
       return;
     }
     refetch();
-    useTableChanges("system_state", refetch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  useTableChanges("system_state", refetch);
 
   const update = async (patch: Partial<SystemState>) => {
     if (!user) return;

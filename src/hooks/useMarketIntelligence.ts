@@ -114,10 +114,10 @@ export function useMarketIntelligence() {
     }
     setLoading(true);
     load();
-
-    // Realtime refresh delegated to shared subscription manager (HIGH-6).
-    useTableChanges("market_intelligence", load);
   }, [user, load]);
+
+  // Realtime refresh delegated to shared subscription manager (HIGH-6).
+  useTableChanges("market_intelligence", load);
 
   /** Trigger an on-demand brain trust run for all 3 symbols. */
   const refresh = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
