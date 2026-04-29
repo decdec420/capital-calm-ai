@@ -127,13 +127,13 @@ export function ProfilePicker() {
               }`}
               onClick={() => handleSelect(p.id)}
             >
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Icon className="h-4 w-4 text-primary" />
-                  <span className="font-semibold text-sm">{p.label}</span>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Icon className="h-4 w-4 text-primary shrink-0" />
+                  <span className="font-semibold text-sm truncate">{p.label}</span>
                 </div>
                 {isActive && (
-                  <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                  <Badge variant="default" className="shrink-0 text-[10px] px-1.5 py-0">
                     <Check className="h-3 w-3 mr-1" /> Active
                   </Badge>
                 )}
@@ -185,9 +185,9 @@ export function ProfilePicker() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between items-baseline">
-      <dt className="text-muted-foreground text-[11px]">{label}</dt>
-      <dd className="text-foreground">{value}</dd>
+    <div className="flex justify-between items-baseline gap-3">
+      <dt className="text-muted-foreground text-[11px] whitespace-nowrap">{label}</dt>
+      <dd className="text-foreground text-right tabular-nums truncate">{value}</dd>
     </div>
   );
 }
