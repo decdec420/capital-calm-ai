@@ -96,8 +96,8 @@ export function RealtimeSubscriptionProvider({ children }: { children: ReactNode
 
     for (const table of WATCHED_TABLES) {
       ch = ch.on(
-        // @ts-expect-error — overloaded signature; string literal is valid
-        "postgres_changes",
+        // @ts-ignore — overloaded signature; string literal is valid
+        "postgres_changes" as any,
         { event: "*", schema: "public", table, filter: `user_id=eq.${uid}` },
         () => {
           // Fan out to every registered callback for this table.
