@@ -110,12 +110,20 @@ async function signCoinbaseJwt(creds: BrokerCredentials): Promise<string> {
 // ── Credential retrieval ──────────────────────────────────────
 
 /**
- * Fetch Coinbase API credentials from Supabase Vault.
- * Requires service-role admin client.
- * Throws if credentials are missing or Vault RPC fails.
+ * Fetch Coinbase API credentials.
+ * Checks env vars first (COINBASE_API_KEY_NAME + COINBASE_API_KEY_PRIVATE_PEM),
+ * then falls back to Supabase Vault RPC for legacy setups.
  */
 // deno-lint-ignore no-explicit-any
 export async function getBrokerCredentials(admin: any): Promise<BrokerCredentials> {
+  // Primary: env vars set in Lovable Cloud → Secrets (or Supabase Edge Function secrets)
+  const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME");
+  const envKeyPem = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM");
+  if (envKeyName && envKeyPem) {
+    return { apiKeyName: envKeyName, apiKeyPrivatePem: envKeyPem };
+  }
+
+  // Fallback: Supabase Vault RPC (legacy)
   const { data, error } = await admin.rpc("get_coinbase_broker_credentials");
   if (error) {
     throw new Error(`[broker] Vault RPC failed: ${error.message}`);
@@ -123,9 +131,8 @@ export async function getBrokerCredentials(admin: any): Promise<BrokerCredential
   const row = Array.isArray(data) ? data[0] : data;
   if (!row?.api_key_name || !row?.api_key_private_pem) {
     throw new Error(
-      "[broker] Coinbase credentials not in Vault. " +
-        "Insert 'coinbase_api_key_name' and 'coinbase_api_key_private_pem' — " +
-        "see migration 20260427200000_broker_vault_setup.sql for instructions.",
+      "[broker] Coinbase credentials not found. " +
+        "Set COINBASE_API_KEY_NAME and COINBASE_API_KEY_PRIVATE_PEM in Lovable Cloud → Secrets.",
     );
   }
   return {
