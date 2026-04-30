@@ -139,6 +139,8 @@ async function signJwt(keyName: string, pkcs8Pem: string): Promise<string> {
 type PermissionCheckResult = {
   transferEnabled: boolean;
   rawPermissions: string[];
+  checked: boolean;
+  checkError?: string;
 };
 
 function collectPermissions(payload: unknown): string[] {
@@ -165,11 +167,18 @@ async function checkKeyPermissions(keyName: string, pkcs8Pem: string): Promise<P
   const r = await fetch("https://api.coinbase.com/api/v3/brokerage/key_permissions", {
     headers: { Authorization: `Bearer ${jwt}` },
   });
-  if (!r.ok) return { transferEnabled: false, rawPermissions: [] };
+  if (!r.ok) {
+    return {
+      transferEnabled: false,
+      rawPermissions: [],
+      checked: false,
+      checkError: `permission check failed (HTTP ${r.status})`,
+    };
+  }
   const json = await r.json().catch(() => null);
   const rawPermissions = collectPermissions(json);
   const transferEnabled = rawPermissions.some((p) => p.includes("transfer"));
-  return { transferEnabled, rawPermissions };
+  return { transferEnabled, rawPermissions, checked: true };
 }
 
 async function probeAccounts(keyName: string, pkcs8Pem: string): Promise<{ ok: true; policy: PermissionCheckResult } | { ok: false; status: number; error: string }> {
@@ -279,6 +288,20 @@ Deno.serve(async (req) => {
         });
       }
 
+      if (!probe.policy.checked) {
+        const friendly = "Could not verify Coinbase key permissions. Transfer-enabled keys are not allowed in this app, so this key cannot be accepted until permissions can be verified.";
+        await admin.rpc("update_broker_health", {
+          p_user_id: userId,
+          p_status: "auth_failed",
+          p_key_name: keyName,
+          p_error: friendly,
+          p_metadata: { policy: { transferEnabled: null, checked: false, reason: probe.policy.checkError ?? null } },
+        });
+        return new Response(JSON.stringify({ error: friendly, policy: { checked: false } }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       // Probe passed — write Vault
       const { error: e1 } = await admin.rpc("upsert_broker_secret", {
         p_name: "coinbase_api_key_name", p_value: keyName, p_description: "Coinbase Advanced Trade API key name",
@@ -329,6 +352,19 @@ Deno.serve(async (req) => {
       }
       const probe = await probeAccounts(row.api_key_name, row.api_key_private_pem);
       if (probe.ok) {
+        if (!probe.policy.checked) {
+          const friendly = "Could not verify Coinbase key permissions. Transfer-enabled keys are not allowed in this app. Reconnect with a key that can be policy-checked.";
+          await admin.rpc("update_broker_health", {
+            p_user_id: userId,
+            p_status: "auth_failed",
+            p_key_name: row.api_key_name,
+            p_error: friendly,
+            p_metadata: { policy: { transferEnabled: null, checked: false, reason: probe.policy.checkError ?? null } },
+          });
+          return new Response(JSON.stringify({ ok: false, status: "auth_failed", error: friendly, policy: { checked: false } }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
         if (probe.policy.transferEnabled) {
           const friendly = "Transfer-enabled keys are not allowed in this app. Create a new Coinbase key without transfer permission.";
           await admin.rpc("update_broker_health", {
