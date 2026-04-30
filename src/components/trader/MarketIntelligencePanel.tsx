@@ -13,6 +13,7 @@ import { useMarketIntelligence, type MarketIntelligence } from "@/hooks/useMarke
 import { cn } from "@/lib/utils";
 
 const SYMBOL_ORDER = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
+const MOMENTUM_STALE_MINUTES = 75;
 
 type Tone = "long" | "short" | "neutral" | "warn" | "good";
 
@@ -73,10 +74,25 @@ function formatRelative(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function getMinutesAgo(iso: string | null): number | null {
+  if (!iso) return null;
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, Math.floor((Date.now() - ts) / 60_000));
+}
+
+function momentumFreshnessMeta(brief?: MarketIntelligence): { label: string; tone: Tone; minutes: number | null } {
+  const minutes = getMinutesAgo(brief?.recentMomentumAt ?? null);
+  if (minutes == null) return { label: "No momentum", tone: "neutral", minutes: null };
+  if (minutes <= MOMENTUM_STALE_MINUTES) return { label: "Momentum fresh", tone: "good", minutes };
+  return { label: "Momentum stale", tone: "warn", minutes };
+}
+
 function SymbolBrief({ brief }: { brief: MarketIntelligence }) {
   const bias = biasMeta(brief.macroBias);
   const env = envMeta(brief.environmentRating);
   const BiasIcon = bias.icon;
+  const momentum = momentumFreshnessMeta(brief);
 
   return (
     <div className="space-y-3">
@@ -104,6 +120,15 @@ function SymbolBrief({ brief }: { brief: MarketIntelligence }) {
         </span>
         <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-border bg-muted text-muted-foreground font-medium">
           {humanize(brief.trendStructure)}
+        </span>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-medium",
+            toneClasses(momentum.tone),
+          )}
+        >
+          {momentum.label}
+          {momentum.minutes != null && <span className="opacity-70">· {momentum.minutes}m old</span>}
         </span>
       </div>
 
@@ -180,6 +205,25 @@ function SymbolBrief({ brief }: { brief: MarketIntelligence }) {
           )}
           {brief.entryQualityContext && (
             <p className="text-xs text-muted-foreground leading-relaxed">{brief.entryQualityContext}</p>
+          )}
+          {(brief.recentMomentum1h != null ||
+            brief.recentMomentum4h != null ||
+            brief.recentMomentumNotes) && (
+            <div className="rounded-md border border-border/70 bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                {brief.recentMomentum1h != null && (
+                  <span>
+                    1h momentum <span className="text-foreground font-mono">{brief.recentMomentum1h.toFixed(2)}</span>
+                  </span>
+                )}
+                {brief.recentMomentum4h != null && (
+                  <span>
+                    4h momentum <span className="text-foreground font-mono">{brief.recentMomentum4h.toFixed(2)}</span>
+                  </span>
+                )}
+              </div>
+              {brief.recentMomentumNotes && <p className="italic">{brief.recentMomentumNotes}</p>}
+            </div>
           )}
         </CollapsibleContent>
       </Collapsible>
@@ -265,11 +309,27 @@ export function MarketIntelligencePanel({ symbol, className }: MarketIntelligenc
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-3 h-8">
             {symbols.map((s) => (
-              <TabsTrigger key={s} value={s} className="text-[11px]">
-                {s.replace("-USD", "")}
+              <TabsTrigger key={s} value={s} className="text-[11px] gap-1.5">
+                <span>{s.replace("-USD", "")}</span>
+                {(() => {
+                  const freshness = momentumFreshnessMeta(briefsBySymbol.get(s));
+                  return (
+                    <span
+                      className={cn(
+                        "rounded border px-1 py-0 text-[10px] leading-4",
+                        toneClasses(freshness.tone),
+                      )}
+                    >
+                      {freshness.minutes == null ? "—" : `${freshness.minutes}m`}
+                    </span>
+                  );
+                })()}
               </TabsTrigger>
             ))}
           </TabsList>
+          <p className="pt-2 text-[10px] text-muted-foreground">
+            Momentum freshness turns stale after {MOMENTUM_STALE_MINUTES} minutes.
+          </p>
           {symbols.map((s) => {
             const b = briefsBySymbol.get(s);
             return (
