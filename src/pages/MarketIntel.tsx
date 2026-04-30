@@ -33,7 +33,7 @@ export default function MarketIntel() {
   if (loading || candles.length === 0) {
     return (
       <div className="space-y-6 animate-fade-in">
-        <SectionHeader eyebrow="Market Intelligence" title="BTC-USD" description="Regime, signal quality, and observation feed." />
+        <SectionHeader eyebrow="Regime Monitor" title="BTC-USD" description="Chart-derived regime diagnostics, signal quality, and observation feed." />
         <div className="panel p-12 text-center">
           <p className="text-sm text-muted-foreground italic">Pulling fresh candles…</p>
         </div>
@@ -43,7 +43,7 @@ export default function MarketIntel() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <SectionHeader eyebrow="Market Intelligence" title="BTC-USD" description="Regime, signal quality, and observation feed." />
+      <SectionHeader eyebrow="Regime Monitor" title="BTC-USD" description="Chart-derived regime diagnostics, signal quality, and observation feed." />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
