@@ -182,6 +182,39 @@ export type Database = {
         }
         Relationships: []
       }
+      broker_health: {
+        Row: {
+          created_at: string
+          key_name: string | null
+          last_error: string | null
+          last_failure_at: string | null
+          last_success_at: string | null
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          key_name?: string | null
+          last_error?: string | null
+          last_failure_at?: string | null
+          last_success_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          key_name?: string | null
+          last_error?: string | null
+          last_failure_at?: string | null
+          last_success_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       chat_conversations: {
         Row: {
           created_at: string
@@ -1417,6 +1450,7 @@ export type Database = {
         }[]
       }
       check_jessica_heartbeat: { Args: never; Returns: undefined }
+      delete_broker_secrets: { Args: never; Returns: undefined }
       get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }
       get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
@@ -1438,6 +1472,19 @@ export type Database = {
         Returns: undefined
       }
       realized_pnl_today: { Args: { p_user_id: string }; Returns: number }
+      update_broker_health: {
+        Args: {
+          p_error?: string
+          p_key_name?: string
+          p_status: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
+      upsert_broker_secret: {
+        Args: { p_description?: string; p_name: string; p_value: string }
+        Returns: undefined
+      }
       upsert_copilot_memory:
         | {
             Args: {
