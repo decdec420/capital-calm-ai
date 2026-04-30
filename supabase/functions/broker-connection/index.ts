@@ -218,7 +218,7 @@ Deno.serve(async (req) => {
       const probe = await probeAccounts(keyName, pkcs8);
       if (!probe.ok) {
         const friendly = probe.status === 401 || probe.status === 403
-          ? `Coinbase rejected the credentials (HTTP ${probe.status}). Check the API key name and that the key has 'view' + 'trade' scopes.`
+          ? `Coinbase rejected the credentials (HTTP ${probe.status}). Check the API key name. In paper mode, 'view' scope is enough; enable 'trade' scope only if live mode execution is turned on.`
           : `Probe failed: ${probe.error}`;
         await admin.rpc("update_broker_health", {
           p_user_id: userId, p_status: "auth_failed", p_key_name: keyName, p_error: friendly,

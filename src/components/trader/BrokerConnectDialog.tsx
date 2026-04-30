@@ -107,7 +107,7 @@ export function BrokerConnectDialog({ open, onOpenChange, initialKeyName, onSave
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
           >
-            Create a Coinbase Advanced Trade key (view + trade scopes)
+            Create a Coinbase Advanced Trade key ('view' for paper mode; add 'trade' only for live mode)
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>
