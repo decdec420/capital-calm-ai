@@ -37,6 +37,10 @@ export interface MarketIntelligence {
   entryQualityContext: string;
   // Meta
   generatedAt: string;
+  recentMomentum1h: number | null;
+  recentMomentum4h: number | null;
+  recentMomentumAt: string | null;
+  recentMomentumNotes: string;
   candleCount1h: number | null;
   candleCount4h: number | null;
   candleCount1d: number | null;
@@ -75,6 +79,11 @@ function mapRow(r: Record<string, unknown>): MarketIntelligence {
     patternContext: str("pattern_context"),
     entryQualityContext: str("entry_quality_context"),
     generatedAt: r.generated_at as string,
+    recentMomentum1h: num("recent_momentum_1h"),
+    recentMomentum4h: num("recent_momentum_4h"),
+    recentMomentumAt:
+      typeof r.recent_momentum_at === "string" ? (r.recent_momentum_at as string) : null,
+    recentMomentumNotes: str("recent_momentum_notes"),
     candleCount1h: num("candle_count_1h"),
     candleCount4h: num("candle_count_4h"),
     candleCount1d: num("candle_count_1d"),
