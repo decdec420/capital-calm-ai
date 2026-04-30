@@ -14,7 +14,7 @@ export function BrokerConnectionCard() {
   const [probing, setProbing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const lastSuccess = useRelativeTime(health.lastSuccessAt);
+  const lastSuccess = useRelativeTime(health.lastSuccessAt ? new Date(health.lastSuccessAt).getTime() : null);
 
   const onProbe = async () => {
     setProbing(true);
