@@ -50,6 +50,7 @@ export function BrokerConnectionCard() {
   };
 
   const status = health.status;
+  const transferBlocked = !!health.statusMetadata?.policy?.transferEnabled;
   const meta =
     status === "healthy"
       ? { icon: <Wifi className="h-4 w-4" />, tone: "safe" as const, label: "Connected" }
@@ -85,6 +86,11 @@ export function BrokerConnectionCard() {
             {status === "auth_failed" && health.lastError && (
               <div className="text-xs text-status-blocked">{health.lastError}</div>
             )}
+            {transferBlocked && (
+              <div className="text-xs font-medium text-status-blocked">
+                Transfer-enabled keys are not allowed in this app.
+              </div>
+            )}
             {status === "not_connected" && (
               <div className="text-xs text-muted-foreground">
                 Required for live trading. Paper mode works without it.
@@ -111,7 +117,7 @@ export function BrokerConnectionCard() {
         </div>
 
         <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-          Coinbase Advanced Trade keys with <span className="text-foreground">view + trade</span> scopes. Stored encrypted in Lovable Cloud Vault — never visible to the browser. We verify the keys against Coinbase before saving.
+          Coinbase Advanced Trade keys with <span className="text-foreground">view + trade</span> scopes. Transfer permission is blocked. Stored encrypted in Lovable Cloud Vault — never visible to the browser. We verify the keys against Coinbase before saving.
         </div>
       </div>
 

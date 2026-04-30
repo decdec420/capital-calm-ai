@@ -11,6 +11,7 @@ export interface BrokerHealth {
   lastFailureAt: string | null;
   lastError: string | null;
   updatedAt: string | null;
+  statusMetadata: { policy?: { transferEnabled?: boolean; permissions?: string[] } } | null;
 }
 
 const EMPTY: BrokerHealth = {
@@ -20,6 +21,7 @@ const EMPTY: BrokerHealth = {
   lastFailureAt: null,
   lastError: null,
   updatedAt: null,
+  statusMetadata: null,
 };
 
 export function useBrokerHealth() {
@@ -47,6 +49,7 @@ export function useBrokerHealth() {
         lastFailureAt: data.last_failure_at,
         lastError: data.last_error,
         updatedAt: data.updated_at,
+        statusMetadata: (data.status_metadata as BrokerHealth["statusMetadata"]) ?? null,
       });
     } else {
       setHealth(EMPTY);

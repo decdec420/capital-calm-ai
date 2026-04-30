@@ -149,6 +149,7 @@ export type Database = {
           last_verified_at: string | null
           mode: string
           status: string
+          status_metadata: Json | null
           updated_at: string
           user_id: string
         }
@@ -163,6 +164,7 @@ export type Database = {
           last_verified_at?: string | null
           mode?: string
           status?: string
+          status_metadata?: Json | null
           updated_at?: string
           user_id: string
         }
@@ -177,6 +179,7 @@ export type Database = {
           last_verified_at?: string | null
           mode?: string
           status?: string
+          status_metadata?: Json | null
           updated_at?: string
           user_id?: string
         }
@@ -190,6 +193,7 @@ export type Database = {
           last_failure_at: string | null
           last_success_at: string | null
           status: string
+          status_metadata: Json | null
           updated_at: string
           user_id: string
         }
@@ -200,6 +204,7 @@ export type Database = {
           last_failure_at?: string | null
           last_success_at?: string | null
           status?: string
+          status_metadata?: Json | null
           updated_at?: string
           user_id: string
         }
@@ -210,6 +215,7 @@ export type Database = {
           last_failure_at?: string | null
           last_success_at?: string | null
           status?: string
+          status_metadata?: Json | null
           updated_at?: string
           user_id?: string
         }
@@ -1476,6 +1482,7 @@ export type Database = {
         Args: {
           p_error?: string
           p_key_name?: string
+          p_metadata?: Json
           p_status: string
           p_user_id: string
         }

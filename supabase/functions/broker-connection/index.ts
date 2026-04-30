@@ -136,7 +136,43 @@ async function signJwt(keyName: string, pkcs8Pem: string): Promise<string> {
   return `${sigInput}.${sigB64}`;
 }
 
-async function probeAccounts(keyName: string, pkcs8Pem: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+type PermissionCheckResult = {
+  transferEnabled: boolean;
+  rawPermissions: string[];
+};
+
+function collectPermissions(payload: unknown): string[] {
+  const out = new Set<string>();
+  const scan = (node: unknown): void => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const item of node) scan(item);
+      return;
+    }
+    if (typeof node === "object") {
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (/permission|scope/i.test(k) && typeof v === "string") out.add(v.toLowerCase());
+        scan(v);
+      }
+    }
+  };
+  scan(payload);
+  return Array.from(out);
+}
+
+async function checkKeyPermissions(keyName: string, pkcs8Pem: string): Promise<PermissionCheckResult> {
+  const jwt = await signJwt(keyName, pkcs8Pem);
+  const r = await fetch("https://api.coinbase.com/api/v3/brokerage/key_permissions", {
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!r.ok) return { transferEnabled: false, rawPermissions: [] };
+  const json = await r.json().catch(() => null);
+  const rawPermissions = collectPermissions(json);
+  const transferEnabled = rawPermissions.some((p) => p.includes("transfer"));
+  return { transferEnabled, rawPermissions };
+}
+
+async function probeAccounts(keyName: string, pkcs8Pem: string): Promise<{ ok: true; policy: PermissionCheckResult } | { ok: false; status: number; error: string }> {
   try {
     const jwt = await signJwt(keyName, pkcs8Pem);
     const r = await fetch("https://api.coinbase.com/api/v3/brokerage/accounts?limit=1", {
@@ -144,7 +180,8 @@ async function probeAccounts(keyName: string, pkcs8Pem: string): Promise<{ ok: t
     });
     if (r.ok) {
       await r.text();
-      return { ok: true };
+      const policy = await checkKeyPermissions(keyName, pkcs8Pem);
+      return { ok: true, policy };
     }
     const txt = await r.text();
     return { ok: false, status: r.status, error: txt.slice(0, 400) };
@@ -221,9 +258,23 @@ Deno.serve(async (req) => {
           ? `Coinbase rejected the credentials (HTTP ${probe.status}). Check the API key name. In paper mode, 'view' scope is enough; enable 'trade' scope only if live mode execution is turned on.`
           : `Probe failed: ${probe.error}`;
         await admin.rpc("update_broker_health", {
-          p_user_id: userId, p_status: "auth_failed", p_key_name: keyName, p_error: friendly,
+          p_user_id: userId, p_status: "auth_failed", p_key_name: keyName, p_error: friendly, p_metadata: null,
         });
         return new Response(JSON.stringify({ error: friendly, status: probe.status }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (probe.policy.transferEnabled) {
+        const friendly = "Transfer-enabled keys are not allowed in this app. Create a new Coinbase key without transfer permission.";
+        await admin.rpc("update_broker_health", {
+          p_user_id: userId,
+          p_status: "auth_failed",
+          p_key_name: keyName,
+          p_error: friendly,
+          p_metadata: { policy: { transferEnabled: true, permissions: probe.policy.rawPermissions } },
+        });
+        return new Response(JSON.stringify({ error: friendly, policy: { transferEnabled: true } }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -239,7 +290,11 @@ Deno.serve(async (req) => {
       if (e2) throw new Error(`Vault private key write failed: ${e2.message}`);
 
       await admin.rpc("update_broker_health", {
-        p_user_id: userId, p_status: "healthy", p_key_name: keyName, p_error: null,
+        p_user_id: userId,
+        p_status: "healthy",
+        p_key_name: keyName,
+        p_error: null,
+        p_metadata: { policy: { transferEnabled: false, permissions: probe.policy.rawPermissions } },
       });
 
       return new Response(JSON.stringify({ ok: true, status: "healthy", keyName }), {
@@ -251,7 +306,7 @@ Deno.serve(async (req) => {
       const { error } = await admin.rpc("delete_broker_secrets");
       if (error) throw new Error(`Vault delete failed: ${error.message}`);
       await admin.rpc("update_broker_health", {
-        p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: null,
+        p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: null, p_metadata: null,
       });
       return new Response(JSON.stringify({ ok: true, status: "not_connected" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -266,7 +321,7 @@ Deno.serve(async (req) => {
       const row = Array.isArray(data) ? data[0] : data;
       if (!row?.api_key_name || !row?.api_key_private_pem) {
         await admin.rpc("update_broker_health", {
-          p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: "No credentials in Vault",
+          p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: "No credentials in Vault", p_metadata: null,
         });
         return new Response(JSON.stringify({ ok: true, status: "not_connected" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -274,8 +329,25 @@ Deno.serve(async (req) => {
       }
       const probe = await probeAccounts(row.api_key_name, row.api_key_private_pem);
       if (probe.ok) {
+        if (probe.policy.transferEnabled) {
+          const friendly = "Transfer-enabled keys are not allowed in this app. Create a new Coinbase key without transfer permission.";
+          await admin.rpc("update_broker_health", {
+            p_user_id: userId,
+            p_status: "auth_failed",
+            p_key_name: row.api_key_name,
+            p_error: friendly,
+            p_metadata: { policy: { transferEnabled: true, permissions: probe.policy.rawPermissions } },
+          });
+          return new Response(JSON.stringify({ ok: false, status: "auth_failed", error: friendly, policy: { transferEnabled: true } }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
         await admin.rpc("update_broker_health", {
-          p_user_id: userId, p_status: "healthy", p_key_name: row.api_key_name, p_error: null,
+          p_user_id: userId,
+          p_status: "healthy",
+          p_key_name: row.api_key_name,
+          p_error: null,
+          p_metadata: { policy: { transferEnabled: false, permissions: probe.policy.rawPermissions } },
         });
         return new Response(JSON.stringify({ ok: true, status: "healthy" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -285,7 +357,7 @@ Deno.serve(async (req) => {
         ? `Coinbase rejected the credentials (HTTP ${probe.status}). Reconnect required.`
         : `Probe failed: ${probe.error}`;
       await admin.rpc("update_broker_health", {
-        p_user_id: userId, p_status: "auth_failed", p_key_name: row.api_key_name, p_error: friendly,
+        p_user_id: userId, p_status: "auth_failed", p_key_name: row.api_key_name, p_error: friendly, p_metadata: null,
       });
       return new Response(JSON.stringify({ ok: false, status: "auth_failed", error: friendly }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
