@@ -40,6 +40,10 @@ export interface MarketIntelligence {
   candleCount1h: number | null;
   candleCount4h: number | null;
   candleCount1d: number | null;
+  recentMomentum1h: string | null;
+  recentMomentum4h: string | null;
+  recentMomentumAt: string | null;
+  recentMomentumNotes: string | null;
 }
 
 function mapRow(r: Record<string, unknown>): MarketIntelligence {
@@ -78,6 +82,10 @@ function mapRow(r: Record<string, unknown>): MarketIntelligence {
     candleCount1h: num("candle_count_1h"),
     candleCount4h: num("candle_count_4h"),
     candleCount1d: num("candle_count_1d"),
+    recentMomentum1h: typeof r.recent_momentum_1h === "string" ? (r.recent_momentum_1h as string) : null,
+    recentMomentum4h: typeof r.recent_momentum_4h === "string" ? (r.recent_momentum_4h as string) : null,
+    recentMomentumAt: typeof r.recent_momentum_at === "string" ? (r.recent_momentum_at as string) : null,
+    recentMomentumNotes: typeof r.recent_momentum_notes === "string" ? (r.recent_momentum_notes as string) : null,
   };
 }
 

@@ -73,13 +73,39 @@ function formatRelative(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function momentumFreshnessMeta(brief: MarketIntelligence): { stale: boolean; cause?: string } {
+  if (!brief.recentMomentumAt) {
+    return { stale: true, cause: brief.recentMomentumNotes ?? "Momentum snapshot timestamp missing" };
+  }
+
+  const ageMs = Date.now() - new Date(brief.recentMomentumAt).getTime();
+  const stale = Number.isNaN(ageMs) || ageMs > 2 * 60 * 60 * 1000;
+  if (!stale) return { stale: false };
+
+  const cause = [brief.recentMomentumNotes, brief.recentMomentum1h, brief.recentMomentum4h]
+    .filter((v): v is string => Boolean(v && v.trim()))
+    .join(" · ");
+
+  return { stale: true, cause: cause || `Momentum snapshot stale (${formatRelative(brief.recentMomentumAt)})` };
+}
+
 function SymbolBrief({ brief }: { brief: MarketIntelligence }) {
   const bias = biasMeta(brief.macroBias);
   const env = envMeta(brief.environmentRating);
   const BiasIcon = bias.icon;
+  const momentumFreshness = momentumFreshnessMeta(brief);
 
   return (
     <div className="space-y-3">
+      {momentumFreshness.stale && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive space-y-1">
+          <p className="font-medium">Brain Trust refresh issue → momentum stale → signal gate block</p>
+          {momentumFreshness.cause && (
+            <p className="text-[11px] text-destructive/90">Cause: {momentumFreshness.cause}</p>
+          )}
+        </div>
+      )}
+
       {/* Top-line badges */}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <span
