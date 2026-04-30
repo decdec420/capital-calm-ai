@@ -1200,9 +1200,15 @@ async function runTickForUser(
     const momentumStale = !momentum1h || !momentum4h || !Number.isFinite(momentumAgeMin) || momentumAgeMin > freshness.maxAgeMin;
     const momentumGate = momentumStale
       ? gate(
-          GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE,
+          freshness.state === "refresh_failed"
+            ? GATE_CODES.BRAIN_TRUST_REFRESH_FAILED
+            : freshness.state === "stale_after_refresh" || freshness.state === "refresh_debounced"
+            ? GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE
+            : GATE_CODES.MISSING_MARKET_INTELLIGENCE,
           "block",
-          `${symbol}: Trade blocked — Brain Trust stale or missing short-horizon momentum read.`,
+          freshness.state === "refresh_failed"
+            ? `${symbol}: Trade blocked — Brain Trust refresh failed before momentum could be validated.`
+            : `${symbol}: Trade blocked — Brain Trust stale or missing short-horizon momentum read.`,
           {
             symbol,
             momentum1h,
