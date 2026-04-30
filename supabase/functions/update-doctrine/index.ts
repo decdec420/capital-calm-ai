@@ -9,13 +9,8 @@ import {
   type DoctrineField,
   DOCTRINE_FIELD_LABELS,
 } from "../_shared/doctrine-resolver.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
 const COOLDOWN_MS = 24 * 60 * 60 * 1000;
 

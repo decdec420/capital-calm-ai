@@ -27,14 +27,10 @@ import {
   getBrokerCredentials,
   placeMarketBuy,
 } from "../_shared/broker.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 validateDoctrineInvariants();
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -231,9 +227,11 @@ Deno.serve(async (req) => {
     const tags = ["ai-signal", sig.regime];
     if (wasPullback) tags.push("pullback");
 
-    // ── LIVE MODE: place broker order BEFORE writing DB ────────────────
-    // Fail-safe: if the broker call throws, we return 502 and write nothing
-    // to the DB. This prevents ghost trades (DB says "open", no real position).
+    // ── LIVE MODE: place broker order ──────────────────────────────────
+    // Uses sig.id as the Coinbase clientOrderId so retries/double-clicks
+    // hit the same idempotency key and Coinbase rejects the duplicate.
+    // The DB INSERT happens immediately after — if it fails, the trade is
+    // marked broker_failed on the signal row so the operator can reconcile.
     let brokerOrderId: string | null = null;
     if (liveEnabled) {
       try {
@@ -242,7 +240,7 @@ Deno.serve(async (req) => {
           creds,
           sig.symbol,
           sizeUsd.toFixed(2), // spend exactly sizeUsd dollars
-          crypto.randomUUID(),
+          signalId, // deterministic: same UUID on retry — Coinbase rejects duplicate
         );
         // Use actual fill price and size (may differ slightly from proposed)
         entry = fill.fillPrice;

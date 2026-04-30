@@ -14,12 +14,8 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 import { log } from "../_shared/logger.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
 
 // Flash for latency — Bobby runs every 60 seconds. He doesn't need deep
 // analysis here; the Brain Trust and Taylor did that. His job is: read their
@@ -393,7 +389,7 @@ async function runJessicaForUser(
             skipped,
             reason,
             actions,
-            decision: decision.slice(0, 500),
+            decision: decision.slice(0, 2000),
           },
         })
         .eq("user_id", userId);
@@ -517,6 +513,7 @@ async function runJessicaForUser(
   }
 
   for (let round = 0; round < 3; round++) {
+    const aiCallStart = Date.now();
     const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -529,9 +526,12 @@ async function runJessicaForUser(
         tools: DESK_TOOLS,
         tool_choice: "auto",
         stream: false,
-        max_tokens: 512,
+        max_tokens: 2048,
       }),
     });
+
+    const aiCallMs = Date.now() - aiCallStart;
+    log("info", "jessica_ai_latency", { fn: "jessica", userId, round, latencyMs: aiCallMs, model: JESSICA_MODEL });
 
     if (!res.ok) {
       console.error("[jessica] AI call failed:", res.status, await res.text().catch(() => ""));
@@ -606,7 +606,37 @@ async function runJessicaForUser(
     console.error("[jessica] failed to update last_jessica_decision", e);
   }
 
+  // Fire a system_event for every Bobby decision so the operator has a
+  // chronological audit trail and Wags can surface recent decision history.
+  try {
+    await admin.from("system_events").insert({
+      user_id: userId,
+      event_type: "bobby_decision",
+      actor: "jessica_autonomous",
+      payload: {
+        actions: actionsLog.length,
+        decision: finalDecision.slice(0, 2000),
+        action_log: actionsLog.map((a) => ({
+          tool: a.tool,
+          success: (a.result as Record<string, unknown>)?.success,
+        })),
+      },
+    });
+  } catch (e) {
+    console.error("[jessica] bobby_decision system_event failed (non-fatal):", e);
+  }
+
   log("info", "jessica_tick", { fn: "jessica", userId, actions: actionsLog.length, decision: finalDecision.slice(0, 100) });
+
+  // Healthchecks.io heartbeat — set HEALTHCHECKS_JESSICA_URL env var to your
+  // check's ping URL. Each successful Bobby tick pings it; missing 2+ ticks
+  // in a row triggers an alert. Best-effort — never block on failure.
+  const hcUrl = Deno.env.get("HEALTHCHECKS_JESSICA_URL");
+  if (hcUrl) {
+    fetch(hcUrl, { method: "GET", signal: AbortSignal.timeout(3000) }).catch(() => {
+      // Swallow — heartbeat failure must never break the tick.
+    });
+  }
 
   return {
     actions: actionsLog.length,

@@ -1,3 +1,4 @@
+import { corsHeaders } from "../_shared/cors.ts";
 // ============================================================
 // post-trade-learn — automatic per-trade learning artifact
 // ------------------------------------------------------------
@@ -20,11 +21,6 @@
 //     a separate weekly-review function (future) do narrative analysis.
 // ============================================================
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
 
 // Trade Coach uses Sonnet — grades entries A-D and writes actionable lessons.
 // Runs at most 2×/day (daily trade cap). Quality of feedback matters here.
@@ -250,14 +246,24 @@ async function runTradeCoach(
     .maybeSingle();
   if (existingCoach) return;
 
-  // Brain Trust brief that was active at trade time. We currently keep one
-  // row per (user, symbol) — use that as the proxy snapshot.
-  const { data: intel } = await admin
-    .from("market_intelligence")
-    .select("*")
-    .eq("user_id", t.user_id)
-    .eq("symbol", t.symbol)
-    .maybeSingle();
+  // Brain Trust brief at signal-creation time.
+  // Prefer the snapshot baked into context_snapshot.brainTrustSnapshot (written
+  // by signal-engine at the moment the signal was proposed). Fall back to the
+  // current live market_intelligence row only when the snapshot is absent
+  // (legacy signals created before this fix was deployed).
+  // deno-lint-ignore no-explicit-any
+  const ctxBrainTrust = (sig as any)?.context_snapshot?.brainTrustSnapshot ?? null;
+  // deno-lint-ignore no-explicit-any
+  let intel: any = ctxBrainTrust;
+  if (!intel) {
+    const { data: liveIntel } = await admin
+      .from("market_intelligence")
+      .select("*")
+      .eq("user_id", t.user_id)
+      .eq("symbol", t.symbol)
+      .maybeSingle();
+    intel = liveIntel; // fallback for legacy trades
+  }
 
   const entryPrice = Number(t.entry_price);
   const exitPrice = Number(t.exit_price ?? 0);
@@ -302,7 +308,7 @@ ENTRY CONTEXT (signal engine):
 - AI reasoning: "${sig?.ai_reasoning ?? "not available"}"
 - Risk manager verdict: ${riskVerdict}
 
-BRAIN TRUST CONTEXT (current cached intel — proxy for entry-time):
+BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market conditions):
 - Macro bias: ${intel?.macro_bias ?? "unknown"} (confidence: ${((Number(intel?.macro_confidence ?? 0)) * 100).toFixed(0)}%)
 - Market phase: ${intel?.market_phase ?? "unknown"}
 - Trend structure: ${intel?.trend_structure ?? "unknown"}
@@ -537,19 +543,23 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Trigger-only entrypoint. Validate via vault-stored token, with the
-    // service role key as a fallback for manual testing.
+    // Trigger-only entrypoint. Requires vault-stored internal token.
+    // The service role key must NEVER be accepted as an HTTP bearer — leaking
+    // one token would give full DB admin rights. Use INTERNAL_FUNCTION_SECRET
+    // or the get_post_trade_learn_token vault RPC for internal calls.
     const authHeader = req.headers.get("Authorization") ?? "";
     const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
     let tokenOk = false;
-    if (bearer && bearer === SERVICE_KEY) {
+    // Check internal function secret first (env-var based internal calls)
+    const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET");
+    if (internalSecret && bearer === internalSecret) {
       tokenOk = true;
     } else {
       try {
         const { data: tok } = await admin.rpc("get_post_trade_learn_token");
-        if (tok && tok === bearer) tokenOk = true;
+        if (tok && bearer && tok === bearer) tokenOk = true;
       } catch {
-        // RPC missing — only service-role fallback works.
+        // RPC missing — deny access (fail closed).
       }
     }
     if (!tokenOk) {

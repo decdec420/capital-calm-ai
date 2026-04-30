@@ -280,36 +280,50 @@ export async function fetchCandles(
     timeframe: tf,
   };
 
-  try {
-    let r = await fetch(
-      `${CB}/products/${symbol}/candles?granularity=${granularitySeconds}`,
-    );
-    if (r.status === 429) {
-      console.warn(`[market] Coinbase rate-limited on ${symbol} candles — retrying in ~1s`);
-      await sleep(1000);
-      r = await fetch(
-        `${CB}/products/${symbol}/candles?granularity=${granularitySeconds}`,
+  // Exponential backoff retry — up to 3 attempts with ~1s, ~2s, ~4s waits.
+  // Retries on 429 (rate-limit), 5xx (server errors), and network failures.
+  // Non-retryable errors (4xx except 429) surface immediately.
+  const MAX_ATTEMPTS = 3;
+  const url = `${CB}/products/${symbol}/candles?granularity=${granularitySeconds}`;
+  let lastError: Error = new Error("unreachable");
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      const backoffMs = 1000 * Math.pow(2, attempt - 1); // 1s, 2s
+      console.warn(
+        `[market] Coinbase candle retry ${attempt}/${MAX_ATTEMPTS - 1} for ${symbol} ${tf} in ~${backoffMs}ms`,
       );
+      await sleep(backoffMs);
     }
-    if (!r.ok) {
-      const msg = `HTTP ${r.status}`;
-      ctx.tracker?.recordFailure(key, msg);
-      throw new Error(`Coinbase ${symbol} candles ${r.status}`);
+    try {
+      const r = await fetch(url);
+      if (r.status === 429 || r.status >= 500) {
+        lastError = new Error(`HTTP ${r.status}`);
+        continue; // retryable
+      }
+      if (!r.ok) {
+        const msg = `HTTP ${r.status}`;
+        ctx.tracker?.recordFailure(key, msg);
+        throw new Error(`Coinbase ${symbol} candles ${r.status}`);
+      }
+      const raw = (await r.json()) as number[][];
+      // Coinbase returns [ time, low, high, open, close, volume ] newest-first.
+      // Sort ascending and remap to named fields.
+      const candles = [...raw]
+        .sort((a, b) => a[0] - b[0])
+        .map(([t, l, h, o, c, v]) => ({ t, l, h, o, c, v }));
+      ctx.tracker?.recordSuccess(key);
+      return candles;
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("Coinbase ")) throw e; // non-retryable 4xx
+      lastError = e instanceof Error ? e : new Error(String(e));
+      // Network / timeout error — retryable
     }
-    const raw = (await r.json()) as number[][];
-    // Coinbase returns [ time, low, high, open, close, volume ] newest-first.
-    // Sort ascending and remap to named fields.
-    const candles = [...raw]
-      .sort((a, b) => a[0] - b[0])
-      .map(([t, l, h, o, c, v]) => ({ t, l, h, o, c, v }));
-    ctx.tracker?.recordSuccess(key);
-    return candles;
-  } catch (e) {
-    if (e instanceof Error && e.message.startsWith("Coinbase ")) throw e;
-    const msg = e instanceof Error ? e.message : String(e);
-    ctx.tracker?.recordFailure(key, msg);
-    throw e;
   }
+
+  // All attempts exhausted
+  ctx.tracker?.recordFailure(key, lastError.message);
+  throw lastError;
 }
 
 function labelForGranularity(g: number): string {

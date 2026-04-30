@@ -14,12 +14,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 import { buildEventModeContextInstruction } from "./event-mode-context.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -130,11 +126,17 @@ Doctrine editor:
 - After the tool returns success, confirm what changed in one sentence. "Done — switched to aggressive."
 - If the tool returns an error, say so and suggest the operator update it manually in Settings.
 
-Strategy performance questions:
+Strategy performance and Katrina (Taylor) recommendations:
 - Taylor is the desk's strategy analyst (runs as the 'katrina' function). If 'katrinaLatestReview'
   is in context and the operator asks about strategy/experiment performance, lead with
   Taylor's latest brief — cite the date and trend. Don't reinvent the analysis; reference it.
   If she flagged promotions or kills, mention the counts.
+- PROACTIVE ACTION: If katrinaLatestReview.needs_action === true, surface this at the START
+  of your FIRST response in the conversation (before answering whatever the user asked):
+  Example: "Taylor flagged 2 experiments to promote and 1 to kill — needs your decision.
+  Check the Learnings tab or say 'show Taylor's review' and I'll pull it up. Anyway —"
+  Keep it to one sentence. Don't repeat it in subsequent turns unless asked.
+  After the operator reviews/acts, the needs_action flag clears automatically.
 
 ${eventModeInstruction ? `Event mode instruction:
 ${eventModeInstruction}
@@ -288,7 +290,7 @@ Deno.serve(async (req: Request) => {
     try {
       const { data } = await supabase
         .from("strategy_reviews")
-        .select("brief_text, reviewed_at, win_rate_trend, promote_ids, kill_ids")
+        .select("brief_text, reviewed_at, win_rate_trend, promote_ids, kill_ids, needs_action")
         .eq("user_id", userId)
         .order("reviewed_at", { ascending: false })
         .limit(1)
@@ -318,6 +320,7 @@ Deno.serve(async (req: Request) => {
             kill_count: Array.isArray(latestReview.kill_ids)
               ? latestReview.kill_ids.length
               : 0,
+            needs_action: latestReview.needs_action === true,
           }
         : ((safeContext as Record<string, unknown> | undefined)?.katrinaLatestReview ?? null),
     };

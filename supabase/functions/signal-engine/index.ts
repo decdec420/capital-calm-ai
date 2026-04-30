@@ -64,6 +64,8 @@ import {
   getBrokerCredentials,
   placeMarketBuy,
 } from "../_shared/broker.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { log } from "../_shared/logger.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -189,12 +191,7 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
   }
   return { state: "stale_after_refresh", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin };
 }
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+// corsHeaders is imported from ../_shared/cors.ts (see import at top of file)
 
 // Symbols come from the doctrine whitelist — single source of truth.
 const SYMBOLS = SYMBOL_WHITELIST;
@@ -488,12 +485,14 @@ STOPS AND TARGETS:
   setup is too extended. Skip it.
 
 ${isPaper ? `
-PAPER MODE — FLOOD GATES OPEN:
-You are running in paper mode. A wrong trade is a data point, not a loss.
-Lower your confidence threshold to 0.55 (vs 0.65 in live). Accept setups that
-are directionally sound even if not textbook. The goal right now is to build
-pattern data faster. Propose trades on B+ setups, not just A+.
-Still skip chop and broken setups — but don't wait for perfection.
+PAPER MODE — CALIBRATION PHASE:
+You are running in paper mode. No real capital is at risk.
+Your threshold is 0.55 confidence (vs 0.65 in live). This is intentionally
+lower to generate more signal data — but you still require a real edge.
+Accept B+ setups with clear regime alignment. Reject chop, broken structure,
+and setups with no identifiable edge regardless of mode.
+Your paper results directly calibrate the Trade Coach. Don't flood the system
+with noise — that degrades future live performance. Quality > quantity.
 ` : `
 A SKIP IS NOT FAILURE. Most ticks should be skips.
 The edge is in the quality of trades taken, not the quantity.
@@ -655,12 +654,13 @@ YOUR EVALUATION FRAMEWORK:
      You have sentiment as a tailwind.
 
 4. PORTFOLIO HEAT:
-   Open positions: ${openTrades.length}
+   Open positions: ${openTrades.length} / ${MAX_CORRELATED_POSITIONS} max allowed
    Current proposed size: $${sizeUsd.toFixed(2)} (${riskPct.toFixed(1)}% of equity)
    - 0 open positions: Standard sizing acceptable.
    - 1 open position, different symbol: Slightly reduce size (correlation risk).
    - 1 open position, same direction: Significant correlation. REDUCE_SIZE by 50%.
-   - 2+ open positions: VETO until one closes. Max portfolio heat exceeded.
+   - 2 open positions, all different symbols: Reduce size by 25-50% (heat is elevated).
+   - At max positions (${MAX_CORRELATED_POSITIONS}): VETO — hard cap enforced upstream, should not reach here.
 
 5. STOP PLACEMENT SANITY:
    Entry: $${entry.toFixed(2)} | Stop: $${stop.toFixed(2)} | Distance: ${((Math.abs(entry - stop) / entry) * 100).toFixed(2)}%
@@ -732,13 +732,13 @@ What is your verdict?
         await resp.text().catch(() => ""),
       );
       cbFailure();
-      return { verdict: "approve", reason: "Risk manager unavailable — approving by default." };
+      return { verdict: "veto", reason: "Risk manager unavailable — failing safe. Retry next tick." };
     }
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) {
       cbFailure();
-      return { verdict: "approve", reason: "Risk manager parse error — approving by default." };
+      return { verdict: "veto", reason: "Risk manager parse error — failing safe. Retry next tick." };
     }
     const parsed = JSON.parse(args);
     cbSuccess();
@@ -753,7 +753,7 @@ What is your verdict?
       e,
     );
     cbFailure();
-    return { verdict: "approve", reason: "Risk manager exception — approving by default." };
+    return { verdict: "veto", reason: "Risk manager exception — failing safe. Retry next tick." };
   }
 }
 
@@ -789,7 +789,7 @@ async function runTickForUser(
       .eq("user_id", userId),
     admin
       .from("trades")
-      .select("id,symbol,side")
+      .select("id,symbol,side,entry_price,size")
       .eq("user_id", userId)
       .eq("status", "open"),
     admin
@@ -918,6 +918,37 @@ async function runTickForUser(
       expiredCount,
       perSymbol: [],
     };
+  }
+
+  // Book-exposure cap — total notional of open positions must not exceed
+  // MAX_BOOK_EXPOSURE_PCT of equity. Prevents oversizing across symbols.
+  const MAX_BOOK_EXPOSURE_PCT = 0.40; // 40% of equity max
+  if (equity > 0) {
+    const bookNotional = (openTrades ?? []).reduce((sum: number, t: { entry_price?: number; size?: number }) => {
+      const notional = (Number(t.entry_price ?? 0)) * (Number(t.size ?? 0));
+      return sum + (isFinite(notional) ? notional : 0);
+    }, 0);
+    const bookExposurePct = bookNotional / equity;
+    if (bookExposurePct >= MAX_BOOK_EXPOSURE_PCT) {
+      const exposureGate = gate(
+        GATE_CODES.DOCTRINE_CORRELATION_BLOCK,
+        "halt",
+        `Book exposure ${(bookExposurePct * 100).toFixed(1)}% of equity exceeds ${(MAX_BOOK_EXPOSURE_PCT * 100).toFixed(0)}% cap ($${bookNotional.toFixed(2)} open vs $${equity.toFixed(2)} equity).`,
+        { bookExposurePct, cap: MAX_BOOK_EXPOSURE_PCT, bookNotional, equity },
+      );
+      await persistSnapshot(admin, userId, {
+        gateReasons: [exposureGate],
+        perSymbol: [],
+        chosenSymbol: null,
+      });
+      return {
+        userId,
+        tick: "book_exposure_cap",
+        gateReasons: [exposureGate],
+        expiredCount,
+        perSymbol: [],
+      };
+    }
   }
 
   // ── Re-entry cooldown + stepped anti-tilt ─────────────────────
@@ -1753,6 +1784,16 @@ async function runTickForUser(
       `coach: ${winner.symbol}/${side} conf ${rawConf.toFixed(2)} → ${conf.toFixed(2)} (${coachVerdict.warning})`,
     );
   }
+  // Re-check MIN_CONFIDENCE after coach penalty — the multiplier may have
+  // pushed a borderline signal below the threshold. Drop it here rather than
+  // persisting a sub-threshold signal that the operator would reject anyway.
+  if (conf < MIN_CONFIDENCE) {
+    return {
+      symbol: winner.symbol,
+      outcome: "skipped",
+      reason: `coach_penalty: conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
+    };
+  }
   const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
   // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
   const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
@@ -1928,6 +1969,7 @@ async function runTickForUser(
       direction_basis: directionBasis,
       lifecycle_phase: "proposed",
       lifecycle_transitions: [proposedTransition],
+      paper_grade: isPaper,
       context_snapshot: {
         regime: winner.regime,
         lastPrice: winner.lastPrice,
@@ -1939,6 +1981,20 @@ async function runTickForUser(
         coachVerdict: coachVerdict ?? null,
         rawConfidence: rawConf,
         activeNewsFlags: summarizeNewsFlags(intel?.news_flags).active,
+        // Brain Trust snapshot at signal-creation time — used by post-trade-learn
+        // to evaluate the trade in the context that was CURRENT when the signal
+        // was generated (not the potentially-hours-stale live market_intelligence).
+        brainTrustSnapshot: intel
+          ? {
+            symbol: intel.symbol,
+            generated_at: intel.generated_at,
+            macro_bias: intel.macro_bias,
+            environment: intel.environment,
+            pattern_context: intel.pattern_context,
+            news_flags: intel.news_flags,
+            running_narrative: intel.running_narrative,
+          }
+          : null,
       },
       status: "pending",
       // TTL: signal is valid for 30 minutes. Bobby's pending-signal query

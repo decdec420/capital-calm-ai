@@ -47,7 +47,9 @@ export type WatchedTable =
   | "market_intelligence"
   | "doctrine_settings"
   | "pending_doctrine_changes"
-  | "experiments";
+  | "experiments"
+  | "system_events"
+  | "strategy_reviews";
 
 const WATCHED_TABLES: WatchedTable[] = [
   "system_state",
@@ -59,6 +61,8 @@ const WATCHED_TABLES: WatchedTable[] = [
   "doctrine_settings",
   "pending_doctrine_changes",
   "experiments",
+  "system_events",      // bobby_decision + katrina_recommendation events
+  "strategy_reviews",   // needs_action flag from Katrina
 ];
 
 // ── Context ───────────────────────────────────────────────────

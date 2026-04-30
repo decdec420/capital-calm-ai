@@ -11,12 +11,9 @@
 // writes the result to strategy_reviews. Surfaced in the Learning tab and to Wags.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { corsHeaders } from "../_shared/cors.ts";
+import { log } from "../_shared/logger.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-internal-function-secret",
-};
 
 // Katrina gets flash-level depth — strategy analysis benefits from careful
 // reasoning, and she only runs once a week or every 10 trades.
@@ -301,7 +298,33 @@ Return a structured JSON object with these exact keys:
         { role: "system", content: KATRINA_SYSTEM },
         { role: "user", content: userMessage },
       ],
-      response_format: { type: "json_object" },
+      tools: [{
+        type: "function",
+        function: {
+          name: "submit_strategy_review",
+          description: "Submit the structured strategy performance review.",
+          parameters: {
+            type: "object",
+            required: ["brief_text", "promote_ids", "kill_ids", "continue_ids", "win_rate_trend"],
+            additionalProperties: false,
+            properties: {
+              brief_text: { type: "string", description: "3-5 sentence analysis, lead with strongest finding." },
+              promote_ids: { type: "array", items: { type: "string" }, description: "Experiment IDs ready to promote." },
+              kill_ids: { type: "array", items: { type: "string" }, description: "Experiment IDs to terminate." },
+              continue_ids: { type: "array", items: { type: "string" }, description: "Experiment IDs to keep running." },
+              top_regime: { type: ["string", "null"], description: "Best-performing regime or null." },
+              worst_regime: { type: ["string", "null"], description: "Worst-performing regime or null." },
+              win_rate_trend: { type: "string", enum: ["improving", "stable", "declining"] },
+              key_findings: {
+                type: "array",
+                items: { type: "string" },
+                description: "2-4 bullet points, each ≤ 15 words.",
+              },
+            },
+          },
+        },
+      }],
+      tool_choice: { type: "function", function: { name: "submit_strategy_review" } },
       stream: false,
       max_tokens: 4000,
     }),
@@ -318,12 +341,13 @@ Return a structured JSON object with these exact keys:
   const json = await res.json().catch(() => null) as Json | null;
   let analysis: Json = {};
   try {
-    const content = String((json?.choices as Array<Json> | undefined)?.[0]?.message
-      ? ((json!.choices as Array<Json>)[0].message as Json).content
-      : "{}");
-    analysis = JSON.parse(content);
+    const toolArgs = (json?.choices as Array<Json> | undefined)?.[0]
+      // deno-lint-ignore no-explicit-any
+      ?.message?.tool_calls?.[0]?.function?.arguments as any;
+    if (!toolArgs) throw new Error("No tool_calls in response");
+    analysis = typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs;
   } catch (e) {
-    console.error("[katrina] Failed to parse AI JSON:", e);
+    console.error("[katrina] Failed to parse AI function call:", e);
     return { error: "Failed to parse Katrina's analysis" };
   }
 
@@ -348,6 +372,8 @@ Return a structured JSON object with these exact keys:
     ? triggerType
     : "manual";
 
+  const hasActionableRecommendations = promoteIds.length > 0 || killIds.length > 0;
+
   const { data: reviewRow, error: insertErr } = await admin
     .from("strategy_reviews")
     .insert({
@@ -363,6 +389,7 @@ Return a structured JSON object with these exact keys:
       win_rate_trend: trend,
       ai_model: KATRINA_MODEL,
       raw_analysis: analysis,
+      needs_action: hasActionableRecommendations,
     })
     .select("id")
     .maybeSingle();
@@ -372,7 +399,30 @@ Return a structured JSON object with these exact keys:
     return { error: `DB insert failed: ${insertErr.message}` };
   }
 
-  console.log(`[katrina] user=${userId} trades=${totalTrades} trend=${trend} promote=${promoteIds.length} kill=${killIds.length} review=${reviewRow?.id}`);
+  // Fire a system_event so Wags (copilot-chat) can surface actionable
+  // Katrina recommendations to the operator in the next conversation.
+  if (hasActionableRecommendations && reviewRow?.id) {
+    try {
+      await admin.from("system_events").insert({
+        user_id: userId,
+        event_type: "katrina_recommendation",
+        actor: "katrina",
+        payload: {
+          review_id: reviewRow.id,
+          promote_count: promoteIds.length,
+          kill_count: killIds.length,
+          trend,
+          brief_text: briefText,
+          promote_ids: promoteIds,
+          kill_ids: killIds,
+        },
+      });
+    } catch (e) {
+      console.error("[katrina] system_events insert failed (non-fatal):", e);
+    }
+  }
+
+  log("info", "katrina_tick", { fn: "katrina", userId, trades: totalTrades, trend, promote: promoteIds.length, kill: killIds.length, reviewId: reviewRow?.id });
 
   return {
     review_id: reviewRow?.id,
@@ -426,10 +476,13 @@ Deno.serve(async (req: Request) => {
   const targetUserId = typeof body.user_id === "string" ? body.user_id : null;
 
   const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
+  // Require BOTH the bearer token AND the x-internal-function-secret header to
+  // match the shared secret. Either one alone is insufficient — this prevents
+  // the service-role-key-as-bearer bypass that was present in the old logic.
   const validInternalSecret = internalSecret &&
-    (bearer === internalSecret || internalSecretHeader === internalSecret);
-  const isServiceRoleDispatch = bearer === serviceRoleKey;
-  if (validInternalSecret && (bearer === internalSecret || isServiceRoleDispatch)) {
+    bearer === internalSecret &&
+    internalSecretHeader === internalSecret;
+  if (validInternalSecret) {
     if (!targetUserId) {
       return new Response(JSON.stringify({ error: "Missing user_id" }), {
         status: 400,
