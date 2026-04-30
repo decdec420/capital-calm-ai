@@ -13,6 +13,7 @@ import { useMarketIntelligence, type MarketIntelligence } from "@/hooks/useMarke
 import { cn } from "@/lib/utils";
 
 const SYMBOL_ORDER = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
+const MOMENTUM_STALE_MINUTES = 75;
 
 type Tone = "long" | "short" | "neutral" | "warn" | "good";
 
@@ -73,20 +74,42 @@ function formatRelative(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function momentumFreshnessMeta(brief: MarketIntelligence): { stale: boolean; cause?: string } {
-  if (!brief.recentMomentumAt) {
-    return { stale: true, cause: brief.recentMomentumNotes ?? "Momentum snapshot timestamp missing" };
-  }
+function getMinutesAgo(iso: string | null): number | null {
+  if (!iso) return null;
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, Math.floor((Date.now() - ts) / 60_000));
+}
 
-  const ageMs = Date.now() - new Date(brief.recentMomentumAt).getTime();
-  const stale = Number.isNaN(ageMs) || ageMs > 2 * 60 * 60 * 1000;
-  if (!stale) return { stale: false };
+function momentumFreshnessMeta(
+  brief?: MarketIntelligence,
+): { label: string; tone: Tone; minutes: number | null; stale: boolean; cause?: string } {
+  const minutes = getMinutesAgo(brief?.recentMomentumAt ?? null);
+  if (!brief) return { label: "No momentum", tone: "neutral", minutes: null, stale: true };
+  if (minutes == null) {
+    return {
+      label: "No momentum",
+      tone: "neutral",
+      minutes: null,
+      stale: true,
+      cause: brief.recentMomentumNotes ?? "Momentum snapshot timestamp missing",
+    };
+  }
+  if (minutes <= MOMENTUM_STALE_MINUTES) {
+    return { label: "Momentum fresh", tone: "good", minutes, stale: false };
+  }
 
   const cause = [brief.recentMomentumNotes, brief.recentMomentum1h, brief.recentMomentum4h]
     .filter((v): v is string => Boolean(v && v.trim()))
     .join(" · ");
 
-  return { stale: true, cause: cause || `Momentum snapshot stale (${formatRelative(brief.recentMomentumAt)})` };
+  return {
+    label: "Momentum stale",
+    tone: "warn",
+    minutes,
+    stale: true,
+    cause: cause || `Momentum snapshot stale (${formatRelative(brief.recentMomentumAt ?? "")})`,
+  };
 }
 
 function SymbolBrief({ brief }: { brief: MarketIntelligence }) {
@@ -130,6 +153,17 @@ function SymbolBrief({ brief }: { brief: MarketIntelligence }) {
         </span>
         <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-border bg-muted text-muted-foreground font-medium">
           {humanize(brief.trendStructure)}
+        </span>
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-medium",
+            toneClasses(momentumFreshness.tone),
+          )}
+        >
+          {momentumFreshness.label}
+          {momentumFreshness.minutes != null && (
+            <span className="opacity-70">· {momentumFreshness.minutes}m old</span>
+          )}
         </span>
       </div>
 
@@ -291,11 +325,27 @@ export function MarketIntelligencePanel({ symbol, className }: MarketIntelligenc
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-3 h-8">
             {symbols.map((s) => (
-              <TabsTrigger key={s} value={s} className="text-[11px]">
-                {s.replace("-USD", "")}
+              <TabsTrigger key={s} value={s} className="text-[11px] gap-1.5">
+                <span>{s.replace("-USD", "")}</span>
+                {(() => {
+                  const freshness = momentumFreshnessMeta(briefsBySymbol.get(s));
+                  return (
+                    <span
+                      className={cn(
+                        "rounded border px-1 py-0 text-[10px] leading-4",
+                        toneClasses(freshness.tone),
+                      )}
+                    >
+                      {freshness.minutes == null ? "—" : `${freshness.minutes}m`}
+                    </span>
+                  );
+                })()}
               </TabsTrigger>
             ))}
           </TabsList>
+          <p className="pt-2 text-[10px] text-muted-foreground">
+            Momentum freshness turns stale after {MOMENTUM_STALE_MINUTES} minutes.
+          </p>
           {symbols.map((s) => {
             const b = briefsBySymbol.get(s);
             return (
