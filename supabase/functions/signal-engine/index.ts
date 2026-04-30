@@ -177,7 +177,7 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
     await fetch(`${supabaseUrl}/functions/v1/market-intelligence`, {
       method: "POST",
       headers: { Authorization: `Bearer ${cronToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: "signal_engine_stale_momentum_recovery", symbol }),
+      body: JSON.stringify({ reason: "signal_engine_stale_momentum_recovery", userId, symbol }),
     });
   } catch {
     return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };

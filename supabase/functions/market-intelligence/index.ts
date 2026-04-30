@@ -743,6 +743,12 @@ Deno.serve(async (req) => {
     if (!LOVABLE_API_KEY) return json({ error: "LOVABLE_API_KEY not configured" }, 500);
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+    const reqBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const requestedUserId = typeof reqBody?.userId === "string" ? reqBody.userId : null;
+    const requestedSymbolRaw = typeof reqBody?.symbol === "string" ? reqBody.symbol : null;
+    const requestedSymbol = requestedSymbolRaw && SYMBOL_WHITELIST.includes(requestedSymbolRaw as Symbol)
+      ? requestedSymbolRaw as Symbol
+      : null;
     const authHeader = req.headers.get("Authorization") ?? "";
     let userIds: string[] = [];
     let isCron = false;
@@ -756,13 +762,19 @@ Deno.serve(async (req) => {
       cronToken = null;
     }
 
+    let symbolsToRun: Symbol[] = [...SYMBOL_WHITELIST];
     if (cronToken && authHeader === `Bearer ${cronToken}`) {
       isCron = true;
-      const { data: users } = await admin
-        .from("system_state")
-        .select("user_id")
-        .eq("bot", "running");
-      userIds = (users ?? []).map((u: { user_id: string }) => u.user_id);
+      if (requestedUserId) {
+        userIds = [requestedUserId];
+      } else {
+        const { data: users } = await admin
+          .from("system_state")
+          .select("user_id")
+          .eq("bot", "running");
+        userIds = (users ?? []).map((u: { user_id: string }) => u.user_id);
+      }
+      if (requestedSymbol) symbolsToRun = [requestedSymbol];
     } else {
       // User JWT — run for the signed-in caller on demand.
       const userClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -779,7 +791,7 @@ Deno.serve(async (req) => {
 
     const results: Array<{ userId: string; symbol: string; ok: boolean; error?: string }> = [];
     for (const userId of userIds) {
-      for (const symbol of SYMBOL_WHITELIST) {
+      for (const symbol of symbolsToRun) {
         try {
           await runIntelligenceForSymbol(admin, userId, symbol as Symbol, LOVABLE_API_KEY);
           results.push({ userId, symbol, ok: true });
