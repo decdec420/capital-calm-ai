@@ -16,6 +16,7 @@ import { AlertTriangle, Compass, Plug } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
+import { BrokerConnectionCard } from "@/components/trader/BrokerConnectionCard";
 
 import { toast } from "sonner";
 
@@ -150,9 +151,8 @@ export default function Settings() {
         </Section>
       )}
 
-      <Section id="brokers" title="Brokers (placeholder)">
-        <Row label="Paper broker" value="Connected (UI only)" tone="safe" />
-        <Row label="Live broker" value="Not configured" tone="blocked" />
+      <Section id="brokers" title="Broker connection">
+        <BrokerConnectionCard />
       </Section>
 
       <Section title="Data sources">

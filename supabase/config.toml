@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.activate-doctrine-changes]
 verify_jwt = false
+
+[functions.broker-connection]
+verify_jwt = false
