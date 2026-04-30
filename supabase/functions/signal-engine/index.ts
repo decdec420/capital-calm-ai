@@ -84,6 +84,8 @@ const CB_STATE = {
 
 const OPEN_THRESHOLD = 3;       // Trip after 3 consecutive failures
 const RESET_AFTER_MS = 60_000;  // Stay open for 60s, then probe
+const BRAIN_TRUST_REFRESH_DEBOUNCE_MS = 10 * 60_000; // 10m per user+symbol
+const brainTrustRefreshAttempts = new Map<string, number>();
 
 function cbAllow(): boolean {
   if (CB_STATE.state === "closed") return true;
@@ -116,6 +118,76 @@ function cbFailure(): void {
       `[signal-engine] circuit breaker OPEN after ${CB_STATE.failures} failures — pausing ${RESET_AFTER_MS/1000}s`,
     );
   }
+}
+
+interface BrainTrustFreshnessResult {
+  state:
+    | "fresh"
+    | "refreshed"
+    | "refresh_failed"
+    | "stale_after_refresh"
+    | "refresh_debounced";
+  momentum1h: string | null;
+  momentum4h: string | null;
+  momentumAgeMin: number | null;
+  maxAgeMin: number;
+}
+
+// deno-lint-ignore no-explicit-any
+async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol: string, isPaper: boolean): Promise<BrainTrustFreshnessResult> {
+  const maxAgeMin = 120;
+  const readRow = async () => {
+    const { data } = await admin
+      .from("market_intelligence")
+      .select("recent_momentum_1h,recent_momentum_4h,recent_momentum_at")
+      .eq("user_id", userId)
+      .eq("symbol", symbol)
+      .maybeSingle();
+    const momentumAt = data?.recent_momentum_at ? new Date(data.recent_momentum_at).getTime() : null;
+    const momentumAgeMin = momentumAt ? (Date.now() - momentumAt) / 60_000 : null;
+    return {
+      momentum1h: data?.recent_momentum_1h ?? null,
+      momentum4h: data?.recent_momentum_4h ?? null,
+      momentumAgeMin,
+      fresh: !!data?.recent_momentum_1h && !!data?.recent_momentum_4h && !!momentumAt && momentumAgeMin !== null && momentumAgeMin <= maxAgeMin,
+    };
+  };
+
+  const first = await readRow();
+  if (first.fresh) {
+    return { state: "fresh", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+  }
+  if (!isPaper) {
+    return { state: "stale_after_refresh", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+  }
+
+  const key = `${userId}:${symbol}`;
+  const lastAttempt = brainTrustRefreshAttempts.get(key) ?? 0;
+  if (Date.now() - lastAttempt < BRAIN_TRUST_REFRESH_DEBOUNCE_MS) {
+    return { state: "refresh_debounced", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+  }
+  brainTrustRefreshAttempts.set(key, Date.now());
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const cronToken = (await admin.rpc("get_signal_engine_cron_token")).data as string | null;
+    if (!cronToken) {
+      return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+    }
+    await fetch(`${supabaseUrl}/functions/v1/market-intelligence`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cronToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "signal_engine_stale_momentum_recovery", symbol }),
+    });
+  } catch {
+    return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+  }
+
+  const second = await readRow();
+  if (second.fresh) {
+    return { state: "refreshed", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin };
+  }
+  return { state: "stale_after_refresh", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin };
 }
 
 const corsHeaders = {
@@ -1119,23 +1191,24 @@ async function runTickForUser(
     const newsSummary = summarizeNewsFlags(symbolIntel?.news_flags);
     const reentryHit = reentryLockedSymbols.get(symbol);
 
-    // Brain Trust momentum freshness gate. Required before any proposal:
-    // both 1h and 4h reads must be present AND the read must be ≤2h old.
-    const momentumAt = symbolIntel?.recent_momentum_at
-      ? new Date(symbolIntel.recent_momentum_at).getTime()
-      : null;
-    const momentumAgeMin = momentumAt
-      ? (Date.now() - momentumAt) / 60_000
-      : Number.POSITIVE_INFINITY;
-    const momentum1h = symbolIntel?.recent_momentum_1h ?? null;
-    const momentum4h = symbolIntel?.recent_momentum_4h ?? null;
-    const momentumStale =
-      !momentum1h || !momentum4h || !momentumAt || momentumAgeMin > 120;
+    // Brain Trust momentum freshness gate. Required before any proposal.
+    // In paper mode, attempt a safe refresh before hard-blocking.
+    const freshness = await ensureFreshBrainTrustMomentum(admin, userId, symbol, isPaper);
+    const momentum1h = freshness.momentum1h;
+    const momentum4h = freshness.momentum4h;
+    const momentumAgeMin = freshness.momentumAgeMin ?? Number.POSITIVE_INFINITY;
+    const momentumStale = !momentum1h || !momentum4h || !Number.isFinite(momentumAgeMin) || momentumAgeMin > freshness.maxAgeMin;
     const momentumGate = momentumStale
       ? gate(
-          GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE,
+          freshness.state === "refresh_failed"
+            ? GATE_CODES.BRAIN_TRUST_REFRESH_FAILED
+            : freshness.state === "stale_after_refresh" || freshness.state === "refresh_debounced"
+            ? GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE
+            : GATE_CODES.MISSING_MARKET_INTELLIGENCE,
           "block",
-          `${symbol}: Trade blocked — Brain Trust stale or missing short-horizon momentum read.`,
+          freshness.state === "refresh_failed"
+            ? `${symbol}: Trade blocked — Brain Trust refresh failed before momentum could be validated.`
+            : `${symbol}: Trade blocked — Brain Trust stale or missing short-horizon momentum read.`,
           {
             symbol,
             momentum1h,
@@ -1143,7 +1216,9 @@ async function runTickForUser(
             momentumAgeMinutes: Number.isFinite(momentumAgeMin)
               ? Math.round(momentumAgeMin)
               : null,
-            maxAgeMinutes: 120,
+            maxAgeMinutes: freshness.maxAgeMin,
+            refreshState: freshness.state,
+            mode: isPaper ? "paper" : "live",
           },
         )
       : null;
