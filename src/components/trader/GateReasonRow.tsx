@@ -103,6 +103,7 @@ interface GateReasonRowProps {
 export function GateReasonRow({ reason, className, compact }: GateReasonRowProps) {
   const Icon = gateIconFor(reason.code);
   const tone = gateToneFor(reason.severity);
+  const actionableChainText = (reason.meta?.actionable_chain_text ?? reason.meta?.actionableChainText) as string | undefined;
   return (
     <div
       className={cn(
@@ -142,7 +143,14 @@ export function GateReasonRow({ reason, className, compact }: GateReasonRowProps
           )}
         </div>
         {!compact && (
-          <p className="text-xs text-foreground mt-0.5 leading-snug">{reason.message}</p>
+          <>
+            <p className="text-xs text-foreground mt-0.5 leading-snug">{reason.message}</p>
+            {actionableChainText && (
+              <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                Next: {actionableChainText}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -133,6 +133,10 @@ interface BrainTrustFreshnessResult {
   momentum4h: string | null;
   momentumAgeMin: number | null;
   maxAgeMin: number;
+  lastBrainTrustSuccessAt: string | null;
+  lastRefreshAttemptAt: string | null;
+  upstreamFetchErrorCode: string | null;
+  refreshTriggerResult: "not_attempted" | "debounced" | "success" | "failed";
 }
 
 // deno-lint-ignore no-explicit-any
@@ -141,7 +145,7 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
   const readRow = async () => {
     const { data } = await admin
       .from("market_intelligence")
-      .select("recent_momentum_1h,recent_momentum_4h,recent_momentum_at")
+      .select("recent_momentum_1h,recent_momentum_4h,recent_momentum_at,last_updated")
       .eq("user_id", userId)
       .eq("symbol", symbol)
       .maybeSingle();
@@ -151,45 +155,53 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
       momentum1h: data?.recent_momentum_1h ?? null,
       momentum4h: data?.recent_momentum_4h ?? null,
       momentumAgeMin,
+      lastBrainTrustSuccessAt: data?.last_updated ?? null,
       fresh: !!data?.recent_momentum_1h && !!data?.recent_momentum_4h && !!momentumAt && momentumAgeMin !== null && momentumAgeMin <= maxAgeMin,
     };
   };
 
   const first = await readRow();
   if (first.fresh) {
-    return { state: "fresh", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+    return { state: "fresh", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: first.lastBrainTrustSuccessAt, lastRefreshAttemptAt: null, upstreamFetchErrorCode: null, refreshTriggerResult: "not_attempted" };
   }
   if (!isPaper) {
-    return { state: "stale_after_refresh", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+    return { state: "stale_after_refresh", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: first.lastBrainTrustSuccessAt, lastRefreshAttemptAt: null, upstreamFetchErrorCode: null, refreshTriggerResult: "not_attempted" };
   }
 
   const key = `${userId}:${symbol}`;
   const lastAttempt = brainTrustRefreshAttempts.get(key) ?? 0;
   if (Date.now() - lastAttempt < BRAIN_TRUST_REFRESH_DEBOUNCE_MS) {
-    return { state: "refresh_debounced", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+    return { state: "refresh_debounced", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: first.lastBrainTrustSuccessAt, lastRefreshAttemptAt: new Date(lastAttempt).toISOString(), upstreamFetchErrorCode: null, refreshTriggerResult: "debounced" };
   }
-  brainTrustRefreshAttempts.set(key, Date.now());
+  const attemptAtMs = Date.now();
+  brainTrustRefreshAttempts.set(key, attemptAtMs);
+  const attemptAtIso = new Date(attemptAtMs).toISOString();
+  let upstreamFetchErrorCode: string | null = null;
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const cronToken = (await admin.rpc("get_signal_engine_cron_token")).data as string | null;
     if (!cronToken) {
-      return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+      return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: first.lastBrainTrustSuccessAt, lastRefreshAttemptAt: attemptAtIso, upstreamFetchErrorCode: "missing_cron_token", refreshTriggerResult: "failed" };
     }
-    await fetch(`${supabaseUrl}/functions/v1/market-intelligence`, {
+    const resp = await fetch(`${supabaseUrl}/functions/v1/market-intelligence`, {
       method: "POST",
       headers: { Authorization: `Bearer ${cronToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ reason: "signal_engine_stale_momentum_recovery", symbol }),
     });
+    if (!resp.ok) {
+      upstreamFetchErrorCode = `http_${resp.status}`;
+      return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: first.lastBrainTrustSuccessAt, lastRefreshAttemptAt: attemptAtIso, upstreamFetchErrorCode, refreshTriggerResult: "failed" };
+    }
   } catch {
-    return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin };
+    return { state: "refresh_failed", momentum1h: first.momentum1h, momentum4h: first.momentum4h, momentumAgeMin: first.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: first.lastBrainTrustSuccessAt, lastRefreshAttemptAt: attemptAtIso, upstreamFetchErrorCode: upstreamFetchErrorCode ?? "network_error", refreshTriggerResult: "failed" };
   }
 
   const second = await readRow();
   if (second.fresh) {
-    return { state: "refreshed", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin };
+    return { state: "refreshed", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: second.lastBrainTrustSuccessAt, lastRefreshAttemptAt: attemptAtIso, upstreamFetchErrorCode: null, refreshTriggerResult: "success" };
   }
-  return { state: "stale_after_refresh", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin };
+  return { state: "stale_after_refresh", momentum1h: second.momentum1h, momentum4h: second.momentum4h, momentumAgeMin: second.momentumAgeMin, maxAgeMin, lastBrainTrustSuccessAt: second.lastBrainTrustSuccessAt, lastRefreshAttemptAt: attemptAtIso, upstreamFetchErrorCode: null, refreshTriggerResult: "success" };
 }
 // corsHeaders is imported from ../_shared/cors.ts (see import at top of file)
 
@@ -1250,6 +1262,17 @@ async function runTickForUser(
             maxAgeMinutes: freshness.maxAgeMin,
             refreshState: freshness.state,
             mode: isPaper ? "paper" : "live",
+            last_brain_trust_success_at: freshness.lastBrainTrustSuccessAt,
+            last_refresh_attempt_at: freshness.lastRefreshAttemptAt,
+            upstream_fetch_error_code: freshness.upstreamFetchErrorCode,
+            refresh_trigger_result: freshness.refreshTriggerResult,
+            actionable_chain_text: freshness.state === "refresh_failed"
+              ? `Check market-intelligence health and retry (${freshness.upstreamFetchErrorCode ?? "unknown_error"}).`
+              : freshness.state === "refresh_debounced"
+              ? "Refresh recently attempted; wait for debounce window, then retry."
+              : freshness.state === "stale_after_refresh"
+              ? "Refresh completed but momentum is still stale; inspect upstream momentum source."
+              : null,
           },
         )
       : null;
