@@ -16,6 +16,8 @@
 //     openssl pkcs8 -topk8 -nocrypt -in key.pem -out key_pkcs8.pem
 // ============================================================
 
+import { signCoinbaseJwt } from "./coinbase-auth.ts";
+
 const CB_BASE = "https://api.coinbase.com";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -39,72 +41,6 @@ export interface BrokerFill {
   /** Total quote spent/received in USD */
   filledQuoteSize: number;
   status: string;
-}
-
-// ── Encoding helpers ──────────────────────────────────────────
-
-function encodeB64url(obj: object): string {
-  const json = JSON.stringify(obj);
-  let bin = "";
-  new TextEncoder().encode(json).forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-}
-
-function pemToDer(pem: string): Uint8Array {
-  const b64 = pem
-    .replace(/-----BEGIN[^-]+-----/g, "")
-    .replace(/-----END[^-]+-----/g, "")
-    .replace(/\s/g, "");
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-}
-
-// ── JWT signing ───────────────────────────────────────────────
-
-/**
- * Build and sign a Coinbase Cloud JWT using ES256 (ECDSA P-256).
- * The JWT is valid for 60 seconds. Every call to the Coinbase API
- * must use a fresh JWT — do not cache.
- */
-async function signCoinbaseJwt(creds: BrokerCredentials): Promise<string> {
-  const keyBytes = pemToDer(creds.apiKeyPrivatePem);
-
-  const privateKey = await crypto.subtle.importKey(
-    "pkcs8",
-    keyBytes,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"],
-  );
-
-  const now = Math.floor(Date.now() / 1000);
-  // 16-char hex nonce (prevents replay)
-  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-
-  const header = { alg: "ES256", kid: creds.apiKeyName, typ: "JWT" };
-  const payload = {
-    iss: "coinbase-cloud",
-    sub: creds.apiKeyName,
-    nbf: now,
-    exp: now + 60,
-    nonce,
-  };
-
-  const sigInput = `${encodeB64url(header)}.${encodeB64url(payload)}`;
-
-  // WebCrypto returns IEEE P1363 format (raw r||s, 64 bytes) — correct for JWT
-  const sigBytes = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(sigInput),
-  );
-
-  const sigB64 = btoa(
-    String.fromCharCode(...new Uint8Array(sigBytes)),
-  ).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-
-  return `${sigInput}.${sigB64}`;
 }
 
 // ── Credential retrieval ──────────────────────────────────────
@@ -156,7 +92,7 @@ async function waitForFill(
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const jwt = await signCoinbaseJwt(creds);
+    const jwt = await signCoinbaseJwt(creds.apiKeyName, creds.apiKeyPrivatePem);
     const r = await fetch(
       `${CB_BASE}/api/v3/brokerage/orders/historical/${orderId}`,
       { headers: { Authorization: `Bearer ${jwt}` } },
@@ -215,7 +151,7 @@ export async function placeMarketBuy(
   quoteSize: string,
   clientOrderId: string,
 ): Promise<BrokerFill> {
-  const jwt = await signCoinbaseJwt(creds);
+  const jwt = await signCoinbaseJwt(creds.apiKeyName, creds.apiKeyPrivatePem);
 
   const orderBody = {
     client_order_id: clientOrderId,
@@ -267,7 +203,7 @@ export async function placeMarketSell(
   baseSize: string,
   clientOrderId: string,
 ): Promise<BrokerFill> {
-  const jwt = await signCoinbaseJwt(creds);
+  const jwt = await signCoinbaseJwt(creds.apiKeyName, creds.apiKeyPrivatePem);
 
   const orderBody = {
     client_order_id: clientOrderId,

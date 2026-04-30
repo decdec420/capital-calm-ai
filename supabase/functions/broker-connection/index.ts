@@ -12,6 +12,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { normalizeCoinbasePrivateKeyPem, probeCoinbaseAccounts } from "../_shared/coinbase-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,135 +24,6 @@ const corsHeaders = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-// ── PEM normalization ────────────────────────────────────────
-
-function stripPem(pem: string): string {
-  return pem
-    .replace(/-----BEGIN[^-]+-----/g, "")
-    .replace(/-----END[^-]+-----/g, "")
-    .replace(/\s/g, "");
-}
-
-function b64ToBytes(b64: string): Uint8Array {
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-}
-
-function bytesToB64(bytes: Uint8Array): string {
-  let bin = "";
-  bytes.forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin);
-}
-
-// Wrap a 32-byte raw P-256 private scalar (from a SEC1 EC PRIVATE KEY) into
-// a PKCS8 PrivateKeyInfo for prime256v1. We extract the 32-byte private key
-// from the SEC1 DER and rebuild as PKCS8. This is a minimal hand-rolled DER
-// emitter — only correct for P-256 (prime256v1).
-function sec1ToPkcs8Pem(sec1Pem: string): string {
-  const sec1 = b64ToBytes(stripPem(sec1Pem));
-  // SEC1 ECPrivateKey ::= SEQUENCE { version INTEGER (1), privateKey OCTET STRING(32), ... }
-  // Find OCTET STRING tag 0x04 with length 0x20 (32) — that's our scalar.
-  let priv: Uint8Array | null = null;
-  for (let i = 0; i < sec1.length - 33; i++) {
-    if (sec1[i] === 0x04 && sec1[i + 1] === 0x20) {
-      priv = sec1.slice(i + 2, i + 2 + 32);
-      break;
-    }
-  }
-  if (!priv) throw new Error("Could not parse SEC1 private key — expected 32-byte P-256 scalar");
-
-  // PKCS8 PrivateKeyInfo for prime256v1 (P-256) wrapping the SEC1 ECPrivateKey.
-  // Build: SEQUENCE { version 0, AlgorithmIdentifier { ecPublicKey, prime256v1 }, OCTET STRING { ECPrivateKey } }
-  // ECPrivateKey: SEQUENCE { INTEGER 1, OCTET STRING priv }
-  const ecPrivateKey = new Uint8Array([
-    0x30, 0x25,                         // SEQUENCE, len 37
-    0x02, 0x01, 0x01,                   // INTEGER 1
-    0x04, 0x20, ...priv,                // OCTET STRING priv (32)
-    0xa1, 0x00,                         // [1] empty publicKey (optional)
-  ]);
-
-  // AlgorithmIdentifier: SEQUENCE { OID 1.2.840.10045.2.1 (ecPublicKey), OID 1.2.840.10045.3.1.7 (prime256v1) }
-  const algId = new Uint8Array([
-    0x30, 0x13,
-    0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
-    0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
-  ]);
-
-  const inner = new Uint8Array([
-    0x02, 0x01, 0x00,                   // version 0
-    ...algId,
-    0x04, ecPrivateKey.length, ...ecPrivateKey, // OCTET STRING wrapping ECPrivateKey
-  ]);
-
-  const pkcs8 = new Uint8Array([0x30, 0x82, (inner.length >> 8) & 0xff, inner.length & 0xff, ...inner]);
-  const b64 = bytesToB64(pkcs8);
-  const wrapped = b64.match(/.{1,64}/g)!.join("\n");
-  return `-----BEGIN PRIVATE KEY-----\n${wrapped}\n-----END PRIVATE KEY-----\n`;
-}
-
-function normalizePem(input: string): string {
-  const trimmed = input.trim();
-  if (trimmed.includes("BEGIN PRIVATE KEY")) {
-    return trimmed.endsWith("\n") ? trimmed : trimmed + "\n";
-  }
-  if (trimmed.includes("BEGIN EC PRIVATE KEY")) {
-    return sec1ToPkcs8Pem(trimmed);
-  }
-  throw new Error(
-    "Private key must be PEM with -----BEGIN PRIVATE KEY----- or -----BEGIN EC PRIVATE KEY-----",
-  );
-}
-
-// ── JWT signing (probe only, mirrors broker.ts) ──────────────
-
-function encodeB64url(obj: object): string {
-  const json = JSON.stringify(obj);
-  let bin = "";
-  new TextEncoder().encode(json).forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-}
-
-async function signJwt(keyName: string, pkcs8Pem: string): Promise<string> {
-  const keyBytes = b64ToBytes(stripPem(pkcs8Pem));
-  const privateKey = await crypto.subtle.importKey(
-    "pkcs8",
-    keyBytes,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"],
-  );
-  const now = Math.floor(Date.now() / 1000);
-  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-    .map((b) => b.toString(16).padStart(2, "0")).join("");
-  const header = { alg: "ES256", kid: keyName, typ: "JWT" };
-  const payload = { iss: "coinbase-cloud", sub: keyName, nbf: now, exp: now + 60, nonce };
-  const sigInput = `${encodeB64url(header)}.${encodeB64url(payload)}`;
-  const sig = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(sigInput),
-  );
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
-    .replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  return `${sigInput}.${sigB64}`;
-}
-
-async function probeAccounts(keyName: string, pkcs8Pem: string): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-  try {
-    const jwt = await signJwt(keyName, pkcs8Pem);
-    const r = await fetch("https://api.coinbase.com/api/v3/brokerage/accounts?limit=1", {
-      headers: { Authorization: `Bearer ${jwt}` },
-    });
-    if (r.ok) {
-      await r.text();
-      return { ok: true };
-    }
-    const txt = await r.text();
-    return { ok: false, status: r.status, error: txt.slice(0, 400) };
-  } catch (e) {
-    return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
-  }
-}
 
 // ── Handler ──────────────────────────────────────────────────
 
@@ -207,7 +79,7 @@ Deno.serve(async (req) => {
 
       let pkcs8: string;
       try {
-        pkcs8 = normalizePem(rawPem);
+        pkcs8 = normalizeCoinbasePrivateKeyPem(rawPem);
       } catch (e) {
         return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Invalid PEM" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -215,7 +87,7 @@ Deno.serve(async (req) => {
       }
 
       // Probe BEFORE persisting — never store invalid creds
-      const probe = await probeAccounts(keyName, pkcs8);
+      const probe = await probeCoinbaseAccounts(keyName, pkcs8);
       if (!probe.ok) {
         const friendly = probe.status === 401 || probe.status === 403
           ? `Coinbase rejected the credentials (HTTP ${probe.status}). Check the API key name and that the key has 'view' + 'trade' scopes.`
@@ -272,7 +144,7 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      const probe = await probeAccounts(row.api_key_name, row.api_key_private_pem);
+      const probe = await probeCoinbaseAccounts(row.api_key_name, row.api_key_private_pem);
       if (probe.ok) {
         await admin.rpc("update_broker_health", {
           p_user_id: userId, p_status: "healthy", p_key_name: row.api_key_name, p_error: null,
