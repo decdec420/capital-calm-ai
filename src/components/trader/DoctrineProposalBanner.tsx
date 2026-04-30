@@ -36,7 +36,7 @@ export function DoctrineProposalBanner() {
     let cancelled = false;
     const load = async () => {
       const since = new Date(Date.now() - SHOW_WINDOW_MS).toISOString();
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from("system_events")
         .select("id, payload, created_at")
         .eq("user_id", user.id)
@@ -44,7 +44,21 @@ export function DoctrineProposalBanner() {
         .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(3);
+
       if (cancelled) return;
+
+      if (error) {
+        // Graceful degradation: if this optional table is not present/exposed,
+        // keep UI quiet instead of surfacing noisy 404/undefined errors.
+        if (error.code === "PGRST205" || error.code === "42P01") {
+          setChanges([]);
+          return;
+        }
+        console.warn("[DoctrineProposalBanner] system_events fetch failed:", error.message);
+        setChanges([]);
+        return;
+      }
+
       setChanges(
         ((data ?? []) as Array<{ id: string; payload: Record<string, unknown>; created_at: string }>)
           .filter((row) => row.payload?.applied === true)
