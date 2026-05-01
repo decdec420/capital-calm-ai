@@ -936,6 +936,7 @@ async function runTickForUser(
   // Book-exposure cap — total notional of open positions must not exceed
   // MAX_BOOK_EXPOSURE_PCT of equity. Prevents oversizing across symbols.
   const MAX_BOOK_EXPOSURE_PCT = 0.40; // 40% of equity max
+  const equity = acct ? Number(acct.equity) : 0;
   if (equity > 0) {
     const bookNotional = (openTrades ?? []).reduce((sum: number, t: { entry_price?: number; size?: number }) => {
       const notional = (Number(t.entry_price ?? 0)) * (Number(t.size ?? 0));
