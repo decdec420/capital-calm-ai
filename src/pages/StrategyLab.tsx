@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { EmptyState } from "@/components/trader/EmptyState";
