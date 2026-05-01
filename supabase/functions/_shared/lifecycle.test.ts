@@ -180,3 +180,42 @@ Deno.test("evaluateTradeInCandle — no trigger returns hold", () => {
   });
   assertEquals(r.type, "hold");
 });
+
+Deno.test("evaluateTradeInCandle — tight TP1 fires when bar high tagged it (spot below)", () => {
+  // Simulates the post-fix MTM realism: spot is currently 100.40 but the
+  // most-recent 1m bar wicked up to 100.55 — TP1 at 100.50 must fire.
+  const r = evaluateTradeInCandle({
+    side: "long",
+    entryPrice: 100,
+    stopPrice: 99,           // 1% stop
+    tp1Price: 100.5,         // 0.5R TP1 (small-account tier)
+    tp2Price: 102,
+    originalSize: 1,
+    remainingSize: 1,
+    tp1Filled: false,
+    candle: { high: 100.55, low: 99.95, close: 100.4 },
+  });
+  assertEquals(r.type, "tp1_fill");
+  if (r.type === "tp1_fill") {
+    assertEquals(r.fillPrice, 100.5);
+    assertEquals(r.newStop, 100); // breakeven = entry
+    assertEquals(r.closedQty, 0.5);
+  }
+});
+
+Deno.test("evaluateTradeInCandle — flat synthetic bar (spot only) does NOT fire TP1 below it", () => {
+  // Pre-fix behaviour: when 1m fetch fails we fall back to high=low=close=spot.
+  // Spot 100.40 with TP1 at 100.50 must remain hold (no synthetic spike).
+  const r = evaluateTradeInCandle({
+    side: "long",
+    entryPrice: 100,
+    stopPrice: 99,
+    tp1Price: 100.5,
+    tp2Price: 102,
+    originalSize: 1,
+    remainingSize: 1,
+    tp1Filled: false,
+    candle: { high: 100.4, low: 100.4, close: 100.4 },
+  });
+  assertEquals(r.type, "hold");
+});

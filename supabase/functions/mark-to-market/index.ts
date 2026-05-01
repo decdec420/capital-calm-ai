@@ -23,7 +23,9 @@
 // ============================================================
 
 import {
+  fetchCandles1m,
   fetchTickers,
+  type Candle,
   type Symbol,
   type Ticker,
 } from "../_shared/market.ts";
@@ -70,13 +72,24 @@ interface OpenTradeRow {
   notes: string | null;
 }
 
-// Convert a live ticker into a fake 1-bar "candle" so we can reuse
-// the in-candle FSM for TP1/TP2/stop evaluation.
-function tickerToSyntheticCandle(t: Ticker) {
-  const p = t.price;
-  // We don't know the intra-window high/low since we're using spot.
-  // Use price itself as both — this is the conservative assumption:
-  // trigger only on the current tick's price, not on spikes we didn't see.
+// Build a realistic 1-bar "candle" for the FSM. We prefer the most recent
+// completed 1m bar's high/low (so TP/stop fire when the *bar* tagged the
+// level — same realism as the loss path) and merge in the current spot
+// price as the close. If the 1m fetch failed for any reason, we fall back
+// to a flat synthetic bar built from spot, which is conservative: only the
+// current tick can trigger an exit.
+function buildEvaluationCandle(
+  ticker: Ticker,
+  recent1m: Candle | null,
+): { high: number; low: number; close: number } {
+  const p = ticker.price;
+  if (recent1m && Number.isFinite(recent1m.h) && Number.isFinite(recent1m.l)) {
+    return {
+      high: Math.max(recent1m.h, p),
+      low: Math.min(recent1m.l, p),
+      close: p,
+    };
+  }
   return { high: p, low: p, close: p };
 }
 
@@ -155,6 +168,24 @@ async function runMarkToMarket(
   );
   const tickers = await fetchTickers(uniqueSymbols);
 
+  // Pull the most-recent completed 1m candle per symbol so the FSM can
+  // evaluate TP1/TP2/stop using the bar high/low — the same realism the
+  // stop path always assumed. If a fetch fails, we fall back to spot only.
+  const recent1m: Partial<Record<Symbol, Candle>> = {};
+  await Promise.all(
+    uniqueSymbols.map(async (sym) => {
+      try {
+        const candles = await fetchCandles1m(sym);
+        if (candles.length > 0) {
+          // fetchCandles returns ascending; take the most recent completed bar.
+          recent1m[sym] = candles[candles.length - 1];
+        }
+      } catch (e) {
+        console.warn(`[mark-to-market] 1m candle fetch failed for ${sym}:`, e);
+      }
+    }),
+  );
+
   // 2b. Determine which users have live_trading_enabled.
   //     Broker credentials are loaded once if any live user has open trades.
   const uniqueUserIds = Array.from(new Set(trades.map((t) => t.user_id)));
@@ -207,7 +238,7 @@ async function runMarkToMarket(
       originalSize,
       remainingSize: Number(t.size),
       tp1Filled: !!t.tp1_filled,
-      candle: tickerToSyntheticCandle(ticker),
+      candle: buildEvaluationCandle(ticker, recent1m[t.symbol as Symbol] ?? null),
       stopAtBreakeven: !!t.tp1_filled,
     });
 

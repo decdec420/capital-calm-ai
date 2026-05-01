@@ -674,13 +674,14 @@ YOUR EVALUATION FRAMEWORK:
    - 2 open positions, all different symbols: Reduce size by 25-50% (heat is elevated).
    - At max positions (${MAX_CORRELATED_POSITIONS}): VETO — hard cap enforced upstream, should not reach here.
 
-5. STOP PLACEMENT SANITY:
+5. STOP PLACEMENT SANITY (volatility-aware):
    Entry: $${entry.toFixed(2)} | Stop: $${stop.toFixed(2)} | Distance: ${((Math.abs(entry - stop) / entry) * 100).toFixed(2)}%
-   - If stop is more than 3% from entry: VETO.
-     This is too wide for $1 orders — the R is too large vs the actual dollar risk.
-   - If stop is less than 0.5% from entry: VETO.
-     This is too tight. Noise will stop you out constantly.
-   - 0.8-2.0%: Ideal stop placement for crypto on 1h chart.
+   The stop must sit OUTSIDE typical 1h noise but INSIDE a sane bleed budget:
+   - If stop is less than 0.5% from entry: VETO. Noise will stop you out constantly.
+   - If stop is more than 3.5% from entry AND the entry is NOT adjacent to a clear
+     structural level (HL, swing low, VWAP, prior breakout): VETO. Stop is in open space.
+   - 0.8-2.5%: Ideal for crypto on the 1h chart in normal vol regimes.
+   - 2.5-3.5%: Acceptable ONLY if entry sits at structure (then size auto-shrinks via risk math).
 
 OUTPUT: approve (trade is good as proposed) / reduce_size with multiplier 0.25-0.75 /
 veto with specific reason. Be decisive. No maybes.
@@ -1779,11 +1780,23 @@ async function runTickForUser(
   );
   const coachVerdict = computeCoachVerdict(sameSidedRecent);
 
-  // Stop fallback uses the strategy's stop_atr_mult so the param actually
-  // changes live trades, not just backtests. We approximate ATR as 1% of
-  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
-  // already exposes annualizedVolPct if a future revision wants tighter.
-  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
+  // Stop fallback uses the strategy's stop_atr_mult AGAINST a real volatility
+  // read from the regime block. Previously we approximated ATR as a flat 1%
+  // of price — which on choppy crypto sat the stop *inside* the noise band
+  // and got clipped by routine wicks. Now we derive the per-bar % volatility
+  // from the regime's annualizedVolPct (1h candle stdev × √(24×365)) and
+  // require the stop to sit OUTSIDE one bar of typical motion.
+  //
+  //   barVolPct ≈ annualizedVolPct% / √(24 × 365)
+  //
+  // Floor at 0.6% (don't get noise-stopped on quiet days), cap at 2.5%
+  // (don't bleed too much on a single trade if vol is huge).
+  const annualizedVolPct = winner.regime?.annualizedVolPct ?? 60; // % (e.g. 60 = 60%)
+  const barVolPct = (annualizedVolPct / 100) / Math.sqrt(24 * 365); // fraction (e.g. 0.012 = 1.2%)
+  const fallbackStopPct = Math.max(
+    0.006,
+    Math.min(0.025, stratStopAtrMult * barVolPct),
+  );
   const stop = Number(
     decision.proposed_stop ??
       (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
@@ -1882,9 +1895,18 @@ async function runTickForUser(
         ? entry + riskPerUnit * stratTpRMult
         : entry - riskPerUnit * stratTpRMult),
   );
+  // TP1 multiple — tiered by account size.
+  // On small accounts ($1 or less per order) the 1R TP1 was statistically
+  // never hit before the stop did because spread/noise eats the move
+  // before price travels a full R. Drop TP1 to 0.5R so half the position
+  // banks profit on the first push and the runner trails to TP2.
+  // Larger accounts keep the standard 1R ladder.
+  const tp1RMult = sizeUsd < 1.0 ? 0.5 : 1.0;
   const tp1 = Number(
     decision.proposed_tp1 ??
-      (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
+      (side === "long"
+        ? entry + riskPerUnit * tp1RMult
+        : entry - riskPerUnit * tp1RMult),
   );
 
   // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
