@@ -1894,9 +1894,18 @@ async function runTickForUser(
         ? entry + riskPerUnit * stratTpRMult
         : entry - riskPerUnit * stratTpRMult),
   );
+  // TP1 multiple — tiered by account size.
+  // On small accounts ($1 or less per order) the 1R TP1 was statistically
+  // never hit before the stop did because spread/noise eats the move
+  // before price travels a full R. Drop TP1 to 0.5R so half the position
+  // banks profit on the first push and the runner trails to TP2.
+  // Larger accounts keep the standard 1R ladder.
+  const tp1RMult = sizeUsd < 1.0 ? 0.5 : 1.0;
   const tp1 = Number(
     decision.proposed_tp1 ??
-      (side === "long" ? entry + riskPerUnit : entry - riskPerUnit),
+      (side === "long"
+        ? entry + riskPerUnit * tp1RMult
+        : entry - riskPerUnit * tp1RMult),
   );
 
   // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
