@@ -108,7 +108,7 @@ export function DeskRosterStrip({
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Strategy desk</div>
           <div className="text-sm font-medium text-foreground">Team roster</div>
         </div>
-        <Link to="/lab" className="text-xs text-primary hover:underline">
+        <Link to="/strategy" className="text-xs text-primary hover:underline">
           Open Lab →
         </Link>
       </div>
