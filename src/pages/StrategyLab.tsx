@@ -899,22 +899,17 @@ function ArchiveRow({
 // ────────────────────────────────────────────────────────────────────────
 
 /** Plain-English metric tile. */
-function FriendlyMetric({
-  label,
-  sub,
-  value,
-  hint,
-}: {
+const FriendlyMetric = React.forwardRef<HTMLDivElement, {
   label: string;
   sub: string;
   value: string;
   hint: string;
-}) {
+}>(function FriendlyMetric({ label, sub, value, hint }, ref) {
   return (
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="cursor-help">
+          <div ref={ref} className="cursor-help">
             <div className="text-xs text-muted-foreground leading-tight">{label}</div>
             <div className="text-base tabular text-foreground font-medium mt-0.5">{value}</div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
@@ -924,19 +919,10 @@ function FriendlyMetric({
       </Tooltip>
     </TooltipProvider>
   );
-}
+});
 
 /** Same as FriendlyMetric but shows a delta vs the live baseline. */
-function FriendlyDeltaMetric({
-  label,
-  sub,
-  cur,
-  base,
-  suffix = "",
-  inverse = false,
-  untested = false,
-  hint,
-}: {
+const FriendlyDeltaMetric = React.forwardRef<HTMLDivElement, {
   label: string;
   sub: string;
   cur: number;
@@ -945,7 +931,10 @@ function FriendlyDeltaMetric({
   inverse?: boolean;
   untested?: boolean;
   hint: string;
-}) {
+}>(function FriendlyDeltaMetric(
+  { label, sub, cur, base, suffix = "", inverse = false, untested = false, hint },
+  ref,
+) {
   let body: React.ReactNode;
   if (untested) {
     body = <div className="text-base tabular text-muted-foreground font-medium mt-0.5">—</div>;
@@ -972,7 +961,7 @@ function FriendlyDeltaMetric({
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="cursor-help">
+          <div ref={ref} className="cursor-help">
             <div className="text-xs text-muted-foreground leading-tight">{label}</div>
             {body}
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
@@ -982,7 +971,7 @@ function FriendlyDeltaMetric({
       </Tooltip>
     </TooltipProvider>
   );
-}
+});
 // ────────────────────────────────────────────────────────────────────────
 
 function StrategyDialog({
