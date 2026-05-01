@@ -846,6 +846,7 @@ export type Database = {
           parent_strategy_id: string | null
           promotion_notes: string | null
           status: string
+          symbol: string | null
           updated_at: string
           user_id: string
           version: string
@@ -863,6 +864,7 @@ export type Database = {
           parent_strategy_id?: string | null
           promotion_notes?: string | null
           status?: string
+          symbol?: string | null
           updated_at?: string
           user_id: string
           version: string
@@ -880,6 +882,7 @@ export type Database = {
           parent_strategy_id?: string | null
           promotion_notes?: string | null
           status?: string
+          symbol?: string | null
           updated_at?: string
           user_id?: string
           version?: string
@@ -901,6 +904,7 @@ export type Database = {
           continue_ids: string[]
           id: string
           kill_ids: string[]
+          needs_action: boolean
           promote_ids: string[]
           raw_analysis: Json
           reviewed_at: string
@@ -917,6 +921,7 @@ export type Database = {
           continue_ids?: string[]
           id?: string
           kill_ids?: string[]
+          needs_action?: boolean
           promote_ids?: string[]
           raw_analysis?: Json
           reviewed_at?: string
@@ -933,6 +938,7 @@ export type Database = {
           continue_ids?: string[]
           id?: string
           kill_ids?: string[]
+          needs_action?: boolean
           promote_ids?: string[]
           raw_analysis?: Json
           reviewed_at?: string
@@ -1182,6 +1188,7 @@ export type Database = {
           id: string
           lifecycle_phase: string
           lifecycle_transitions: Json
+          paper_grade: boolean
           proposed_entry: number
           proposed_stop: number | null
           proposed_target: number | null
@@ -1217,6 +1224,7 @@ export type Database = {
           id?: string
           lifecycle_phase?: string
           lifecycle_transitions?: Json
+          paper_grade?: boolean
           proposed_entry: number
           proposed_stop?: number | null
           proposed_target?: number | null
@@ -1252,6 +1260,7 @@ export type Database = {
           id?: string
           lifecycle_phase?: string
           lifecycle_transitions?: Json
+          paper_grade?: boolean
           proposed_entry?: number
           proposed_stop?: number | null
           proposed_target?: number | null
