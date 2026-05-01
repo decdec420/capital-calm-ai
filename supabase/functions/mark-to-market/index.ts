@@ -72,13 +72,24 @@ interface OpenTradeRow {
   notes: string | null;
 }
 
-// Convert a live ticker into a fake 1-bar "candle" so we can reuse
-// the in-candle FSM for TP1/TP2/stop evaluation.
-function tickerToSyntheticCandle(t: Ticker) {
-  const p = t.price;
-  // We don't know the intra-window high/low since we're using spot.
-  // Use price itself as both — this is the conservative assumption:
-  // trigger only on the current tick's price, not on spikes we didn't see.
+// Build a realistic 1-bar "candle" for the FSM. We prefer the most recent
+// completed 1m bar's high/low (so TP/stop fire when the *bar* tagged the
+// level — same realism as the loss path) and merge in the current spot
+// price as the close. If the 1m fetch failed for any reason, we fall back
+// to a flat synthetic bar built from spot, which is conservative: only the
+// current tick can trigger an exit.
+function buildEvaluationCandle(
+  ticker: Ticker,
+  recent1m: Candle | null,
+): { high: number; low: number; close: number } {
+  const p = ticker.price;
+  if (recent1m && Number.isFinite(recent1m.h) && Number.isFinite(recent1m.l)) {
+    return {
+      high: Math.max(recent1m.h, p),
+      low: Math.min(recent1m.l, p),
+      close: p,
+    };
+  }
   return { high: p, low: p, close: p };
 }
 
