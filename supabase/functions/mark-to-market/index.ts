@@ -168,6 +168,24 @@ async function runMarkToMarket(
   );
   const tickers = await fetchTickers(uniqueSymbols);
 
+  // Pull the most-recent completed 1m candle per symbol so the FSM can
+  // evaluate TP1/TP2/stop using the bar high/low — the same realism the
+  // stop path always assumed. If a fetch fails, we fall back to spot only.
+  const recent1m: Partial<Record<Symbol, Candle>> = {};
+  await Promise.all(
+    uniqueSymbols.map(async (sym) => {
+      try {
+        const candles = await fetchCandles1m(sym);
+        if (candles.length > 0) {
+          // fetchCandles returns ascending; take the most recent completed bar.
+          recent1m[sym] = candles[candles.length - 1];
+        }
+      } catch (e) {
+        console.warn(`[mark-to-market] 1m candle fetch failed for ${sym}:`, e);
+      }
+    }),
+  );
+
   // 2b. Determine which users have live_trading_enabled.
   //     Broker credentials are loaded once if any live user has open trades.
   const uniqueUserIds = Array.from(new Set(trades.map((t) => t.user_id)));
