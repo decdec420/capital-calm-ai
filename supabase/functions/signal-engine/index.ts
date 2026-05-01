@@ -1139,7 +1139,7 @@ async function runTickForUser(
   };
 
   // Equity & daily counters for the risk gate.
-  const equity = acct ? Number(acct.equity) : 0;
+  // equity already computed earlier in this function for the book-exposure gate.
   // Resolve per-user effective doctrine caps from settings + live equity.
   // Authoritative source for max-order USD, daily-loss USD, kill-switch floor.
   const resolvedDoctrine: ResolvedDoctrine = resolveDoctrine(settingsRow, equity);
