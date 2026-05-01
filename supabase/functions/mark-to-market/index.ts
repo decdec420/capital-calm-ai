@@ -23,7 +23,9 @@
 // ============================================================
 
 import {
+  fetchCandles1m,
   fetchTickers,
+  type Candle,
   type Symbol,
   type Ticker,
 } from "../_shared/market.ts";
