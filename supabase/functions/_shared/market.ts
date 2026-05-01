@@ -165,6 +165,19 @@ export class MarketHealthTracker {
 // ─── Public fetchers ───────────────────────────────────────────────
 
 /**
+ * Fetch 1-minute candles. Used by mark-to-market so TP1/TP2 fire when
+ * the recent bar high/low actually tagged the level — not only when the
+ * current spot tick is sitting beyond it. Mirrors the realism of the
+ * stop path, which has always used the bar low.
+ */
+export async function fetchCandles1m(
+  symbol: Symbol,
+  ctx: MarketFetchContext = {},
+): Promise<Candle[]> {
+  return fetchCandles(symbol, 60, ctx, "1m");
+}
+
+/**
  * Fetch 15-minute candles for entry timing.
  * Used by the signal engine to confirm whether the 1h setup is right
  * NOW (15m momentum cooperating) or whether to wait for a better tick.
