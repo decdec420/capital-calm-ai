@@ -1779,11 +1779,23 @@ async function runTickForUser(
   );
   const coachVerdict = computeCoachVerdict(sameSidedRecent);
 
-  // Stop fallback uses the strategy's stop_atr_mult so the param actually
-  // changes live trades, not just backtests. We approximate ATR as 1% of
-  // price (decent rough constant for hourly BTC/ETH/SOL); the regime block
-  // already exposes annualizedVolPct if a future revision wants tighter.
-  const fallbackStopPct = Math.max(0.004, Math.min(0.04, stratStopAtrMult * 0.01));
+  // Stop fallback uses the strategy's stop_atr_mult AGAINST a real volatility
+  // read from the regime block. Previously we approximated ATR as a flat 1%
+  // of price — which on choppy crypto sat the stop *inside* the noise band
+  // and got clipped by routine wicks. Now we derive the per-bar % volatility
+  // from the regime's annualizedVolPct (1h candle stdev × √(24×365)) and
+  // require the stop to sit OUTSIDE one bar of typical motion.
+  //
+  //   barVolPct ≈ annualizedVolPct% / √(24 × 365)
+  //
+  // Floor at 0.6% (don't get noise-stopped on quiet days), cap at 2.5%
+  // (don't bleed too much on a single trade if vol is huge).
+  const annualizedVolPct = winner.regime?.annualizedVolPct ?? 60; // % (e.g. 60 = 60%)
+  const barVolPct = (annualizedVolPct / 100) / Math.sqrt(24 * 365); // fraction (e.g. 0.012 = 1.2%)
+  const fallbackStopPct = Math.max(
+    0.006,
+    Math.min(0.025, stratStopAtrMult * barVolPct),
+  );
   const stop = Number(
     decision.proposed_stop ??
       (side === "long" ? entry * (1 - fallbackStopPct) : entry * (1 + fallbackStopPct)),
