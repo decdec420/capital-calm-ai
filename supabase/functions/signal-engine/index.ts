@@ -936,6 +936,7 @@ async function runTickForUser(
   // Book-exposure cap — total notional of open positions must not exceed
   // MAX_BOOK_EXPOSURE_PCT of equity. Prevents oversizing across symbols.
   const MAX_BOOK_EXPOSURE_PCT = 0.40; // 40% of equity max
+  const equity = acct ? Number(acct.equity) : 0;
   if (equity > 0) {
     const bookNotional = (openTrades ?? []).reduce((sum: number, t: { entry_price?: number; size?: number }) => {
       const notional = (Number(t.entry_price ?? 0)) * (Number(t.size ?? 0));
@@ -1138,7 +1139,7 @@ async function runTickForUser(
   };
 
   // Equity & daily counters for the risk gate.
-  const equity = acct ? Number(acct.equity) : 0;
+  // equity already computed earlier in this function for the book-exposure gate.
   // Resolve per-user effective doctrine caps from settings + live equity.
   // Authoritative source for max-order USD, daily-loss USD, kill-switch floor.
   const resolvedDoctrine: ResolvedDoctrine = resolveDoctrine(settingsRow, equity);
