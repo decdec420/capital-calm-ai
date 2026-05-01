@@ -238,7 +238,7 @@ async function runMarkToMarket(
       originalSize,
       remainingSize: Number(t.size),
       tp1Filled: !!t.tp1_filled,
-      candle: tickerToSyntheticCandle(ticker),
+      candle: buildEvaluationCandle(ticker, recent1m[t.symbol as Symbol] ?? null),
       stopAtBreakeven: !!t.tp1_filled,
     });
 
