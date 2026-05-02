@@ -1,81 +1,72 @@
-## Brain Trust audit — findings
+## Brain Trust — make it feel live
 
-The Brain Trust (Hall / Dollar Bill / Mafee in `market-intelligence`) is silently skipping every symbol on every cron tick. Logs show, on a tight loop:
+You want Hall, Dollar Bill, and Mafee responsive instead of cached for 4h. Plan below makes the desk feel live every minute while protecting against gateway rate limits and pointless re-runs.
 
-```
-No candles for BTC-USD; skipping AI experts.
-No candles for ETH-USD; skipping AI experts.
-No candles for SOL-USD; skipping AI experts.
-```
+### Refresh model (per 1-min cron tick, per symbol)
 
-This means **no expert ever runs**, so `market_intelligence` rows never refresh. Trade decisions downstream that read this row are getting stale or null intel — which is part of why Bobby/Wags say the desk feels blind.
+| Expert | Cadence | Why |
+|---|---|---|
+| **Mafee** (pattern + `recent_momentum_1h`/`4h`) | **Every minute** | This is the live tape read. Engine already gates on `recent_momentum_at` freshness. |
+| **Dollar Bill** (funding signal + sentiment + news_flags) | **Every 5 min** OR sooner if a new news item appears | Funding rate updates every 8h on Binance, Fear&Greed updates daily — calling Bill every minute is paying Gemini to read the same numbers. |
+| **Hall** (macro phase, trend, S/R, narrative) | **Every 15 min** OR sooner if price breaks his stated `nearest_support`/`nearest_resistance` | Wyckoff phase doesn't change in 60 seconds. Event-driven re-run handles real regime shifts. |
 
-### Root cause
+External data fetchers also get short caches so we don't spam free APIs:
+- Coinbase candles: per-fetch (already retried via `_shared/market.ts`)
+- Funding rate: 5 min cache
+- Fear & Greed: 30 min cache
+- CryptoPanic news: 5 min cache
 
-`supabase/functions/market-intelligence/index.ts` has its **own private** `fetchCoinbaseCandles` (lines 611–622):
+### Soft staleness gating (signal-engine)
 
-```text
-fetch(`${CB}/products/${symbol}/candles?granularity=…`)
-  → if !ok throw
-  → no retry, no User-Agent, no backoff
-```
-
-It is then called for 3 granularities in parallel via `Promise.allSettled` (line 643). When any one throws (Coinbase intermittently returns 429 or 5xx to edge-runtime IPs, especially when 6 parallel requests fire), `allSettled` swallows the rejection. We log only the generic "No candles" line — the actual HTTP status / error message is lost.
-
-The rest of the codebase (signal-engine, mark-to-market) uses `_shared/market.ts → fetchCandles()` which already has:
-- exponential backoff (1s / 2s) on 429 + 5xx
-- proper error surfacing
-- health tracking via `MarketFetchTracker`
-
-`market-intelligence` is the only consumer that bypasses it, and it's the only one failing.
-
-### Secondary observations
-
-- Cron fires every ~1 minute (logs show ~60s cadence), but Brain Trust is documented as a 4-hour cadence. Even when candles work, we'd be calling Lovable AI 9× per minute. That's wasteful and may be causing rate-limit pressure on the AI gateway too.
-- `news_flags` / funding / Fear&Greed are best-effort — fine as-is.
-- `EXPERT_MODEL = google/gemini-2.5-flash` — fine, available in our gateway.
-
-## Plan
-
-### 1. Replace the local Coinbase fetcher with the shared one
-
-In `supabase/functions/market-intelligence/index.ts`:
-
-- Import `fetchCandles` from `../_shared/market.ts`.
-- Delete the local `fetchCoinbaseCandles` function and the local `CB` constant.
-- Adapt the call sites to the `Candle` shape returned by the shared fetcher (`{t,o,h,l,c,v}`) — update `runMacroStrategist` / `runPatternSpecialist` accordingly, since they currently index raw arrays (`c[0]`, `c[2]`, etc.).
-- For the 6h granularity (21600s) the shared fetcher accepts it directly.
-
-This buys us retries, correct error surfacing, and consistent health tracking.
-
-### 2. Surface the real failure reason
-
-Replace the swallowed `Promise.allSettled` block with explicit per-fetch handling so the log line becomes, e.g.:
+Add to the conviction scoring — don't block trades, just dial down confidence when intel is stale:
 
 ```text
-[brain-trust] BTC-USD candle fetch failed (6h): HTTP 429 — skipping experts
+mafee_age = now - market_intelligence.recent_momentum_at
+if mafee_age > 5 min:  setup_score *= 0.85
+if mafee_age > 15 min: setup_score *= 0.65 + log warning
+hall_age = now - market_intelligence.generated_at
+if hall_age > 60 min:  setup_score *= 0.90
 ```
 
-Keep using `Promise.allSettled` for parallelism, but inspect each rejection and log the `.reason.message`. Still skip the symbol if either 6h or 1d is empty, but at least we know *why*.
+This keeps the bot trading during gateway hiccups but forces it to be more selective. A 0.55 setup_score that drops to 0.47 because intel is stale will fail the conviction bar naturally.
 
-### 3. Throttle the cron schedule
+### Implementation
 
-Brain Trust narrative is meant to be a 4h cadence. Add a short-circuit at the top of `runIntelligenceForSymbol` for the cron path:
+**1. `supabase/functions/market-intelligence/index.ts`**
+- Replace the single `BRAIN_TRUST_FRESHNESS_MS` with per-expert freshness windows.
+- Refactor `runIntelligenceForSymbol` so each expert is gated independently:
+  - Read prior row → compute `mafeeAge`, `billAge`, `hallAge`.
+  - Always call Mafee (with 1h candles).
+  - Call Bill only if `billAge > 5min` OR `news_flags` changed since last run.
+  - Call Hall only if `hallAge > 15min` OR current spot crossed prior `nearest_support`/`nearest_resistance`.
+  - When an expert is skipped, carry over its previous fields into the upsert so the row stays whole.
+- Add module-level memoized fetchers for funding / fear-greed / news with the cache TTLs above.
+- Keep `skipFreshness: true` for on-demand UI calls (refresh button always runs all three).
 
-- Look up `market_intelligence.generated_at` for `(user_id, symbol)`.
-- If `now() - generated_at < 4 hours`, log "fresh, skip" and return without calling the AI or Coinbase.
+**2. `supabase/functions/signal-engine/index.ts`**
+- After loading `market_intelligence`, compute `mafeeAge` and `hallAge`, apply the multiplicative penalties above to `setup_score` before the conviction gate.
+- Log the penalty in `gateReasons` so the UI can explain "Setup score reduced 15% — Mafee read 7m old".
+- Surface a stale_intel reason in `system_state.last_engine_snapshot.gateReasons` when intel is older than 15min, so the operator can see it on the desk strip.
 
-On-demand calls (signed-in user hitting "Refresh") still bypass this freshness check. This both saves cost and avoids hammering Coinbase.
+**3. Cron schedule**
+- Confirm `market-intelligence` cron runs every 1 minute (it already does — same token as `signal-engine`). No DB change needed.
 
-### 4. Verify
+**4. Verify**
+- `supabase--curl_edge_functions` POST `/market-intelligence` twice within 60s → second call should log "Mafee ran, Bill skipped (cached 12s), Hall skipped (cached 12s)".
+- `select symbol, generated_at, recent_momentum_at from market_intelligence` taken 5 min apart → `recent_momentum_at` advances every minute, `generated_at` (Hall stamp) only every 15 min.
+- Edge function logs → no 429s from Lovable AI gateway.
+- A signal proposed during stale-intel period shows the penalty in `gateReasons`.
 
-- `supabase--curl_edge_functions` POST to `/market-intelligence` with cron token → expect at least one symbol with `ok: true` and a non-null `candle_count_4h` in the database.
-- Tail `edge-function-logs-market-intelligence` → no more "No candles" lines on the next cron cycle (or, if Coinbase truly is failing, we now see the HTTP code).
-- `select symbol, generated_at, candle_count_4h, candle_count_1d from market_intelligence order by generated_at desc limit 10;` → rows refreshing per symbol.
+### Cost envelope (1 user, 3 symbols)
 
-### Out of scope (note for follow-up)
+- Mafee: 3 × 60 = **180 calls/hr** (the "live" feel)
+- Bill: 3 × 12 = **36 calls/hr**
+- Hall: 3 × 4 = **12 calls/hr** (+ event-driven extras)
+- **Total: ~228 AI calls/hr** vs 540 if we ran all three every minute. Same live feel on the part that matters; ~2.4× cheaper; far below any gateway throttle.
 
-- Tuning the Brain Trust cron interval in `supabase/config.toml` if cron is currently set tighter than 4h.
-- Renaming the local field-index assumptions in the AI prompts (already covered in step 1).
+### Out of scope (note for later)
 
-Approve and I'll implement all four steps and verify against the live function.
+- Per-symbol parallelism inside one cron tick (currently sequential). Worth doing if we add a 2nd user.
+- Pushing Brain Trust output over Realtime so the UI updates without polling.
+
+Approve and I'll implement, deploy, and verify.
