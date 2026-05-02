@@ -132,16 +132,22 @@ export default function Copilot() {
     const load = async () => {
       const { data } = await supabase
         .from("market_intelligence")
-        .select("symbol, generated_at");
+        .select("symbol, generated_at, recent_momentum_at");
       if (data) {
-        const map: Record<string, string> = {};
+        const macroMap: Record<string, string> = {};
+        const momMap: Record<string, string> = {};
         for (const row of data) {
-          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+          if (row.symbol && row.generated_at) macroMap[row.symbol] = row.generated_at;
+          if (row.symbol && row.recent_momentum_at) momMap[row.symbol] = row.recent_momentum_at;
         }
-        setIntelTimestamps(map);
+        setIntelTimestamps(macroMap);
+        setMomentumTimestamps(momMap);
       }
     };
     load();
+    // Refresh every 30s so the strip doesn't go stale while the user sits.
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   // Agent health — refreshed every 30s. Drives pipeline-strip dot colors.
