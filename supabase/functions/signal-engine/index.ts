@@ -50,6 +50,13 @@ import {
   type ResolvedDoctrine,
 } from "../_shared/doctrine-resolver.ts";
 import {
+  composeOverlay,
+  selectActiveWindowMode,
+  selectDrawdownStep,
+  type DoctrineOverlay,
+  type DoctrineWindowRow,
+} from "../_shared/doctrine-modes.ts";
+import {
   appendTransition,
   transitionSignal,
   transitionTrade,
