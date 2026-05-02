@@ -677,7 +677,7 @@ execution engine will refuse to propose any trade for this symbol.
           "ONE sentence explaining the recent momentum read — what just happened on the tape that drove these calls.",
       },
     },
-  });
+  }, MAFEE_MODEL);
 }
 
 // ─── Main Intelligence Loop ──────────────────────────────────────
@@ -783,12 +783,18 @@ async function runIntelligenceForSymbol(
   }
 
   // ── Run the experts that are due ────────────────────────────────
+  // Build per-expert peer-context blocks from the prior row so each expert
+  // sees what its teammates last said (regime, env_rating, momentum, S/R).
+  const peerForHall  = buildPeerContext(prev, "hall");
+  const peerForBill  = buildPeerContext(prev, "bill");
+  const peerForMafee = buildPeerContext(prev, "mafee");
+
   const ran: string[] = [];
   const macroPromise = runHall
-    ? runMacroStrategist(apiKey, symbol, candles6h, candles1d, previousNarrative)
+    ? runMacroStrategist(apiKey, symbol, candles6h, candles1d, previousNarrative, peerForHall)
     : Promise.resolve(null);
   const cryptoPromise = runBill
-    ? runCryptoIntelAnalyst(apiKey, symbol, funding, fg, news, previousNarrative)
+    ? runCryptoIntelAnalyst(apiKey, symbol, funding, fg, news, previousNarrative, peerForBill)
     : Promise.resolve(null);
 
   const [macroResult, cryptoResult] = await Promise.all([macroPromise, cryptoPromise]);
@@ -811,6 +817,7 @@ async function runIntelligenceForSymbol(
         supportForMafee ?? null,
         resistanceForMafee ?? null,
         previousNarrative,
+        peerForMafee,
       )
     : null;
   if (canRunMafee) ran.push(patternResult ? "Mafee" : "Mafee(failed)");
