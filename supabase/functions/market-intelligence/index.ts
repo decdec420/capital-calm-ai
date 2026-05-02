@@ -50,9 +50,61 @@ const json = (b: unknown, s = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-// Brain Trust uses Gemini 2.5 Flash — strong reasoning, available in Lovable gateway.
-// (gemini-2.5-pro is not available in this gateway tier; 2.5-flash matches Katrina's model)
-const EXPERT_MODEL = "google/gemini-2.5-flash";
+// Per-expert model assignment. Mafee runs every minute on a tightly-scoped
+// numeric task → cheaper flash-lite is plenty. Hall and Bill reason over text-
+// heavy macro/news context less frequently → standard flash for nuance.
+const HALL_MODEL  = "google/gemini-2.5-flash";
+const BILL_MODEL  = "google/gemini-2.5-flash";
+const MAFEE_MODEL = "google/gemini-2.5-flash-lite";
+
+// Shared preamble prepended to every expert's system prompt. Eliminates the
+// duplicated desk-context, voice rules, and shared vocabulary that used to live
+// in all three expert prompts. ~30 lines saved per call × 3 experts.
+const BRAIN_TRUST_PREAMBLE = `
+You are an expert on the Axe Capital crypto trading desk. The desk runs three
+experts in parallel — Hall (macro structure), Dollar Bill (derivatives + news),
+Mafee (chart patterns + momentum) — coordinated by Bobby (commander) and gated
+by Chuck (risk). Your output feeds Taylor's signal scoring and Bobby's decisions.
+
+Voice: senior desk trader briefing a sharp PM. Terse, opinionated, no hedging
+filler. Every sentence earns its place. Concrete prices, not generic words.
+
+Shared vocabulary (use consistently across the desk):
+- regime / market_phase: accumulation | markup | distribution | markdown
+- trend_structure: uptrend | downtrend | range | transitioning
+- environment_rating: highly_favorable | favorable | neutral | unfavorable | highly_unfavorable
+- bias scale: strong_long | lean_long | neutral | lean_short | strong_short
+
+Output discipline: respond ONLY via the structured tool call schema you are
+given. No preamble, no markdown, no explanations outside the schema fields.
+Calibration matters — 0.5 means genuinely uncertain, not a polite hedge.
+`.trim();
+
+function buildPeerContext(prev: Record<string, unknown> | null, exclude: "hall" | "bill" | "mafee"): string {
+  if (!prev) return "Peer desk read: first run — no prior peer context available.";
+  const lines: string[] = ["Peer desk read (carried from last cycle):"];
+  if (exclude !== "hall") {
+    const phase = prev.market_phase ?? "unknown";
+    const trend = prev.trend_structure ?? "unknown";
+    const sup = prev.nearest_support != null ? `$${Number(prev.nearest_support).toFixed(2)}` : "n/a";
+    const res = prev.nearest_resistance != null ? `$${Number(prev.nearest_resistance).toFixed(2)}` : "n/a";
+    lines.push(`- Hall (macro): phase=${phase}, trend=${trend}, S=${sup}, R=${res}`);
+  }
+  if (exclude !== "bill") {
+    const env = prev.environment_rating ?? "neutral";
+    const fund = prev.funding_rate_signal ?? "neutral";
+    const fg = prev.fear_greed_label ?? "n/a";
+    const flagCount = Array.isArray(prev.news_flags) ? (prev.news_flags as unknown[]).length : 0;
+    lines.push(`- Bill (intel): env=${env}, funding=${fund}, F&G=${fg}, news_flags=${flagCount}`);
+  }
+  if (exclude !== "mafee") {
+    const m1h = prev.recent_momentum_1h ?? "n/a";
+    const m4h = prev.recent_momentum_4h ?? "n/a";
+    lines.push(`- Mafee (tape): 1h=${m1h}, 4h=${m4h}`);
+  }
+  lines.push("Use this as context — do NOT just restate it. Your job is your own read.");
+  return lines.join("\n");
+}
 
 // ─── Free External Data Fetchers ────────────────────────────────
 
