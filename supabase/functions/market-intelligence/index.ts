@@ -659,46 +659,59 @@ async function runIntelligenceForSymbol(
   symbol: Symbol,
   apiKey: string,
   opts: { skipFreshness?: boolean } = {},
-): Promise<{ skipped?: "fresh" | "no_candles"; reason?: string } | void> {
-  // Load previous Brain Trust output for narrative continuity + freshness check.
+): Promise<{ skipped?: "fresh" | "no_candles"; reason?: string; ran?: string[] } | void> {
+  // Load full prior row so we can carry over fields for any expert we skip.
   const { data: prevRow } = await admin
     .from("market_intelligence")
-    .select("running_narrative, generated_at")
+    .select("*")
     .eq("user_id", userId)
     .eq("symbol", symbol)
     .maybeSingle();
-  const prev = prevRow as { running_narrative?: string | null; generated_at?: string | null } | null;
-  const previousNarrative = prev?.running_narrative ?? null;
+  // deno-lint-ignore no-explicit-any
+  const prev = (prevRow ?? null) as any;
+  const previousNarrative = (prev?.running_narrative as string | null) ?? null;
 
-  // Throttle cron-driven re-runs. On-demand requests bypass via opts.skipFreshness.
-  if (!opts.skipFreshness && prev?.generated_at) {
-    const ageMs = Date.now() - new Date(prev.generated_at).getTime();
-    if (ageMs < BRAIN_TRUST_FRESHNESS_MS) {
-      const ageMin = Math.round(ageMs / 60000);
-      console.log(`[brain-trust] ${symbol} fresh (${ageMin}m old) — skip cron run`);
-      return { skipped: "fresh" };
-    }
+  // ── Tiered freshness gating per expert ──────────────────────────
+  const now = Date.now();
+  const ageMs = (iso: string | null | undefined): number =>
+    iso ? now - new Date(iso).getTime() : Number.POSITIVE_INFINITY;
+
+  const mafeeAge = ageMs(prev?.recent_momentum_at);
+  // generated_at is stamped on every Hall run; if missing, treat as infinitely stale.
+  const hallAge  = ageMs(prev?.generated_at);
+  // Bill doesn't have its own timestamp column, so we use generated_at as a
+  // conservative proxy. (Bill always co-runs with Hall on the first row.)
+  const billAge  = hallAge;
+
+  const skipFreshness = !!opts.skipFreshness;
+  const runMafee = skipFreshness || mafeeAge >= MAFEE_FRESHNESS_MS;
+  const runBill  = skipFreshness || billAge  >= BILL_FRESHNESS_MS;
+  let runHall    = skipFreshness || hallAge  >= HALL_FRESHNESS_MS;
+
+  // If nothing needs running, short-circuit completely (no fetches, no writes).
+  if (!runMafee && !runBill && !runHall) {
+    console.log(
+      `[brain-trust] ${symbol} all-fresh — Mafee ${Math.round(mafeeAge/60000)}m, Bill ${Math.round(billAge/60000)}m, Hall ${Math.round(hallAge/60000)}m`,
+    );
+    return { skipped: "fresh" };
   }
 
-  // Fetch candles + free external data + news in parallel.
-  // Use the shared fetcher (`_shared/market.ts`) — it has retry/backoff on
-  // 429 + 5xx, which the previous local fetcher did not.
-  const [c1hRes, c4hRes, c1dRes, fundingRes, fgRes, newsRes] = await Promise.allSettled([
-    fetchCandles(symbol, 3600),
-    fetchCandles(symbol, 21600), // 6h — nearest valid granularity (Coinbase doesn't support 4h/14400)
-    fetchCandles(symbol, 86400),
-    fetchFundingRate(symbol),
-    fetchFearGreed(),
-    fetchCryptoNews(symbol),
+  // ── Fetch what each enabled expert needs ────────────────────────
+  // Mafee needs 1h candles; Hall needs 6h + 1d; Bill needs funding/F&G/news.
+  const need1h = runMafee || runHall; // pattern always wants 1h; Hall uses recent close for context
+  const need6h = runHall;
+  const need1d = runHall;
+
+  const [c1hRes, c6hRes, c1dRes, fundingRes, fgRes, newsRes] = await Promise.allSettled([
+    need1h ? fetchCandles(symbol, 3600)  : Promise.resolve([] as Candle[]),
+    need6h ? fetchCandles(symbol, 21600) : Promise.resolve([] as Candle[]),
+    need1d ? fetchCandles(symbol, 86400) : Promise.resolve([] as Candle[]),
+    runBill ? fetchFundingRate(symbol)   : Promise.resolve(null),
+    runBill ? fetchFearGreed()           : Promise.resolve(null),
+    runBill ? fetchCryptoNews(symbol)    : Promise.resolve([] as NewsItem[]),
   ]);
 
-  // Surface real failure reasons instead of swallowing them silently.
-  const candleResults: Array<[string, PromiseSettledResult<Candle[]>]> = [
-    ["1h", c1hRes],
-    ["6h", c4hRes],
-    ["1d", c1dRes],
-  ];
-  for (const [tf, res] of candleResults) {
+  for (const [tf, res] of [["1h", c1hRes], ["6h", c6hRes], ["1d", c1dRes]] as const) {
     if (res.status === "rejected") {
       const msg = res.reason instanceof Error ? res.reason.message : String(res.reason);
       console.error(`[brain-trust] ${symbol} candle fetch failed (${tf}): ${msg}`);
@@ -706,104 +719,156 @@ async function runIntelligenceForSymbol(
   }
 
   const candles1h = c1hRes.status === "fulfilled" ? c1hRes.value : [];
-  const candles4h = c4hRes.status === "fulfilled" ? c4hRes.value : [];
+  const candles6h = c6hRes.status === "fulfilled" ? c6hRes.value : [];
   const candles1d = c1dRes.status === "fulfilled" ? c1dRes.value : [];
-  const funding = fundingRes.status === "fulfilled" ? fundingRes.value : null;
-  const fg = fgRes.status === "fulfilled" ? fgRes.value : null;
-  const news = newsRes.status === "fulfilled" ? newsRes.value : [];
+  const funding   = fundingRes.status === "fulfilled" ? fundingRes.value : null;
+  const fg        = fgRes.status === "fulfilled" ? fgRes.value : null;
+  const news      = newsRes.status === "fulfilled" ? newsRes.value : [];
 
-  if (candles4h.length === 0 || candles1d.length === 0) {
-    const reason = `6h=${candles4h.length} 1d=${candles1d.length}`;
-    console.error(`[brain-trust] ${symbol} insufficient candles (${reason}); skipping AI experts.`);
-    return { skipped: "no_candles", reason };
+  // Hall needs 6h+1d to run meaningfully — degrade gracefully if missing.
+  if (runHall && (candles6h.length === 0 || candles1d.length === 0)) {
+    console.warn(`[brain-trust] ${symbol} Hall skipped — insufficient 6h/1d candles`);
+    runHall = false;
+  }
+  // Mafee needs 1h candles.
+  const canRunMafee = runMafee && candles1h.length > 0;
+  if (runMafee && !canRunMafee) {
+    console.warn(`[brain-trust] ${symbol} Mafee skipped — no 1h candles`);
   }
 
-  // Macro + Crypto experts run in parallel; Pattern needs S/R from Macro.
-  const [macroResult, cryptoResult] = await Promise.all([
-    runMacroStrategist(apiKey, symbol, candles4h, candles1d, previousNarrative),
-    runCryptoIntelAnalyst(apiKey, symbol, funding, fg, news, previousNarrative),
-  ]);
-
-  const patternResult = await runPatternSpecialist(
-    apiKey,
-    symbol,
-    candles1h,
-    (macroResult?.nearest_support as number | undefined) ?? null,
-    (macroResult?.nearest_resistance as number | undefined) ?? null,
-    previousNarrative,
-  );
-
-  if (!macroResult && !cryptoResult && !patternResult) {
-    console.error(`All experts failed for ${symbol}`);
-    return;
+  // Event-driven Hall trigger: if price has crossed prior S/R, force a re-run
+  // even if it's still within the 15-min cooldown (regime may have shifted).
+  if (!runHall && !skipFreshness && candles1h.length > 0 && prev) {
+    const lastClose = candles1h[candles1h.length - 1].c;
+    const prevSup = prev.nearest_support != null ? Number(prev.nearest_support) : null;
+    const prevRes = prev.nearest_resistance != null ? Number(prev.nearest_resistance) : null;
+    if ((prevSup != null && lastClose < prevSup) || (prevRes != null && lastClose > prevRes)) {
+      console.log(`[brain-trust] ${symbol} Hall force-rerun — price ${lastClose} broke S/R (${prevSup}/${prevRes})`);
+      runHall = candles6h.length > 0 && candles1d.length > 0;
+    }
   }
 
+  // If after gating nothing actually runs, exit clean.
+  if (!canRunMafee && !runBill && !runHall) {
+    return { skipped: "no_candles", reason: "no expert eligible after freshness+candle checks" };
+  }
+
+  // ── Run the experts that are due ────────────────────────────────
+  const ran: string[] = [];
+  const macroPromise = runHall
+    ? runMacroStrategist(apiKey, symbol, candles6h, candles1d, previousNarrative)
+    : Promise.resolve(null);
+  const cryptoPromise = runBill
+    ? runCryptoIntelAnalyst(apiKey, symbol, funding, fg, news, previousNarrative)
+    : Promise.resolve(null);
+
+  const [macroResult, cryptoResult] = await Promise.all([macroPromise, cryptoPromise]);
+  if (runHall) ran.push(macroResult ? "Hall" : "Hall(failed)");
+  if (runBill) ran.push(cryptoResult ? "Bill" : "Bill(failed)");
+
+  // Mafee runs after Hall (uses fresh S/R if available, else carries from prev row).
+  const supportForMafee =
+    (macroResult?.nearest_support as number | undefined) ??
+    (prev?.nearest_support != null ? Number(prev.nearest_support) : null);
+  const resistanceForMafee =
+    (macroResult?.nearest_resistance as number | undefined) ??
+    (prev?.nearest_resistance != null ? Number(prev.nearest_resistance) : null);
+
+  const patternResult = canRunMafee
+    ? await runPatternSpecialist(
+        apiKey,
+        symbol,
+        candles1h,
+        supportForMafee ?? null,
+        resistanceForMafee ?? null,
+        previousNarrative,
+      )
+    : null;
+  if (canRunMafee) ran.push(patternResult ? "Mafee" : "Mafee(failed)");
+
+  console.log(`[brain-trust] ${symbol} ran: [${ran.join(", ")}] (skipped: ${
+    [!runHall && "Hall", !runBill && "Bill", !canRunMafee && "Mafee"].filter(Boolean).join(", ") || "none"
+  })`);
+
+  // ── Build upsert: use fresh values where we ran, else carry from prev ──
+  // Carry-over helper: if expert didn't run (or returned null), keep prior value.
+  const hallVal = <T>(fresh: T | undefined, prevKey: string, fallback: T): T =>
+    fresh !== undefined && fresh !== null ? fresh : (prev?.[prevKey] ?? fallback);
+  const billVal = <T>(fresh: T | undefined, prevKey: string, fallback: T): T =>
+    fresh !== undefined && fresh !== null ? fresh : (prev?.[prevKey] ?? fallback);
+  const mafeeVal = <T>(fresh: T | undefined, prevKey: string, fallback: T): T =>
+    fresh !== undefined && fresh !== null ? fresh : (prev?.[prevKey] ?? fallback);
+
+  // updated_narrative: prefer fresh from Hall, else carry forward.
   const updatedNarrative =
     (macroResult?.updated_narrative as string | undefined)?.trim() ||
     previousNarrative ||
     null;
 
-  const newsFlags = Array.isArray(cryptoResult?.news_flags)
-    ? cryptoResult!.news_flags
-    : [];
+  // news_flags: only overwrite if Bill ran successfully.
+  const newsFlags = cryptoResult && Array.isArray(cryptoResult.news_flags)
+    ? cryptoResult.news_flags
+    : (prev?.news_flags ?? []);
+
+  // recent_momentum_at — only stamp NOW if Mafee actually returned both reads.
+  const mafeeFreshlyStamped =
+    !!(patternResult?.recent_momentum_1h && patternResult?.recent_momentum_4h);
 
   const upsertPayload = {
     user_id: userId,
     symbol,
-    macro_bias: macroResult?.macro_bias ?? "neutral",
-    macro_confidence: macroResult?.macro_confidence ?? 0.5,
-    market_phase: macroResult?.market_phase ?? "unknown",
-    trend_structure: macroResult?.trend_structure ?? "unknown",
-    nearest_support: macroResult?.nearest_support ?? null,
-    nearest_resistance: macroResult?.nearest_resistance ?? null,
-    key_level_notes: macroResult?.key_level_notes ?? "",
-    macro_summary: macroResult?.macro_summary ?? "",
-    funding_rate_signal: cryptoResult?.funding_rate_signal ?? "neutral",
-    funding_rate_pct: cryptoResult?.funding_rate_pct ?? funding,
-    fear_greed_score: cryptoResult?.fear_greed_score ?? fg?.score ?? null,
-    fear_greed_label: cryptoResult?.fear_greed_label ?? fg?.label ?? null,
-    sentiment_summary: cryptoResult?.sentiment_summary ?? "",
-    environment_rating: cryptoResult?.environment_rating ?? "neutral",
-    pattern_context: patternResult?.pattern_context ?? "",
-    entry_quality_context: patternResult?.entry_quality_context ?? "",
-    // Short-horizon momentum read (mandatory for the engine's freshness gate).
-    // Only stamp recent_momentum_at when we actually got a fresh read this run,
-    // so a partial failure doesn't masquerade as fresh data.
-    recent_momentum_1h: patternResult?.recent_momentum_1h ?? null,
-    recent_momentum_4h: patternResult?.recent_momentum_4h ?? null,
-    recent_momentum_notes: patternResult?.recent_momentum_notes ?? null,
-    recent_momentum_at:
-      patternResult?.recent_momentum_1h && patternResult?.recent_momentum_4h
-        ? new Date().toISOString()
-        : null,
+    // ── Hall (carry over when skipped) ──
+    macro_bias:           hallVal(macroResult?.macro_bias as string | undefined, "macro_bias", "neutral"),
+    macro_confidence:     hallVal(macroResult?.macro_confidence as number | undefined, "macro_confidence", 0.5),
+    market_phase:         hallVal(macroResult?.market_phase as string | undefined, "market_phase", "unknown"),
+    trend_structure:      hallVal(macroResult?.trend_structure as string | undefined, "trend_structure", "unknown"),
+    nearest_support:      hallVal(macroResult?.nearest_support as number | undefined, "nearest_support", null as number | null),
+    nearest_resistance:   hallVal(macroResult?.nearest_resistance as number | undefined, "nearest_resistance", null as number | null),
+    key_level_notes:      hallVal(macroResult?.key_level_notes as string | undefined, "key_level_notes", ""),
+    macro_summary:        hallVal(macroResult?.macro_summary as string | undefined, "macro_summary", ""),
+    // ── Bill (carry over when skipped) ──
+    funding_rate_signal:  billVal(cryptoResult?.funding_rate_signal as string | undefined, "funding_rate_signal", "neutral"),
+    funding_rate_pct:     billVal(cryptoResult?.funding_rate_pct as number | undefined, "funding_rate_pct", funding),
+    fear_greed_score:     billVal(cryptoResult?.fear_greed_score as number | undefined, "fear_greed_score", fg?.score ?? null),
+    fear_greed_label:     billVal(cryptoResult?.fear_greed_label as string | undefined, "fear_greed_label", fg?.label ?? null),
+    sentiment_summary:    billVal(cryptoResult?.sentiment_summary as string | undefined, "sentiment_summary", ""),
+    environment_rating:   billVal(cryptoResult?.environment_rating as string | undefined, "environment_rating", "neutral"),
+    // ── Mafee (carry over when skipped — momentum_at only refreshes on a real run) ──
+    pattern_context:        mafeeVal(patternResult?.pattern_context as string | undefined, "pattern_context", ""),
+    entry_quality_context:  mafeeVal(patternResult?.entry_quality_context as string | undefined, "entry_quality_context", ""),
+    recent_momentum_1h:     mafeeVal(patternResult?.recent_momentum_1h as string | undefined, "recent_momentum_1h", null as string | null),
+    recent_momentum_4h:     mafeeVal(patternResult?.recent_momentum_4h as string | undefined, "recent_momentum_4h", null as string | null),
+    recent_momentum_notes:  mafeeVal(patternResult?.recent_momentum_notes as string | undefined, "recent_momentum_notes", null as string | null),
+    recent_momentum_at:     mafeeFreshlyStamped
+      ? new Date().toISOString()
+      : (prev?.recent_momentum_at ?? null),
+    // ── Shared / always update ──
     running_narrative: updatedNarrative,
     news_flags: newsFlags,
-    generated_at: new Date().toISOString(),
-    candle_count_1h: candles1h.length,
-    candle_count_4h: candles4h.length,
-    candle_count_1d: candles1d.length,
+    // generated_at advances whenever Hall runs (so hallAge math works next tick).
+    // If only Mafee/Bill ran, keep prior generated_at so Hall's cooldown is honored.
+    generated_at: runHall && macroResult
+      ? new Date().toISOString()
+      : (prev?.generated_at ?? new Date().toISOString()),
+    candle_count_1h: candles1h.length || (prev?.candle_count_1h ?? 0),
+    candle_count_4h: candles6h.length || (prev?.candle_count_4h ?? 0),
+    candle_count_1d: candles1d.length || (prev?.candle_count_1d ?? 0),
   };
-
-  console.log(`[upsert] ${userId}/${symbol} payload keys: ${Object.keys(upsertPayload).join(", ")}`);
 
   const { data: upsertData, error } = await admin
     .from("market_intelligence")
     .upsert(upsertPayload, { onConflict: "user_id,symbol" })
-    .select("id, user_id, symbol, generated_at");
-
-  console.log(`[upsert] ${userId}/${symbol} result — error: ${error ? JSON.stringify(error) : "null"}, rows: ${upsertData ? JSON.stringify(upsertData) : "null"}`);
+    .select("id, user_id, symbol, generated_at, recent_momentum_at");
 
   if (error) {
     console.error(`Upsert failed for ${userId}/${symbol}:`, error.message, JSON.stringify(error));
     throw error;
   }
-
   if (!upsertData || upsertData.length === 0) {
-    console.error(`Upsert returned no rows for ${userId}/${symbol} — possible RLS block or constraint mismatch`);
     throw new Error(`Upsert wrote 0 rows for ${userId}/${symbol}`);
   }
-
-  console.log(`[upsert] ${userId}/${symbol} written OK — id: ${upsertData[0].id}`);
+  console.log(`[upsert] ${userId}/${symbol} OK — momentum_at=${upsertData[0].recent_momentum_at}, generated_at=${upsertData[0].generated_at}`);
+  return { ran };
 }
 
 // ─── HTTP Handler ────────────────────────────────────────────────
