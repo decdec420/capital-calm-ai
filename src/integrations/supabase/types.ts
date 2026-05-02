@@ -448,6 +448,117 @@ export type Database = {
         }
         Relationships: []
       }
+      doctrine_symbol_overrides: {
+        Row: {
+          created_at: string
+          daily_loss_pct: number | null
+          enabled: boolean
+          id: string
+          max_order_pct: number | null
+          max_trades_per_day: number | null
+          risk_per_trade_pct: number | null
+          symbol: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_loss_pct?: number | null
+          enabled?: boolean
+          id?: string
+          max_order_pct?: number | null
+          max_trades_per_day?: number | null
+          risk_per_trade_pct?: number | null
+          symbol: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_loss_pct?: number | null
+          enabled?: boolean
+          id?: string
+          max_order_pct?: number | null
+          max_trades_per_day?: number | null
+          risk_per_trade_pct?: number | null
+          symbol?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      doctrine_versions: {
+        Row: {
+          created_at: string
+          id: string
+          label: string | null
+          overrides: Json
+          settings: Json
+          source: string
+          user_id: string
+          version_no: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          overrides?: Json
+          settings?: Json
+          source?: string
+          user_id: string
+          version_no: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          overrides?: Json
+          settings?: Json
+          source?: string
+          user_id?: string
+          version_no?: number
+        }
+        Relationships: []
+      }
+      doctrine_windows: {
+        Row: {
+          created_at: string
+          days: number[]
+          enabled: boolean
+          end_utc: string
+          id: string
+          label: string
+          mode: string
+          start_utc: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          days?: number[]
+          enabled?: boolean
+          end_utc: string
+          id?: string
+          label: string
+          mode: string
+          start_utc: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          days?: number[]
+          enabled?: boolean
+          end_utc?: string
+          id?: string
+          label?: string
+          mode?: string
+          start_utc?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       experiments: {
         Row: {
           after_value: string
@@ -1004,6 +1115,7 @@ export type Database = {
           broker_connection: string
           created_at: string
           data_feed: string
+          doctrine_overlay_today: Json
           id: string
           kill_switch_engaged: boolean
           last_auto_promoted_at: string | null
@@ -1032,6 +1144,7 @@ export type Database = {
           broker_connection?: string
           created_at?: string
           data_feed?: string
+          doctrine_overlay_today?: Json
           id?: string
           kill_switch_engaged?: boolean
           last_auto_promoted_at?: string | null
@@ -1060,6 +1173,7 @@ export type Database = {
           broker_connection?: string
           created_at?: string
           data_feed?: string
+          doctrine_overlay_today?: Json
           id?: string
           kill_switch_engaged?: boolean
           last_auto_promoted_at?: string | null
