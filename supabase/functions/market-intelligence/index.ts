@@ -482,6 +482,8 @@ async function runCryptoIntelAnalyst(
   const userMsg = `
 Analyze the crypto-specific environment for ${symbol}.
 
+${peerContext}
+
 ${narrCtx}
 
 DERIVATIVES DATA:
