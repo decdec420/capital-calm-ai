@@ -46,6 +46,10 @@ function mapRow(r: any): SystemState {
         ? profile
         : "sentinel",
     lastJessicaDecision: r.last_jessica_decision ?? null,
+    doctrineOverlayToday:
+      r.doctrine_overlay_today && typeof r.doctrine_overlay_today === "object"
+        ? r.doctrine_overlay_today
+        : null,
   };
 }
 

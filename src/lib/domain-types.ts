@@ -198,6 +198,18 @@ export interface SystemState {
     decision: string;
     action_log?: Array<{ tool: string; success?: boolean }>;
   } | null;
+  /** Live doctrine overlay (mode + drawdown step) computed by signal-engine. */
+  doctrineOverlayToday: {
+    mode?: "calm" | "choppy" | "storm" | "lockout";
+    drawdownStep?: 0 | 1 | 2 | 3;
+    sizeMult?: number;
+    tradesMult?: number;
+    riskMult?: number;
+    dailyLossMult?: number;
+    blockNewEntries?: boolean;
+    reasons?: string[];
+    computedAt?: string;
+  } | null;
 }
 
 export interface AccountState {
