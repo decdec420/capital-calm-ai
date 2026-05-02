@@ -145,7 +145,7 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
   const readRow = async () => {
     const { data } = await admin
       .from("market_intelligence")
-      .select("recent_momentum_1h,recent_momentum_4h,recent_momentum_at,last_updated")
+      .select("recent_momentum_1h,recent_momentum_4h,recent_momentum_at,generated_at")
       .eq("user_id", userId)
       .eq("symbol", symbol)
       .maybeSingle();
@@ -155,7 +155,7 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
       momentum1h: data?.recent_momentum_1h ?? null,
       momentum4h: data?.recent_momentum_4h ?? null,
       momentumAgeMin,
-      lastBrainTrustSuccessAt: data?.last_updated ?? null,
+      lastBrainTrustSuccessAt: data?.recent_momentum_at ?? data?.generated_at ?? null,
       fresh: !!data?.recent_momentum_1h && !!data?.recent_momentum_4h && !!momentumAt && momentumAgeMin !== null && momentumAgeMin <= maxAgeMin,
     };
   };
