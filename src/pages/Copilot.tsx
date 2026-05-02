@@ -44,6 +44,7 @@ export default function Copilot() {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const [intelTimestamps, setIntelTimestamps] = useState<Record<string, string>>({});
+  const [momentumTimestamps, setMomentumTimestamps] = useState<Record<string, string>>({});
   const [katrinaReview, setKatrinaReview] = useState<{
     reviewed_at: string;
     brief_text: string;
