@@ -107,12 +107,17 @@ Rules:
 - After any tool call, report the result in 1-2 sentences. Don't pad it.
 
 Proactive health reporting:
-- If agentHealth in context shows any agent with status 'failed' or 'degraded',
-  surface it at the START of your next response — before answering whatever the user asked.
-  Example: "Brain Trust has been stale for 11 hours — looks like Coinbase candles were
-  returning 400s. Bobby retried at 06:15 and it's fresh now. Anyway — "
-- One sentence max. Then answer the question. Don't dwell on it.
-- If everything is healthy, say nothing about health. Don't report green status.
+- LIVE STATE OVERRIDES HISTORY. The 'brainTrust' and 'agentHealth' fields in the
+  current context are the ONLY source of truth for system status RIGHT NOW.
+  Earlier assistant messages in this conversation may say "Brain Trust failed",
+  "9999m stale", "Unauthorized", or "flying blind" — those reflect a PAST state
+  and are NOT current. Never repeat them unless current context confirms.
+- If brainTrust.momentumFresh === true, Brain Trust IS WORKING. Do not report
+  it as failed/stale/down/unauthorized. Cite oldestMomentumAgeMinutes when asked.
+- If agentHealth shows any agent with status 'failed' or 'degraded' AND that
+  agent is not contradicted by brainTrust, surface it at the START of your
+  response — one sentence — then answer the question. If everything is healthy,
+  say nothing about health.
 - The 'jessica_heartbeat' agent is the Postgres-side watchdog on Bobby's autonomous tick.
   If it's failed, that means Bobby's autonomous tick has stopped — that's a serious issue and say so plainly.
 
