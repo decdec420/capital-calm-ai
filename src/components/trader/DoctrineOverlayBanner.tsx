@@ -35,10 +35,9 @@ function pct(v: number | undefined): string {
 
 export function DoctrineOverlayBanner() {
   const { data: system } = useSystemState();
-  const overlayRaw = (system as unknown as { doctrineOverlayToday?: OverlayShape } | null)?.doctrineOverlayToday;
-  // Some snapshots store under last_engine_snapshot.overlay too — fall back.
-  const snapshotOverlay = (system?.lastEngineSnapshot as unknown as { overlay?: OverlayShape } | null)?.overlay;
-  const overlay: OverlayShape | undefined = overlayRaw ?? snapshotOverlay;
+  const overlay: OverlayShape | undefined =
+    (system?.doctrineOverlayToday as OverlayShape | null) ??
+    ((system?.lastEngineSnapshot as unknown as { overlay?: OverlayShape } | null)?.overlay);
 
   if (!overlay || !overlay.mode) return null;
 

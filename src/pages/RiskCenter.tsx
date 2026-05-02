@@ -9,6 +9,9 @@ import { PerTradeStopPanel } from "@/components/trader/PerTradeStopPanel";
 import { DoctrineGuardrailGrid } from "@/components/trader/DoctrineGuardrailGrid";
 import { ProfilePicker } from "@/components/trader/ProfilePicker";
 import { PendingDoctrineChangesPanel } from "@/components/trader/PendingDoctrineChangesPanel";
+import { DoctrineOverlayBanner } from "@/components/trader/DoctrineOverlayBanner";
+import { DoctrineSymbolOverridesPanel } from "@/components/trader/DoctrineSymbolOverridesPanel";
+import { DoctrineWindowsPanel } from "@/components/trader/DoctrineWindowsPanel";
 import { StartingEquityModal } from "@/components/onboarding/StartingEquityModal";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -168,11 +171,18 @@ export default function RiskCenter() {
         )}
       </div>
 
+      {/* Live overlay banner — shows when mode/drawdown is tightening caps right now. */}
+      <DoctrineOverlayBanner />
+
       {/* Pending doctrine changes (24h cooldown) — only renders when present. */}
       <PendingDoctrineChangesPanel />
 
       {/* Doctrine source-of-truth: derived live from doctrine + account + trades. */}
       <DoctrineGuardrailGrid />
+
+      {/* Diamond-Tier: per-symbol overrides + time-window mode rules. */}
+      <DoctrineSymbolOverridesPanel />
+      <DoctrineWindowsPanel />
 
       {loading ? (
         <p className="text-xs text-muted-foreground italic">Loading…</p>
