@@ -131,6 +131,7 @@ export function AppSidebar() {
                         <NavLink
                           to={item.url}
                           end
+                          onClick={handleNavClick}
                           className={cn(
                             "group flex items-center gap-2.5 rounded-md text-sm transition-colors",
                             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
