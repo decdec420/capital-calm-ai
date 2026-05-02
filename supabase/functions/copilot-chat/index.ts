@@ -300,15 +300,78 @@ Deno.serve(async (req: Request) => {
       console.error("[copilot-chat] strategy_reviews load failed", e);
     }
 
+    // Server-authoritative Brain Trust freshness. The agent_health row can
+    // lag behind reality (e.g. Bobby skipped because Coinbase probe failed),
+    // so we read market_intelligence directly and override the brain_trust
+    // health row when momentum is actually fresh. This stops Wags from
+    // reporting an old "9999m stale" when momentum is in fact 1m old.
+    let brainTrustLive: {
+      momentumFresh: boolean;
+      oldestMomentumAgeMin: number | null;
+      perSymbol: Array<{ symbol: string; momentumAgeMin: number | null; macroAgeMin: number | null }>;
+    } = { momentumFresh: false, oldestMomentumAgeMin: null, perSymbol: [] };
+    try {
+      const { data: miRows } = await supabase
+        .from("market_intelligence")
+        .select("symbol, recent_momentum_at, recent_momentum_1h, recent_momentum_4h, generated_at")
+        .eq("user_id", userId);
+      const nowMs = Date.now();
+      const ages: number[] = [];
+      const perSymbol: Array<{ symbol: string; momentumAgeMin: number | null; macroAgeMin: number | null }> = [];
+      let allHaveMomentum = (miRows ?? []).length > 0;
+      for (const r of (miRows ?? []) as Array<Record<string, unknown>>) {
+        const at = r.recent_momentum_at ? new Date(r.recent_momentum_at as string).getTime() : null;
+        const macroAt = r.generated_at ? new Date(r.generated_at as string).getTime() : null;
+        const ageMin = at ? Math.floor((nowMs - at) / 60000) : null;
+        const macroAgeMin = macroAt ? Math.floor((nowMs - macroAt) / 60000) : null;
+        if (!at || !r.recent_momentum_1h || !r.recent_momentum_4h) {
+          allHaveMomentum = false;
+        } else {
+          ages.push(ageMin!);
+        }
+        perSymbol.push({ symbol: r.symbol as string, momentumAgeMin: ageMin, macroAgeMin });
+      }
+      const oldest = ages.length ? Math.max(...ages) : null;
+      brainTrustLive = {
+        momentumFresh: allHaveMomentum && oldest !== null && oldest <= 75,
+        oldestMomentumAgeMin: oldest,
+        perSymbol,
+      };
+    } catch (e) {
+      console.error("[copilot-chat] market_intelligence load failed", e);
+    }
+
+    // Override stale brain_trust health row when momentum is actually fresh.
+    const adjustedHealth = healthRows.map((h) => {
+      if (h.agent_name === "brain_trust" && brainTrustLive.momentumFresh) {
+        return {
+          ...h,
+          status: "healthy",
+          last_success: new Date().toISOString(),
+          failure_count: 0,
+          last_error: null,
+        };
+      }
+      return h;
+    });
+
     const enrichedContext: Record<string, unknown> = {
       ...(safeContext ?? {}),
-      agentHealth: healthRows.map((h) => ({
+      agentHealth: adjustedHealth.map((h) => ({
         agent: h.agent_name,
         status: h.status,
         last_success: h.last_success,
         failures: h.failure_count,
         error: h.last_error,
       })),
+      brainTrust: {
+        momentumFresh: brainTrustLive.momentumFresh,
+        oldestMomentumAgeMinutes: brainTrustLive.oldestMomentumAgeMin,
+        perSymbol: brainTrustLive.perSymbol,
+        note:
+          "Source of truth for whether the Brain Trust is working RIGHT NOW. " +
+          "Prefer this over agentHealth.brain_trust if they disagree.",
+      },
       katrinaLatestReview: latestReview
         ? {
             date: latestReview.reviewed_at ?? null,
