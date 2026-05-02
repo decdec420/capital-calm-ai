@@ -1,4 +1,12 @@
 // jessica — Bobby Axelrod. Autonomous desk commander. Orchestrator.
+// ----------------------------------------------------------------
+// NOTE ON THE NAME: This edge function is named `jessica` for legacy
+// audit-trail compatibility. The product persona is **Bobby**. The technical
+// actor ID `jessica_autonomous` is intentionally retained because every
+// historical row in `tool_calls` and `system_events` references it. Renaming
+// would break replay of past decisions. UI surfaces ALWAYS say "Bobby" — a
+// CI guard (src/test/persona-legacy-token-guard.test.ts) enforces this.
+// ----------------------------------------------------------------
 // Cron: every 1 minute.
 // Bobby reads full system context, decides what the desk does, executes tools,
 // logs every decision to tool_calls with actor='jessica_autonomous'.
