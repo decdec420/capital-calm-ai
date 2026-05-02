@@ -390,7 +390,26 @@ export default function Copilot() {
       if (!running) runEngine();
     },
   });
-  const buildContext = () => ({
+  const buildContext = () => {
+    const momTimes = Object.values(momentumTimestamps)
+      .map((t) => new Date(t).getTime())
+      .filter((n) => Number.isFinite(n));
+    const oldestMomentumAgeMinutes = momTimes.length
+      ? Math.floor((Date.now() - Math.min(...momTimes)) / 60000)
+      : null;
+    const brainTrustClient = {
+      momentumFresh:
+        momTimes.length === Object.keys(momentumTimestamps).length &&
+        momTimes.length > 0 &&
+        oldestMomentumAgeMinutes !== null &&
+        oldestMomentumAgeMinutes <= 75,
+      oldestMomentumAgeMinutes,
+      perSymbol: Object.entries(momentumTimestamps).map(([symbol, ts]) => ({
+        symbol,
+        momentumAgeMin: Math.floor((Date.now() - new Date(ts).getTime()) / 60000),
+      })),
+    };
+    return ({
     mode: system?.mode,
     bot: system?.bot,
     autonomy: system?.autonomyLevel,
@@ -438,7 +457,9 @@ export default function Copilot() {
       promote_count: (katrinaReview.promote_ids ?? []).length,
       kill_count: (katrinaReview.kill_ids ?? []).length,
     } : null,
-  });
+    brainTrust: brainTrustClient,
+    });
+  };
 
   const send = async (text: string) => {
     if (!text.trim()) return;
