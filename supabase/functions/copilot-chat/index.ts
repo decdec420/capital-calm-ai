@@ -393,9 +393,29 @@ Deno.serve(async (req: Request) => {
         : ((safeContext as Record<string, unknown> | undefined)?.katrinaLatestReview ?? null),
     };
 
+    // Sanitize history: when Brain Trust is currently fresh, scrub assistant
+    // messages that confidently asserted Brain Trust was failed/stale/unauthorized.
+    // Those messages are now factually wrong and otherwise drag the model back
+    // into repeating yesterday's outage as if it were current.
+    const STALE_FAILURE_RE =
+      /(brain\s*trust[^.]{0,80}(failed|fail|down|stale|unauthorized|9999\s*m|flying\s+blind)|9999\s*m|flying\s+blind|unauthorized\s+errors?)/i;
+    const sanitizedHistory: ChatMessage[] = brainTrustLive.momentumFresh
+      ? history.map((m) =>
+          m.role === "assistant" && STALE_FAILURE_RE.test(m.content)
+            ? { ...m, content: "[Earlier status report about Brain Trust outage — superseded; current Brain Trust is healthy.]" }
+            : m,
+        )
+      : history;
+
+    const liveStateNudge =
+      brainTrustLive.momentumFresh && brainTrustLive.oldestMomentumAgeMin !== null
+        ? `LIVE STATE CHECK: Brain Trust is healthy right now. Oldest momentum read across the symbol whitelist is ${brainTrustLive.oldestMomentumAgeMin} minute(s) old. Any earlier message in this thread saying "Brain Trust failed", "9999m stale", "Unauthorized", or "flying blind" is OUTDATED and must not be repeated as current.`
+        : `LIVE STATE CHECK: brainTrust.momentumFresh=${brainTrustLive.momentumFresh}, oldestMomentumAgeMinutes=${brainTrustLive.oldestMomentumAgeMin}. Trust this over earlier messages.`;
+
     const baseMessages: ToolMessage[] = [
       { role: "system", content: buildSystemPrompt(enrichedContext) },
-      ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      ...sanitizedHistory.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      { role: "system", content: liveStateNudge },
       { role: "user", content: userMessage },
     ];
 
