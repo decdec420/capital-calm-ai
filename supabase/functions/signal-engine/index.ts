@@ -1279,6 +1279,41 @@ async function runTickForUser(
         )
       : null;
 
+    // ── Soft staleness penalty on setup_score ────────────────────
+    // Mafee's cron cadence is ~1 min. Anything older than 5 min means the
+    // gateway hiccuped or the brief was carried over. Don't block — just
+    // bias the engine toward the cleanest reads. The hard block at 120 min
+    // (momentumGate above) is still the safety floor.
+    if (!momentumStale && Number.isFinite(momentumAgeMin)) {
+      let penalty = 1.0;
+      let penaltyReason: string | null = null;
+      if (momentumAgeMin > 15) {
+        penalty = 0.65;
+        penaltyReason = `mafee ${Math.round(momentumAgeMin)}m old (>15m)`;
+      } else if (momentumAgeMin > 5) {
+        penalty = 0.85;
+        penaltyReason = `mafee ${Math.round(momentumAgeMin)}m old (>5m)`;
+      }
+      // Hall freshness — use market_intelligence.generated_at via symbolIntel.
+      const hallGenAt = symbolIntel?.generated_at as string | undefined;
+      if (hallGenAt) {
+        const hallAgeMin = (Date.now() - new Date(hallGenAt).getTime()) / 60000;
+        if (hallAgeMin > 60) {
+          penalty *= 0.90;
+          penaltyReason = (penaltyReason ? penaltyReason + " · " : "") +
+            `hall ${Math.round(hallAgeMin)}m old (>60m)`;
+        }
+      }
+      if (penalty < 1.0 && regime.setupScore > 0) {
+        const before = regime.setupScore;
+        // Mutate in place — downstream filter uses regime.setupScore directly.
+        (regime as { setupScore: number }).setupScore = Math.max(0, before * penalty);
+        console.log(
+          `[signal-engine] ${symbol} stale-intel penalty ${(penalty*100).toFixed(0)}% — ${penaltyReason} — setupScore ${before.toFixed(2)} → ${regime.setupScore.toFixed(2)}`,
+        );
+      }
+    }
+
     const lockGate = newsSummary.hasCritical
       ? gate(
           GATE_CODES.NEWS_FLAG_CRITICAL,
