@@ -220,21 +220,50 @@ export const DESK_TOOLS = [
     function: {
       name: "propose_doctrine_change",
       description:
-        "Apply a change to the trading doctrine immediately — risk profile, position sizing, session filters, or strategy parameters. Use when the operator says things like 'make Taylor more aggressive on BTC', 'switch to active mode', 'tighten the stop', or asks to tune any doctrine parameter. Change takes effect right now and is logged to the audit trail.",
+        "Change the trading doctrine — risk profile, position caps, or strategy parameters. Tightenings (lower size, lower trades, higher floor, etc.) apply INSTANTLY. Loosenings are queued for the 24h tilt-protection cooldown and are visible in Pending Doctrine Changes. Use when the operator says things like 'tighten the daily loss to 1%', 'cut max trades to 3', or 'switch profile to active'. Always returns a structured plan; the operator sees both applied + pending in the UI.",
       parameters: {
         type: "object",
         properties: {
           change_summary: {
             type: "string",
-            description: "Plain-English one-sentence summary of what is changing. e.g. 'Switch active_profile from sentinel to aggressive for BTC sessions.'",
-          },
-          parameters: {
-            type: "object",
-            description: "Key-value pairs of the specific settings being changed (optional but recommended).",
+            description: "Plain-English one-sentence summary of what is changing.",
           },
           rationale: {
             type: "string",
             description: "One-line reason for the change.",
+          },
+          parameters: {
+            type: "object",
+            description:
+              "Optional system_state knobs to set immediately (no cooldown). Currently supports: active_profile ∈ {sentinel, active, aggressive}.",
+          },
+          doctrine_changes: {
+            type: "array",
+            description:
+              "Structured doctrine field edits routed through update-doctrine. Tightenings apply instantly; loosenings queue 24h.",
+            items: {
+              type: "object",
+              properties: {
+                field: {
+                  type: "string",
+                  enum: [
+                    "max_order_pct",
+                    "max_order_abs_cap",
+                    "daily_loss_pct",
+                    "max_trades_per_day",
+                    "floor_pct",
+                    "risk_per_trade_pct",
+                    "consecutive_loss_limit",
+                    "loss_cooldown_minutes",
+                    "scan_interval_seconds",
+                    "max_correlated_positions",
+                  ],
+                },
+                to_value: { type: "number" },
+                reason: { type: "string" },
+              },
+              required: ["field", "to_value"],
+            },
           },
         },
         required: ["change_summary", "rationale"],
@@ -568,9 +597,11 @@ export async function executeTool(
         const changeSummary = args.change_summary as string;
         const rationale = args.rationale as string;
         const parameters = (args.parameters as Record<string, unknown>) ?? {};
+        const doctrineChanges = Array.isArray(args.doctrine_changes)
+          ? (args.doctrine_changes as Array<{ field: string; to_value: number; reason?: string }>)
+          : [];
 
-        // Apply known parameters immediately to system_state.
-        // active_profile is the primary tunable doctrine lever.
+        // 1) Apply system_state knobs immediately (active_profile etc).
         const VALID_PROFILES = ["sentinel", "active", "aggressive"];
         const dbPatch: Record<string, unknown> = {};
         if (parameters.active_profile && VALID_PROFILES.includes(parameters.active_profile as string)) {
@@ -586,12 +617,47 @@ export async function executeTool(
           if (patchErr) applyError = patchErr.message;
         }
 
-        // Log the change as implemented (not queued).
+        // 2) Route structured doctrine_changes through update-doctrine so the
+        //    24h cooldown applies to loosenings — Wags can't bypass the gate.
+        let doctrineResults: unknown[] = [];
+        if (doctrineChanges.length > 0) {
+          try {
+            const resp = await fetch(`${supabaseUrl}/functions/v1/update-doctrine`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                // Pass the operator's JWT so update-doctrine attributes the change
+                // to the right user (and audits actor=user). Wags is the
+                // operator's voice; the cooldown applies regardless.
+                Authorization: `Bearer ${token}`,
+                apikey: supabaseAnonKey,
+              },
+              body: JSON.stringify({
+                changes: doctrineChanges.map((c) => ({
+                  field: c.field,
+                  to_value: c.to_value,
+                  reason: c.reason ?? `[wags] ${rationale}`,
+                })),
+              }),
+            });
+            const body = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+              applyError = applyError ?? (body?.error ?? `update-doctrine failed: ${resp.status}`);
+            } else {
+              doctrineResults = Array.isArray(body?.results) ? body.results : [];
+            }
+          } catch (e) {
+            applyError = applyError ?? `update-doctrine fetch failed: ${String(e)}`;
+          }
+        }
+
         await appendSystemEvent("doctrine_change", {
           change_summary: changeSummary,
           rationale,
           parameters,
-          applied: Object.keys(dbPatch).length > 0 && !applyError,
+          doctrine_changes: doctrineChanges,
+          doctrine_results: doctrineResults,
+          applied: !applyError,
           applied_by: actorShort,
         });
 
@@ -603,13 +669,19 @@ export async function executeTool(
                 status: "applied",
                 change_summary: changeSummary,
                 parameters_set: dbPatch,
+                doctrine_results: doctrineResults,
               },
             };
         await adminClient
           .from("tool_calls")
           .insert({ ...logEntry, result, success: result.success });
         if (result.success) {
-          await appendAudit("doctrine_change", { change_summary: changeSummary, rationale, parameters: dbPatch });
+          await appendAudit("doctrine_change", {
+            change_summary: changeSummary,
+            rationale,
+            parameters: dbPatch,
+            doctrine_changes: doctrineChanges,
+          });
         }
         return result;
       }
