@@ -415,7 +415,7 @@ Analysis time: ${new Date().toISOString()}
           "2-3 sentences. The evolving running narrative for this symbol — what is the multi-day story unfolding, and what changed (if anything) since the previous narrative? Reads like a continuous thread, not a snapshot.",
       },
     },
-  });
+  }, HALL_MODEL);
 }
 
 // ─── Expert 2: Dollar Bill — The Crypto Intel Analyst ────────────
