@@ -464,6 +464,7 @@ async function runCryptoIntelAnalyst(
   fearGreed: { score: number; label: string } | null,
   newsItems: NewsItem[],
   previousNarrative: string | null,
+  peerContext: string,
 ): Promise<Record<string, unknown> | null> {
   const newsContext = newsItems.length > 0
     ? newsItems.map((n) =>
