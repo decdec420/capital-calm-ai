@@ -103,10 +103,13 @@ export default function Copilot() {
   const activeProfile = getProfile(system?.activeProfile);
 
   const lastBrainTrustRun = useMemo(() => {
-    const times = Object.values(intelTimestamps).map((t) => new Date(t).getTime()).filter(Boolean);
+    // The Brain Trust strip should track MOMENTUM freshness — that's what the
+    // engine gates on. Falls back to macro generated_at when momentum is unset.
+    const source = Object.keys(momentumTimestamps).length > 0 ? momentumTimestamps : intelTimestamps;
+    const times = Object.values(source).map((t) => new Date(t).getTime()).filter(Boolean);
     if (times.length === 0) return null;
     return new Date(Math.max(...times));
-  }, [intelTimestamps]);
+  }, [intelTimestamps, momentumTimestamps]);
 
   const lastEngineRun = useMemo(() => {
     const ts = (system?.lastEngineSnapshot as { ranAt?: string } | null)?.ranAt;
