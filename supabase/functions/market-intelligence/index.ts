@@ -229,6 +229,7 @@ async function callExpert(
   userMessage: string,
   toolName: string,
   toolSchema: object,
+  model: string,
 ): Promise<Record<string, unknown> | null> {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 45_000);
@@ -241,7 +242,7 @@ async function callExpert(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: EXPERT_MODEL,
+        model,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
