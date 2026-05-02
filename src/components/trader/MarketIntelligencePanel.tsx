@@ -271,8 +271,8 @@ export function MarketIntelligencePanel({ symbol, className }: MarketIntelligenc
           <div>
             <h3 className="text-sm font-semibold">Market Intelligence</h3>
             <p className="text-[11px] text-muted-foreground">
-              Three AI experts · refreshed every 4h
-              {newest && <> · last run {formatRelative(newest.generatedAt)}</>}
+              Three AI experts · momentum refreshes continuously, macro every few hours
+              {newest && <> · macro {formatRelative(newest.generatedAt)}</>}
             </p>
           </div>
         </div>
