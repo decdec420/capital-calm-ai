@@ -316,6 +316,7 @@ async function runMacroStrategist(
   candles4h: Candle[],
   candles1d: Candle[],
   previousNarrative: string | null,
+  peerContext: string,
 ): Promise<Record<string, unknown> | null> {
   const recent4h = candles4h.slice(-30).map((c) => ({
     time: new Date(c.t * 1000).toISOString().slice(0, 16),
@@ -338,13 +339,14 @@ async function runMacroStrategist(
   const userMsg = `
 Analyze ${symbol} and produce your strategic brief.
 
+${peerContext}
+
 PREVIOUS NARRATIVE (~4h ago):
 ${prevNarr}
 
-Your job: read the above, then update it based on what you see now.
-Has the outlook changed? Has a thesis been confirmed or broken?
-Return a fresh "updated_narrative" (2-3 sentences max) capturing the running story
-that will be passed to the next run in ~4 hours.
+Update the narrative based on what you see now. Has the outlook changed?
+Has a thesis been confirmed or broken? Return a fresh "updated_narrative"
+(2-3 sentences) capturing the running story for the next cycle.
 
 DAILY CANDLES (last 14 days):
 ${JSON.stringify(recent1d, null, 2)}
