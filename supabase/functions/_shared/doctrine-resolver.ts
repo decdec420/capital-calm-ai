@@ -190,3 +190,103 @@ export const DOCTRINE_FIELD_LABELS: Record<DoctrineField, string> = {
   scan_interval_seconds: "Scan interval (seconds)",
   max_correlated_positions: "Max correlated positions",
 };
+
+// ── Per-symbol overrides + overlay (Diamond-Tier) ──────────────
+// An override row may set any of these fields. NULL = inherit global.
+// Overlay multipliers come from doctrine-modes.ts and can ONLY tighten.
+
+export interface DoctrineSymbolOverrideRow {
+  symbol: string;
+  enabled: boolean;
+  max_order_pct: number | null;
+  risk_per_trade_pct: number | null;
+  daily_loss_pct: number | null;
+  max_trades_per_day: number | null;
+}
+
+export interface DoctrineOverlayInput {
+  sizeMult: number;
+  tradesMult: number;
+  riskMult: number;
+  dailyLossMult: number;
+  blockNewEntries: boolean;
+}
+
+export interface ResolvedDoctrineForSymbol extends ResolvedDoctrine {
+  symbol: string;
+  /** Whether an override row applied for this symbol. */
+  overrideApplied: boolean;
+  /** Whether an overlay (mode/drawdown/window) reduced the caps. */
+  overlayApplied: boolean;
+  /** True if engine should refuse all new entries this tick. */
+  blockNewEntries: boolean;
+}
+
+/**
+ * Diamond-Tier resolver. Layers, in order:
+ *   1. Per-user doctrine_settings           (the global)
+ *   2. Per-symbol override (if any/enabled) (only ever tightens)
+ *   3. Overlay multipliers (mode + DD)      (only ever tightens)
+ *
+ * Overrides and overlays can ONLY make caps smaller. We take the min
+ * with the layer below so the user can never accidentally loosen via
+ * an override and the engine can never escape the global ceiling.
+ */
+export function resolveDoctrineForSymbol(
+  settings: DoctrineSettingsRow | null | undefined,
+  override: DoctrineSymbolOverrideRow | null | undefined,
+  overlay: DoctrineOverlayInput | null | undefined,
+  symbol: string,
+  currentEquityUsd: number,
+): ResolvedDoctrineForSymbol {
+  const base = resolveDoctrine(settings, currentEquityUsd);
+  const equity = base.basisEquityUsd;
+
+  let maxOrderUsd = base.maxOrderUsd;
+  let dailyLossUsd = base.dailyLossUsd;
+  let dailyLossPct = base.dailyLossPct;
+  let maxTradesPerDay = base.maxTradesPerDay;
+  let riskPerTradePct = base.riskPerTradePct;
+
+  const overrideApplied = !!(override && override.enabled);
+  if (overrideApplied) {
+    if (override!.max_order_pct != null && equity > 0) {
+      const ovrUsd = equity * override!.max_order_pct;
+      maxOrderUsd = Math.min(maxOrderUsd, ovrUsd);
+    }
+    if (override!.daily_loss_pct != null) {
+      dailyLossPct = Math.min(dailyLossPct, override!.daily_loss_pct);
+      if (equity > 0) dailyLossUsd = Math.min(dailyLossUsd, equity * override!.daily_loss_pct);
+    }
+    if (override!.max_trades_per_day != null) {
+      maxTradesPerDay = Math.min(maxTradesPerDay, override!.max_trades_per_day);
+    }
+    if (override!.risk_per_trade_pct != null) {
+      riskPerTradePct = Math.min(riskPerTradePct, override!.risk_per_trade_pct);
+    }
+  }
+
+  const overlayApplied = !!overlay && (
+    overlay.sizeMult < 1 || overlay.tradesMult < 1 || overlay.riskMult < 1 || overlay.dailyLossMult < 1 || overlay.blockNewEntries
+  );
+  if (overlay) {
+    maxOrderUsd     = maxOrderUsd     * Math.max(0, Math.min(1, overlay.sizeMult));
+    maxTradesPerDay = Math.floor(maxTradesPerDay * Math.max(0, Math.min(1, overlay.tradesMult)));
+    riskPerTradePct = riskPerTradePct * Math.max(0, Math.min(1, overlay.riskMult));
+    dailyLossUsd    = dailyLossUsd    * Math.max(0, Math.min(1, overlay.dailyLossMult));
+    dailyLossPct    = dailyLossPct    * Math.max(0, Math.min(1, overlay.dailyLossMult));
+  }
+
+  return {
+    ...base,
+    symbol,
+    maxOrderUsd,
+    dailyLossUsd,
+    dailyLossPct,
+    maxTradesPerDay,
+    riskPerTradePct,
+    overrideApplied,
+    overlayApplied,
+    blockNewEntries: overlay?.blockNewEntries ?? false,
+  };
+}
