@@ -220,21 +220,50 @@ export const DESK_TOOLS = [
     function: {
       name: "propose_doctrine_change",
       description:
-        "Apply a change to the trading doctrine immediately — risk profile, position sizing, session filters, or strategy parameters. Use when the operator says things like 'make Taylor more aggressive on BTC', 'switch to active mode', 'tighten the stop', or asks to tune any doctrine parameter. Change takes effect right now and is logged to the audit trail.",
+        "Change the trading doctrine — risk profile, position caps, or strategy parameters. Tightenings (lower size, lower trades, higher floor, etc.) apply INSTANTLY. Loosenings are queued for the 24h tilt-protection cooldown and are visible in Pending Doctrine Changes. Use when the operator says things like 'tighten the daily loss to 1%', 'cut max trades to 3', or 'switch profile to active'. Always returns a structured plan; the operator sees both applied + pending in the UI.",
       parameters: {
         type: "object",
         properties: {
           change_summary: {
             type: "string",
-            description: "Plain-English one-sentence summary of what is changing. e.g. 'Switch active_profile from sentinel to aggressive for BTC sessions.'",
-          },
-          parameters: {
-            type: "object",
-            description: "Key-value pairs of the specific settings being changed (optional but recommended).",
+            description: "Plain-English one-sentence summary of what is changing.",
           },
           rationale: {
             type: "string",
             description: "One-line reason for the change.",
+          },
+          parameters: {
+            type: "object",
+            description:
+              "Optional system_state knobs to set immediately (no cooldown). Currently supports: active_profile ∈ {sentinel, active, aggressive}.",
+          },
+          doctrine_changes: {
+            type: "array",
+            description:
+              "Structured doctrine field edits routed through update-doctrine. Tightenings apply instantly; loosenings queue 24h.",
+            items: {
+              type: "object",
+              properties: {
+                field: {
+                  type: "string",
+                  enum: [
+                    "max_order_pct",
+                    "max_order_abs_cap",
+                    "daily_loss_pct",
+                    "max_trades_per_day",
+                    "floor_pct",
+                    "risk_per_trade_pct",
+                    "consecutive_loss_limit",
+                    "loss_cooldown_minutes",
+                    "scan_interval_seconds",
+                    "max_correlated_positions",
+                  ],
+                },
+                to_value: { type: "number" },
+                reason: { type: "string" },
+              },
+              required: ["field", "to_value"],
+            },
           },
         },
         required: ["change_summary", "rationale"],
