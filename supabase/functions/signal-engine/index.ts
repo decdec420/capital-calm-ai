@@ -1200,7 +1200,7 @@ async function runTickForUser(
     await persistSnapshot(admin, userId, {
       gateReasons: [
         gate(
-          GATE_CODES.DOCTRINE_LOCKOUT ?? "DOCTRINE_OVERLAY_LOCKOUT",
+          GATE_CODES.DOCTRINE_OVERLAY_LOCKOUT,
           "halt",
           `Doctrine overlay halted entries: ${doctrineOverlay.reasons.join(", ") || doctrineOverlay.mode}`,
           { overlay: doctrineOverlay },
