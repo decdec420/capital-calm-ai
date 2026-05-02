@@ -554,7 +554,7 @@ commentary, generic market recaps, and clickbait. Empty array is acceptable and 
         },
       },
     },
-  });
+  }, BILL_MODEL);
 }
 
 // ─── Expert 3: Mafee — The Pattern Recognition Specialist ────────
