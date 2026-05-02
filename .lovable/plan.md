@@ -1,72 +1,60 @@
-## Brain Trust — make it feel live
+## Two-part plan
 
-You want Hall, Dollar Bill, and Mafee responsive instead of cached for 4h. Plan below makes the desk feel live every minute while protecting against gateway rate limits and pointless re-runs.
+### Part 1: "Jessica" in the codebase — no code change
 
-### Refresh model (per 1-min cron tick, per symbol)
+You're seeing it in file paths, edge function names, and audit logs. Per `docs/tool-inventory.md`, that's **intentional**:
 
-| Expert | Cadence | Why |
-|---|---|---|
-| **Mafee** (pattern + `recent_momentum_1h`/`4h`) | **Every minute** | This is the live tape read. Engine already gates on `recent_momentum_at` freshness. |
-| **Dollar Bill** (funding signal + sentiment + news_flags) | **Every 5 min** OR sooner if a new news item appears | Funding rate updates every 8h on Binance, Fear&Greed updates daily — calling Bill every minute is paying Gemini to read the same numbers. |
-| **Hall** (macro phase, trend, S/R, narrative) | **Every 15 min** OR sooner if price breaks his stated `nearest_support`/`nearest_resistance` | Wyckoff phase doesn't change in 60 seconds. Event-driven re-run handles real regime shifts. |
+- `supabase/functions/jessica/` — edge function path, deployed under that name
+- `tool_calls.actor = 'jessica_autonomous'` — historical audit rows
+- `system_events.actor` — same
+- DB columns / migrations referencing the legacy ID
 
-External data fetchers also get short caches so we don't spam free APIs:
-- Coinbase candles: per-fetch (already retried via `_shared/market.ts`)
-- Funding rate: 5 min cache
-- Fear & Greed: 30 min cache
-- CryptoPanic news: 5 min cache
+A CI guard (`src/test/persona-legacy-token-guard.test.ts`) already blocks "Jessica" from any UI-facing file. Renaming the technical layer would:
+- Break replay of every historical `tool_calls` / `system_events` row
+- Require a destructive migration on production audit data
+- Force redeployment of the edge function under a new name (breaking any external webhooks/cron pointing at it)
 
-### Soft staleness gating (signal-engine)
+**Recommendation: leave it.** The user-facing label is already Bobby everywhere it matters. If you want, I can add a one-line comment at the top of `supabase/functions/jessica/index.ts` explicitly noting "this function powers Bobby — name retained for audit-trail compatibility" so future-you doesn't wonder again.
 
-Add to the conviction scoring — don't block trades, just dial down confidence when intel is stale:
+### Part 2: Tighten the 3 expert prompts (keep all three, share more context)
 
-```text
-mafee_age = now - market_intelligence.recent_momentum_at
-if mafee_age > 5 min:  setup_score *= 0.85
-if mafee_age > 15 min: setup_score *= 0.65 + log warning
-hall_age = now - market_intelligence.generated_at
-if hall_age > 60 min:  setup_score *= 0.90
-```
+**Goal:** reduce token cost and eliminate the chance of the three experts contradicting each other on shared facts (regime, S/R, news context), without collapsing the cadence tiers.
 
-This keeps the bot trading during gateway hiccups but forces it to be more selective. A 0.55 setup_score that drops to 0.47 because intel is stale will fail the conviction bar naturally.
+**Current state:** Each expert (`Hall`, `Dollar Bill`, `Mafee`) has its own ~150-line system prompt in `supabase/functions/market-intelligence/index.ts`. They duplicate:
+- Crypto market preamble / desk context
+- Output schema framing instructions
+- Definitions of "regime", "phase", "environment_rating"
+- General tone/voice rules
 
-### Implementation
+Mafee already gets Hall's S/R passed in, but Bill and Mafee don't see each other's prior outputs at all.
 
-**1. `supabase/functions/market-intelligence/index.ts`**
-- Replace the single `BRAIN_TRUST_FRESHNESS_MS` with per-expert freshness windows.
-- Refactor `runIntelligenceForSymbol` so each expert is gated independently:
-  - Read prior row → compute `mafeeAge`, `billAge`, `hallAge`.
-  - Always call Mafee (with 1h candles).
-  - Call Bill only if `billAge > 5min` OR `news_flags` changed since last run.
-  - Call Hall only if `hallAge > 15min` OR current spot crossed prior `nearest_support`/`nearest_resistance`.
-  - When an expert is skipped, carry over its previous fields into the upsert so the row stays whole.
-- Add module-level memoized fetchers for funding / fear-greed / news with the cache TTLs above.
-- Keep `skipFreshness: true` for on-demand UI calls (refresh button always runs all three).
+**Changes:**
 
-**2. `supabase/functions/signal-engine/index.ts`**
-- After loading `market_intelligence`, compute `mafeeAge` and `hallAge`, apply the multiplicative penalties above to `setup_score` before the conviction gate.
-- Log the penalty in `gateReasons` so the UI can explain "Setup score reduced 15% — Mafee read 7m old".
-- Surface a stale_intel reason in `system_state.last_engine_snapshot.gateReasons` when intel is older than 15min, so the operator can see it on the desk strip.
+1. **Extract a shared `BRAIN_TRUST_PREAMBLE` constant** (~30 lines) covering desk context, output discipline rules, and the shared vocabulary (regime / phase / environment_rating definitions). Prepend it to each expert's system prompt instead of duplicating.
 
-**3. Cron schedule**
-- Confirm `market-intelligence` cron runs every 1 minute (it already does — same token as `signal-engine`). No DB change needed.
+2. **Add a `peerContext` block** passed into each expert call:
+   - **Hall** receives: Bill's last `environment_rating` + headline news flags (so macro reasoning accounts for current sentiment)
+   - **Bill** receives: Hall's last `phase` + S/R levels (so news framing knows the structural backdrop)
+   - **Mafee** already receives Hall's S/R — also add Bill's `environment_rating` (so pattern reads weight risk-on vs risk-off)
+   
+   Format as a compact 4–6 line "Peer desk read (as of HH:MM)" block, not a full prompt dump.
 
-**4. Verify**
-- `supabase--curl_edge_functions` POST `/market-intelligence` twice within 60s → second call should log "Mafee ran, Bill skipped (cached 12s), Hall skipped (cached 12s)".
-- `select symbol, generated_at, recent_momentum_at from market_intelligence` taken 5 min apart → `recent_momentum_at` advances every minute, `generated_at` (Hall stamp) only every 15 min.
-- Edge function logs → no 429s from Lovable AI gateway.
-- A signal proposed during stale-intel period shows the penalty in `gateReasons`.
+3. **Trim each expert's system prompt** by removing the now-redundant preamble/schema sections. Estimated reduction: ~40% of input tokens per call.
 
-### Cost envelope (1 user, 3 symbols)
+4. **Keep cadence and freshness tiers exactly as-is** (Mafee 1m / Bill 5m / Hall 15m + S/R-break event trigger). No change to the staleness penalty in `signal-engine`.
 
-- Mafee: 3 × 60 = **180 calls/hr** (the "live" feel)
-- Bill: 3 × 12 = **36 calls/hr**
-- Hall: 3 × 4 = **12 calls/hr** (+ event-driven extras)
-- **Total: ~228 AI calls/hr** vs 540 if we ran all three every minute. Same live feel on the part that matters; ~2.4× cheaper; far below any gateway throttle.
+5. **Keep all three model assignments** from the previous audit pass:
+   - Mafee → `gemini-2.5-flash-lite`
+   - Bill / Hall → `gemini-2.5-flash`
 
-### Out of scope (note for later)
+**Expected impact:**
+- ~30–40% input-token reduction per expert call → roughly **$50–70/mo savings** on top of the model-tier optimization
+- Fewer cross-expert contradictions (Mafee no longer flags a "perfect long" while Bill's last read was a CPI miss)
+- No change to refresh cadence, no change to UI, no change to DB schema
 
-- Per-symbol parallelism inside one cron tick (currently sequential). Worth doing if we add a 2nd user.
-- Pushing Brain Trust output over Realtime so the UI updates without polling.
+### Files touched
 
-Approve and I'll implement, deploy, and verify.
+- `supabase/functions/market-intelligence/index.ts` — extract shared preamble, trim 3 expert prompts, add peerContext to each call site, read prior peer outputs from the existing `prev` row already loaded at the top of `runBrainTrust`
+- `supabase/functions/jessica/index.ts` — add a single header comment clarifying "Bobby (legacy actor ID retained)"
+
+No DB migration. No frontend changes. No new env vars.
