@@ -1150,6 +1150,74 @@ async function runTickForUser(
   // Resolve per-user effective doctrine caps from settings + live equity.
   // Authoritative source for max-order USD, daily-loss USD, kill-switch floor.
   const resolvedDoctrine: ResolvedDoctrine = resolveDoctrine(settingsRow, equity);
+
+  // ── Diamond-Tier overlay: mode (windows) × drawdown ladder ──
+  // Composed once per tick, persisted to system_state for UI/Wags parity,
+  // and used to TIGHTEN per-symbol caps inside the candidate loop.
+  let doctrineOverlay: DoctrineOverlay = composeOverlay({
+    mode: "calm",
+    modeReasons: [],
+    drawdownStep: selectDrawdownStep(0, equity),
+  });
+  try {
+    const [{ data: windows }, { data: overrideRows }] = await Promise.all([
+      admin
+        .from("doctrine_windows")
+        .select("label,days,start_utc,end_utc,mode,enabled")
+        .eq("user_id", userId)
+        .eq("enabled", true),
+      admin
+        .from("doctrine_symbol_overrides")
+        .select("symbol,enabled,max_order_pct,risk_per_trade_pct,daily_loss_pct,max_trades_per_day")
+        .eq("user_id", userId)
+        .eq("enabled", true),
+    ]);
+    const winSel = selectActiveWindowMode(
+      ((windows ?? []) as DoctrineWindowRow[]),
+      new Date().toISOString(),
+    );
+    const startEq = Number((acct as { start_of_day_equity?: number } | null)?.start_of_day_equity ?? equity);
+    const ddStep = selectDrawdownStep(startEq, equity);
+    doctrineOverlay = composeOverlay({
+      mode: winSel.mode,
+      modeReasons: winSel.reasons,
+      drawdownStep: ddStep,
+    });
+    // Stash for downstream use (per-symbol resolver call site can read this).
+    (admin as unknown as { __overrideRows?: unknown }).__overrideRows = overrideRows ?? [];
+    // Persist for UI / Wags. Best-effort; never fail the tick on this.
+    await admin
+      .from("system_state")
+      .update({ doctrine_overlay_today: doctrineOverlay as unknown as Record<string, unknown> })
+      .eq("user_id", userId);
+  } catch (e) {
+    console.warn("signal-engine: doctrine overlay compute failed", e);
+  }
+
+  // If the overlay says LOCKOUT, halt new entries this tick. Existing
+  // positions are still managed by the close/scale paths.
+  if (doctrineOverlay.blockNewEntries) {
+    await persistSnapshot(admin, userId, {
+      gateReasons: [
+        gate(
+          GATE_CODES.DOCTRINE_LOCKOUT ?? "DOCTRINE_OVERLAY_LOCKOUT",
+          "halt",
+          `Doctrine overlay halted entries: ${doctrineOverlay.reasons.join(", ") || doctrineOverlay.mode}`,
+          { overlay: doctrineOverlay },
+        ),
+      ],
+      perSymbol: [],
+    });
+    return {
+      userId,
+      tick: "doctrine_overlay_lockout",
+      gateReasons: [],
+      expiredCount,
+      perSymbol: [],
+      overlay: doctrineOverlay,
+    };
+  }
+
   // Daily realized PnL is computed on read via a SQL function — there is no
   // realized_pnl_today column on account_state. Falling back to 0 here would
   // silently disable the daily loss cap.
