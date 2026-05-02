@@ -59,7 +59,7 @@ const initialsFor = (name?: string | null, email?: string | null) => {
 };
 
 export function AppSidebar() {
-  const { state } = useSidebar();
+  const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { user, profile, signOut } = useAuth();
@@ -67,6 +67,13 @@ export function AppSidebar() {
   const { pending } = useSignals();
   const { counts: expCounts } = useExperiments();
   const { guardrails } = useGuardrails();
+
+  // When the sidebar is rendered as a mobile overlay (narrow viewport — e.g.
+  // Lovable chat expanded), auto-close it after picking a nav item so the
+  // selected page isn't covered by the menu. No-op on desktop.
+  const handleNavClick = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   const alertCount = alerts.length;
   const signalCount = pending.length;
@@ -124,6 +131,7 @@ export function AppSidebar() {
                         <NavLink
                           to={item.url}
                           end
+                          onClick={handleNavClick}
                           className={cn(
                             "group flex items-center gap-2.5 rounded-md text-sm transition-colors",
                             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
