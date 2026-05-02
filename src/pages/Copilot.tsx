@@ -457,7 +457,9 @@ export default function Copilot() {
       promote_count: (katrinaReview.promote_ids ?? []).length,
       kill_count: (katrinaReview.kill_ids ?? []).length,
     } : null,
-  });
+    brainTrust: brainTrustClient,
+    });
+  };
 
   const send = async (text: string) => {
     if (!text.trim()) return;
