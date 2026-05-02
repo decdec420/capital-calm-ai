@@ -597,9 +597,11 @@ export async function executeTool(
         const changeSummary = args.change_summary as string;
         const rationale = args.rationale as string;
         const parameters = (args.parameters as Record<string, unknown>) ?? {};
+        const doctrineChanges = Array.isArray(args.doctrine_changes)
+          ? (args.doctrine_changes as Array<{ field: string; to_value: number; reason?: string }>)
+          : [];
 
-        // Apply known parameters immediately to system_state.
-        // active_profile is the primary tunable doctrine lever.
+        // 1) Apply system_state knobs immediately (active_profile etc).
         const VALID_PROFILES = ["sentinel", "active", "aggressive"];
         const dbPatch: Record<string, unknown> = {};
         if (parameters.active_profile && VALID_PROFILES.includes(parameters.active_profile as string)) {
@@ -615,12 +617,47 @@ export async function executeTool(
           if (patchErr) applyError = patchErr.message;
         }
 
-        // Log the change as implemented (not queued).
+        // 2) Route structured doctrine_changes through update-doctrine so the
+        //    24h cooldown applies to loosenings — Wags can't bypass the gate.
+        let doctrineResults: unknown[] = [];
+        if (doctrineChanges.length > 0) {
+          try {
+            const resp = await fetch(`${supabaseUrl}/functions/v1/update-doctrine`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                // Pass the operator's JWT so update-doctrine attributes the change
+                // to the right user (and audits actor=user). Wags is the
+                // operator's voice; the cooldown applies regardless.
+                Authorization: `Bearer ${token}`,
+                apikey: supabaseAnonKey,
+              },
+              body: JSON.stringify({
+                changes: doctrineChanges.map((c) => ({
+                  field: c.field,
+                  to_value: c.to_value,
+                  reason: c.reason ?? `[wags] ${rationale}`,
+                })),
+              }),
+            });
+            const body = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+              applyError = applyError ?? (body?.error ?? `update-doctrine failed: ${resp.status}`);
+            } else {
+              doctrineResults = Array.isArray(body?.results) ? body.results : [];
+            }
+          } catch (e) {
+            applyError = applyError ?? `update-doctrine fetch failed: ${String(e)}`;
+          }
+        }
+
         await appendSystemEvent("doctrine_change", {
           change_summary: changeSummary,
           rationale,
           parameters,
-          applied: Object.keys(dbPatch).length > 0 && !applyError,
+          doctrine_changes: doctrineChanges,
+          doctrine_results: doctrineResults,
+          applied: !applyError,
           applied_by: actorShort,
         });
 
@@ -632,13 +669,19 @@ export async function executeTool(
                 status: "applied",
                 change_summary: changeSummary,
                 parameters_set: dbPatch,
+                doctrine_results: doctrineResults,
               },
             };
         await adminClient
           .from("tool_calls")
           .insert({ ...logEntry, result, success: result.success });
         if (result.success) {
-          await appendAudit("doctrine_change", { change_summary: changeSummary, rationale, parameters: dbPatch });
+          await appendAudit("doctrine_change", {
+            change_summary: changeSummary,
+            rationale,
+            parameters: dbPatch,
+            doctrine_changes: doctrineChanges,
+          });
         }
         return result;
       }
