@@ -291,13 +291,16 @@ export default function Copilot() {
       }
       const { data: freshIntel } = await supabase
         .from("market_intelligence")
-        .select("symbol, generated_at");
+        .select("symbol, generated_at, recent_momentum_at");
       if (freshIntel) {
-        const map: Record<string, string> = {};
+        const macroMap: Record<string, string> = {};
+        const momMap: Record<string, string> = {};
         for (const row of freshIntel) {
-          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+          if (row.symbol && row.generated_at) macroMap[row.symbol] = row.generated_at;
+          if (row.symbol && row.recent_momentum_at) momMap[row.symbol] = row.recent_momentum_at;
         }
-        setIntelTimestamps(map);
+        setIntelTimestamps(macroMap);
+        setMomentumTimestamps(momMap);
       }
 
       // Step 2: Signal Engine (Taylor)
