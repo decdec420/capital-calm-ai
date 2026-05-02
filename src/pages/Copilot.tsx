@@ -44,6 +44,7 @@ export default function Copilot() {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [explainSignal, setExplainSignal] = useState<TradeSignal | null>(null);
   const [intelTimestamps, setIntelTimestamps] = useState<Record<string, string>>({});
+  const [momentumTimestamps, setMomentumTimestamps] = useState<Record<string, string>>({});
   const [katrinaReview, setKatrinaReview] = useState<{
     reviewed_at: string;
     brief_text: string;
@@ -102,10 +103,13 @@ export default function Copilot() {
   const activeProfile = getProfile(system?.activeProfile);
 
   const lastBrainTrustRun = useMemo(() => {
-    const times = Object.values(intelTimestamps).map((t) => new Date(t).getTime()).filter(Boolean);
+    // The Brain Trust strip should track MOMENTUM freshness — that's what the
+    // engine gates on. Falls back to macro generated_at when momentum is unset.
+    const source = Object.keys(momentumTimestamps).length > 0 ? momentumTimestamps : intelTimestamps;
+    const times = Object.values(source).map((t) => new Date(t).getTime()).filter(Boolean);
     if (times.length === 0) return null;
     return new Date(Math.max(...times));
-  }, [intelTimestamps]);
+  }, [intelTimestamps, momentumTimestamps]);
 
   const lastEngineRun = useMemo(() => {
     const ts = (system?.lastEngineSnapshot as { ranAt?: string } | null)?.ranAt;
@@ -128,16 +132,22 @@ export default function Copilot() {
     const load = async () => {
       const { data } = await supabase
         .from("market_intelligence")
-        .select("symbol, generated_at");
+        .select("symbol, generated_at, recent_momentum_at");
       if (data) {
-        const map: Record<string, string> = {};
+        const macroMap: Record<string, string> = {};
+        const momMap: Record<string, string> = {};
         for (const row of data) {
-          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+          if (row.symbol && row.generated_at) macroMap[row.symbol] = row.generated_at;
+          if (row.symbol && row.recent_momentum_at) momMap[row.symbol] = row.recent_momentum_at;
         }
-        setIntelTimestamps(map);
+        setIntelTimestamps(macroMap);
+        setMomentumTimestamps(momMap);
       }
     };
     load();
+    // Refresh every 30s so the strip doesn't go stale while the user sits.
+    const interval = setInterval(load, 30_000);
+    return () => clearInterval(interval);
   }, []);
 
   // Agent health — refreshed every 30s. Drives pipeline-strip dot colors.
@@ -281,13 +291,16 @@ export default function Copilot() {
       }
       const { data: freshIntel } = await supabase
         .from("market_intelligence")
-        .select("symbol, generated_at");
+        .select("symbol, generated_at, recent_momentum_at");
       if (freshIntel) {
-        const map: Record<string, string> = {};
+        const macroMap: Record<string, string> = {};
+        const momMap: Record<string, string> = {};
         for (const row of freshIntel) {
-          if (row.symbol && row.generated_at) map[row.symbol] = row.generated_at;
+          if (row.symbol && row.generated_at) macroMap[row.symbol] = row.generated_at;
+          if (row.symbol && row.recent_momentum_at) momMap[row.symbol] = row.recent_momentum_at;
         }
-        setIntelTimestamps(map);
+        setIntelTimestamps(macroMap);
+        setMomentumTimestamps(momMap);
       }
 
       // Step 2: Signal Engine (Taylor)

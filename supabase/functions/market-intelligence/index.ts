@@ -965,6 +965,54 @@ Deno.serve(async (req) => {
           results.push({ userId, symbol, ok: false, error: String(e) });
         }
       }
+      // Refresh agent_health.brain_trust based on actual momentum freshness.
+      // Status is keyed off the OLDEST short-horizon momentum_at across the
+      // whitelist — that's what the engine gates on.
+      try {
+        const { data: rows } = await admin
+          .from("market_intelligence")
+          .select("symbol, recent_momentum_at, recent_momentum_1h, recent_momentum_4h")
+          .eq("user_id", userId);
+        const now = Date.now();
+        const ages: number[] = [];
+        const missing: string[] = [];
+        for (const sym of SYMBOL_WHITELIST) {
+          const row = (rows ?? []).find((r: { symbol: string }) => r.symbol === sym);
+          const at = row?.recent_momentum_at ? new Date(row.recent_momentum_at).getTime() : null;
+          if (!at || !row?.recent_momentum_1h || !row?.recent_momentum_4h) {
+            missing.push(sym);
+          } else {
+            ages.push((now - at) / 60000);
+          }
+        }
+        const oldest = ages.length ? Math.max(...ages) : (missing.length ? 9999 : 0);
+        const status = missing.length === SYMBOL_WHITELIST.length
+          ? "failed"
+          : oldest > 120 ? "failed"
+          : oldest > 75  ? "stale"
+          : "healthy";
+        const lastError = status === "healthy"
+          ? null
+          : missing.length
+            ? `Missing momentum for: ${missing.join(", ")} (oldest ${Math.round(oldest)}m)`
+            : `Oldest momentum ${Math.round(oldest)}m across ${SYMBOL_WHITELIST.length} symbols`;
+        const nowIso = new Date().toISOString();
+        await admin.from("agent_health").upsert(
+          {
+            user_id: userId,
+            agent_name: "brain_trust",
+            status,
+            last_success: status === "healthy" ? nowIso : null,
+            last_failure: status === "failed" ? nowIso : null,
+            failure_count: status === "failed" ? 1 : 0,
+            last_error: lastError,
+            checked_at: nowIso,
+          },
+          { onConflict: "user_id,agent_name" },
+        );
+      } catch (e) {
+        console.error(`[brain-trust] agent_health upsert failed for ${userId}`, e);
+      }
     }
 
     return json({ ok: true, mode: isCron ? "cron" : "on_demand", results });
