@@ -207,7 +207,18 @@ ${cautionSet.size === 0 ? "- (none)" : Array.from(cautionSet).map((f) => `- ${f}
     throw new Error(`AI gateway error ${aiResp.status}: ${t.slice(0, 200)}`);
   }
 
-  }
+  const json = await aiResp.json();
+  const briefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
+
+  return {
+    briefText,
+    sessionBias,
+    keyLevels,
+    watchSymbols,
+    cautionFlags: Array.from(cautionSet),
+    aiModel: BRIEF_MODEL,
+  };
+}
 
 async function upsertBrief(
   admin: Admin,
@@ -234,19 +245,8 @@ async function upsertBrief(
 }
 
 Deno.serve(async (req) => {
-    const cors = makeCorsHeaders(req);
-  const json = await aiResp.json();
-    const briefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
-  
-    return {
-      briefText,
-      sessionBias,
-      keyLevels,
-      watchSymbols,
-      cautionFlags: Array.from(cautionSet),
-      aiModel: BRIEF_MODEL,
-    };
-if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  const cors = makeCorsHeaders(req);
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
