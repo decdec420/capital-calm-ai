@@ -132,22 +132,30 @@ if (req.method === "OPTIONS") {
     // write nothing to DB. The position stays open in both the broker and DB.
     let fillPx: number;
     let brokerOrderId: string | null = null;
+    let exitFeesUsd = 0;
+    // deno-lint-ignore no-explicit-any
+    let liveFill: any = null;
 
     if (liveEnabled) {
       try {
         const creds = await getBrokerCredentials(admin);
         const remainingForSell = Number(trade.size);
+        // Deterministic close clientOrderId — retries hit Coinbase's idempotency
+        // and never double-sell a position.
+        const closeClientOrderId = `${trade.id}-close`;
         const fill = await placeMarketSell(
           creds,
           trade.symbol,
           remainingForSell.toFixed(8),
-          crypto.randomUUID(),
+          closeClientOrderId,
         );
         fillPx = fill.fillPrice;
         brokerOrderId = fill.orderId;
+        exitFeesUsd = Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0;
+        liveFill = fill;
         console.log(
           `[trade-close] LIVE SELL filled: ${trade.symbol} @ $${fillPx} ` +
-            `size=${remainingForSell} orderId=${brokerOrderId}`,
+            `size=${remainingForSell} orderId=${brokerOrderId} fees=$${exitFeesUsd.toFixed(4)}`,
         );
       } catch (brokerErr) {
         const msg = brokerErr instanceof Error ? brokerErr.message : String(brokerErr);
@@ -177,6 +185,19 @@ if (req.method === "OPTIONS") {
           },
         );
       }
+    }
+
+    // Persist the fill before touching the trade row so the cost ledger
+    // is correct even if the trade UPDATE later fails.
+    if (liveFill) {
+      await recordFill(admin, {
+        userId,
+        tradeId: trade.id,
+        symbol: trade.symbol,
+        fillKind: "manual_close",
+        proposedPrice: fillPx, // no specific target on a manual close
+        fill: liveFill,
+      });
     }
 
     const sideMult = trade.side === "long" ? 1 : -1;
