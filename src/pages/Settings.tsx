@@ -12,17 +12,18 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 
-import { AlertTriangle, Compass, Plug } from "lucide-react";
+import { AlertTriangle, Compass, Plug, Wallet } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
 import { BrokerConnectionCard } from "@/components/trader/BrokerConnectionCard";
+import { supabase } from "@/integrations/supabase/client";
 
 import { toast } from "sonner";
 
 export default function Settings() {
   const { data: system, update: updateSystem, acknowledgeLiveMoney } = useSystemState();
-  const { data: account, update: updateAccount } = useAccountState();
+  const { data: account, update: updateAccount, refetch: refetchAccount } = useAccountState();
   const [killOpen, setKillOpen] = useState(false);
   const [ackOpen, setAckOpen] = useState(false);
   const [armConfirmOpen, setArmConfirmOpen] = useState(false);
