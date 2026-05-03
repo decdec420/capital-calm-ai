@@ -123,6 +123,30 @@ export default function Edge() {
   const [recentRouter, setRecentRouter] = useState<RouterDecisionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
+
+  async function handleReplay(strategyId: string, strategyName: string) {
+    setReplayingId(strategyId);
+    try {
+      const { data, error } = await supabase.functions.invoke("replay-strategy", {
+        body: { strategy_id: strategyId, folds: 5, window_size: 30, window_step: 5 },
+      });
+      if (error) throw error;
+      const verdict = (data as { verdict?: string; stability_score?: number | null; folds?: unknown[] })?.verdict ?? "n/a";
+      const score = (data as { stability_score?: number | null })?.stability_score;
+      const folds = ((data as { folds?: unknown[] })?.folds ?? []).length;
+      const scoreStr = typeof score === "number" ? `${(score * 100).toFixed(0)}%` : "—";
+      const tone = verdict === "stable_edge" ? "success" : verdict === "unstable_or_overfit" ? "error" : "info";
+      const msg = `${strategyName}: ${verdict.replace(/_/g, " ")} · stability ${scoreStr} across ${folds} folds`;
+      if (tone === "success") toast.success(msg);
+      else if (tone === "error") toast.error(msg);
+      else toast(msg);
+    } catch (e) {
+      toast.error(`Replay failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setReplayingId(null);
+    }
+  }
 
   const load = async () => {
     const [perfRes, metaRes, ciRes, sigRes] = await Promise.all([
