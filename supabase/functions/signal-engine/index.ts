@@ -1191,14 +1191,14 @@ async function runTickForUser(
     ? dynamicTradeable
     : STATIC_TRADEABLE_REGIMES;
 
-  const strategyId: string | null = approvedStrategy?.id ?? null;
-  const strategyVersion: string =
+  // These start as the *default* (top approved). After the router picks
+  // a per-signal strategy below (once we know symbol+side), we override.
+  let strategyId: string | null = approvedStrategy?.id ?? null;
+  let strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
   // Phase 1 (Kelly-lite): per-strategy risk weight scales the doctrine
   // RISK_PER_TRADE_PCT. Bounded [0.25, 2.0] so a misconfigured weight
   // can't blow past doctrine; the clamp/floor still has the final word.
-  // NOTE: this is the *default* (top approved); after the router picks
-  // a per-signal strategy below, we re-derive the effective risk_weight.
   let strategyRiskWeight: number = Math.max(
     0.25,
     Math.min(2.0, Number(approvedStrategy?.risk_weight ?? 1.0)),
@@ -1206,20 +1206,27 @@ async function runTickForUser(
 
   // Pull the live-tunable knobs out of the strategy params.
   type StratParam = { key: string; value: number | string | boolean };
-  const stratParams: StratParam[] = Array.isArray(approvedStrategy?.params)
-    ? (approvedStrategy!.params as StratParam[])
-    : [];
-  const paramNum = (key: string, fallback: number): number => {
-    const p = stratParams.find((p) => p.key === key);
+  const paramNumOf = (
+    params: StratParam[] | undefined,
+    key: string,
+    fallback: number,
+  ): number => {
+    const p = (params ?? []).find((p) => p.key === key);
     if (!p) return fallback;
     const n = typeof p.value === "number" ? p.value : Number(p.value);
     return Number.isFinite(n) ? n : fallback;
   };
-  const stratEmaFast = paramNum("ema_fast", 9);
-  const stratEmaSlow = paramNum("ema_slow", 21);
-  const stratRsiPeriod = paramNum("rsi_period", 14);
-  const stratStopAtrMult = paramNum("stop_atr_mult", 1.5);
-  const stratTpRMult = paramNum("tp_r_mult", 2);
+  const stratParams: StratParam[] = Array.isArray(approvedStrategy?.params)
+    ? (approvedStrategy!.params as StratParam[])
+    : [];
+  // Defaults from the top approved strategy. Used for regime computation
+  // (which runs per-symbol BEFORE we know which strategy will be picked).
+  const stratEmaFast = paramNumOf(stratParams, "ema_fast", 9);
+  const stratEmaSlow = paramNumOf(stratParams, "ema_slow", 21);
+  const stratRsiPeriod = paramNumOf(stratParams, "rsi_period", 14);
+  // These two are RE-DERIVED after router pick; initial value is just default.
+  let stratStopAtrMult = paramNumOf(stratParams, "stop_atr_mult", 1.5);
+  let stratTpRMult = paramNumOf(stratParams, "tp_r_mult", 2);
   const liveParams = {
     emaFast: stratEmaFast,
     emaSlow: stratEmaSlow,
