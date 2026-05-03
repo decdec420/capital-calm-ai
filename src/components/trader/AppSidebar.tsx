@@ -1,4 +1,4 @@
-import { Activity, BarChart2, Bell, BookOpen, Brain, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
+import { Activity, BarChart2, Bell, BookOpen, Brain, Gem, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -38,6 +38,7 @@ const sections = [
   {
     label: "Strategy",
     items: [
+      { title: "Edge", url: "/edge", icon: Gem },
       { title: "Strategy Lab", url: "/strategy", icon: TestTube2 },
       { title: "Risk Center", url: "/risk", icon: Shield },
       { title: "Learning", url: "/learning", icon: Brain },
