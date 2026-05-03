@@ -57,11 +57,18 @@ export function useSystemState() {
   const { user } = useAuth();
   const [data, setData] = useState<SystemState | null>(null);
   const [loading, setLoading] = useState(true);
+  /** ISO timestamp of the most recent successful data refresh. Updated on
+   *  every initial fetch and every Realtime push for system_state. Lets the
+   *  Overview page show a "last updated X seconds ago" indicator. */
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
 
   const refetch = async () => {
     if (!user) return;
     const { data: row } = await supabase.from("system_state").select("*").eq("user_id", user.id).maybeSingle();
-    if (row) setData(mapRow(row));
+    if (row) {
+      setData(mapRow(row));
+      setLastUpdatedAt(new Date().toISOString());
+    }
     setLoading(false);
   };
 
@@ -125,5 +132,5 @@ export function useSystemState() {
     await refetch();
   };
 
-  return { data, loading, update, refetch, acknowledgeLiveMoney };
+  return { data, loading, update, refetch, acknowledgeLiveMoney, lastUpdatedAt };
 }

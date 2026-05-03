@@ -37,6 +37,19 @@ export interface RiskContext {
   hasOpenPosition: boolean;
   /** Has a pending signal on the same symbol */
   hasPendingSignal: boolean;
+  /**
+   * Total number of open positions across ALL whitelisted symbols.
+   * When supplied, risk gate enforces the max-correlated-positions cap
+   * as a per-symbol block (defense-in-depth against signal-engine's
+   * early-exit halt).
+   */
+  openPositionCount?: number;
+  /**
+   * Sum of (entry_price × size) across all open positions, in USD.
+   * When supplied alongside equityUsd, the gate enforces the 40% book
+   * exposure cap at the per-symbol level.
+   */
+  bookExposureUsd?: number;
   /** Latest bid / ask for spread check (optional — only when available) */
   bid?: number;
   ask?: number;
@@ -137,7 +150,8 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
     );
   }
 
-  // Position / portfolio conflicts (symbol-specific block, not an account halt)
+  // ── Position / portfolio conflicts ────────────────────────────
+  // (1) Same-symbol block — never stack a second position on the same asset.
   if (ctx.hasOpenPosition) {
     reasons.push(
       gate(
@@ -148,6 +162,53 @@ export function evaluateRiskGates(ctx: RiskContext): GateReason[] {
       ),
     );
   }
+
+  // (2) Correlated-positions cap — defense-in-depth against the portfolio-level
+  // halt in signal-engine. Only fires when the caller supplies openPositionCount.
+  const maxCorrelated =
+    ctx.resolved?.maxCorrelatedPositions ??
+    (typeof ctx.profile === "object" && ctx.profile !== null
+      ? ctx.profile.maxCorrelatedPositions
+      : getProfile(typeof ctx.profile === "string" ? ctx.profile : undefined)
+          .maxCorrelatedPositions);
+  if (
+    typeof ctx.openPositionCount === "number" &&
+    ctx.openPositionCount >= maxCorrelated
+  ) {
+    reasons.push(
+      gate(
+        GATE_CODES.CORRELATED_POSITIONS_CAP,
+        "block",
+        `Max ${maxCorrelated} correlated position(s) already open (${ctx.openPositionCount} open).`,
+        { openPositionCount: ctx.openPositionCount, cap: maxCorrelated },
+      ),
+    );
+  }
+
+  // (3) Book exposure cap — prevent the book from exceeding 40% of equity
+  // across all open positions. Only fires when the caller supplies both values.
+  const BOOK_EXPOSURE_CAP = 0.40;
+  if (
+    typeof ctx.bookExposureUsd === "number" &&
+    ctx.equityUsd > 0 &&
+    ctx.bookExposureUsd / ctx.equityUsd >= BOOK_EXPOSURE_CAP
+  ) {
+    const pct = ctx.bookExposureUsd / ctx.equityUsd;
+    reasons.push(
+      gate(
+        GATE_CODES.BOOK_EXPOSURE,
+        "block",
+        `Book exposure ${(pct * 100).toFixed(1)}% ≥ ${(BOOK_EXPOSURE_CAP * 100).toFixed(0)}% cap ($${ctx.bookExposureUsd.toFixed(2)} open vs $${ctx.equityUsd.toFixed(2)} equity).`,
+        {
+          bookExposurePct: pct,
+          cap: BOOK_EXPOSURE_CAP,
+          bookExposureUsd: ctx.bookExposureUsd,
+          equityUsd: ctx.equityUsd,
+        },
+      ),
+    );
+  }
+
   if (ctx.hasPendingSignal) {
     reasons.push(
       gate(

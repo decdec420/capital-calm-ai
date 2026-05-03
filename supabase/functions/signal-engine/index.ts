@@ -94,6 +94,22 @@ const CB_STATE = {
 const OPEN_THRESHOLD = 3;       // Trip after 3 consecutive failures
 const RESET_AFTER_MS = 60_000;  // Stay open for 60s, then probe
 const BRAIN_TRUST_REFRESH_DEBOUNCE_MS = 10 * 60_000; // 10m per user+symbol
+
+// ── External heartbeat ────────────────────────────────────────────
+// Ping HEALTHCHECK_URL (e.g. Better Uptime / Cronitor dead-man ping)
+// after every successful cron tick. If the service stops receiving
+// pings for > 5 minutes it triggers an alert. Best-effort — never
+// blocks or throws; a failed ping is logged but does not fail the tick.
+async function pingHeartbeat(): Promise<void> {
+  const url = Deno.env.get("HEALTHCHECK_URL");
+  if (!url) return; // not configured — silently skip
+  try {
+    await fetch(url, { method: "GET", signal: AbortSignal.timeout(5_000) });
+    log("info", "heartbeat_ok", { fn: "signal-engine", url });
+  } catch (e) {
+    log("warn", "heartbeat_failed", { fn: "signal-engine", url, err: String(e) });
+  }
+}
 const brainTrustRefreshAttempts = new Map<string, number>();
 
 function cbAllow(): boolean {
@@ -101,7 +117,7 @@ function cbAllow(): boolean {
   if (CB_STATE.state === "open") {
     if (Date.now() - CB_STATE.openedAt >= RESET_AFTER_MS) {
       CB_STATE.state = "half-open";
-      console.log("[signal-engine] circuit breaker: half-open — probing AI");
+      log("warn", "cb_half_open", { fn: "signal-engine" });
       return true; // allow one probe
     }
     return false;
@@ -112,7 +128,7 @@ function cbAllow(): boolean {
 
 function cbSuccess(): void {
   if (CB_STATE.state !== "closed") {
-    console.log("[signal-engine] circuit breaker: closed — AI gateway recovered");
+    log("info", "cb_recovered", { fn: "signal-engine" });
   }
   CB_STATE.failures = 0;
   CB_STATE.state = "closed";
@@ -123,9 +139,7 @@ function cbFailure(): void {
   if (CB_STATE.state === "half-open" || CB_STATE.failures >= OPEN_THRESHOLD) {
     CB_STATE.state = "open";
     CB_STATE.openedAt = Date.now();
-    console.error(
-      `[signal-engine] circuit breaker OPEN after ${CB_STATE.failures} failures — pausing ${RESET_AFTER_MS/1000}s`,
-    );
+    log("error", "cb_open", { fn: "signal-engine", failures: CB_STATE.failures, pauseSec: RESET_AFTER_MS / 1000 });
   }
 }
 
@@ -333,7 +347,7 @@ async function expirePendingSignals(admin: any, userId: string): Promise<number>
     });
     if (!result.ok) {
       // Illegal transition — don't corrupt the row, just log and continue.
-      console.warn(`signal ${s.id} cannot transition to expired: ${result.error}`);
+      log("warn", "signal_expire_illegal_transition", { fn: "signal-engine", signalId: s.id, err: result.error });
       continue;
     }
     const next: LifecycleTransition[] = appendTransition(
@@ -387,8 +401,10 @@ async function decideForSymbol(opts: {
   profile: TradingProfile;
   /** Per-user resolved per-order USD cap. Overrides profile when present. */
   maxOrderUsdOverride?: number;
-  /** Paper mode flood gates: lower the confidence bar — a wrong paper trade
-   * is a data point, not a real loss. Defaults to false (live thresholds). */
+  /** Paper mode flag — apply live entry standards but annotate the signal as
+   * paper_grade so Katrina and Coach can separate paper vs live distributions.
+   * Thresholds are marginally relaxed (0.45/0.55 vs 0.55/0.65) to accumulate
+   * calibration data faster; the edge requirement is the same. Defaults to false. */
   isPaper?: boolean;
 }): Promise<
   | { decision: {
@@ -505,13 +521,14 @@ STOPS AND TARGETS:
 
 ${isPaper ? `
 PAPER MODE — CALIBRATION PHASE:
-You are running in paper mode. No real capital is at risk.
-Your threshold is 0.55 confidence (vs 0.65 in live). This is intentionally
-lower to generate more signal data — but you still require a real edge.
-Accept B+ setups with clear regime alignment. Reject chop, broken structure,
-and setups with no identifiable edge regardless of mode.
-Your paper results directly calibrate the Trade Coach. Don't flood the system
-with noise — that degrades future live performance. Quality > quantity.
+You are running in paper mode. Apply live entry standards — no real capital is
+at risk but every signal you generate trains the Trade Coach that will run
+with real money. Hold the same edge requirements you would in live trading.
+Confidence threshold is 0.55 (marginally below live's 0.65) to accumulate
+calibration data faster, but that is NOT a license to take weak setups.
+Require real regime alignment, clear structure, and a defined edge — every time.
+Reject chop, broken structure, and setups with no identifiable edge regardless of mode.
+Quality > quantity. Noise now degrades live performance later.
 ` : `
 A SKIP IS NOT FAILURE. Most ticks should be skips.
 The edge is in the quality of trades taken, not the quantity.
@@ -520,10 +537,13 @@ The edge is in the quality of trades taken, not the quantity.
 You MUST call submit_decision. No plain text responses.
 `.trim();
 
+  const TAYLOR_TIMEOUT_MS = 45_000;
+  const taylorStart = Date.now();
   const aiResp = await fetch(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
     {
       method: "POST",
+      signal: AbortSignal.timeout(TAYLOR_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
@@ -590,9 +610,15 @@ You MUST call submit_decision. No plain text responses.
     },
   );
 
+  const taylorDurationMs = Date.now() - taylorStart;
+  log("info", "ai_call_duration", { fn: "signal-engine", agent: "Taylor", symbol, durationMs: taylorDurationMs });
+  if (taylorDurationMs > TAYLOR_TIMEOUT_MS * 0.8) {
+    log("warn", "ai_call_slow", { fn: "signal-engine", agent: "Taylor", symbol, durationMs: taylorDurationMs, thresholdMs: TAYLOR_TIMEOUT_MS * 0.8 });
+  }
+
   if (!aiResp.ok) {
     const t = await aiResp.text().catch(() => "");
-    console.error(`AI gateway error ${symbol}`, aiResp.status, t);
+    log("error", "ai_gateway_error", { fn: "signal-engine", symbol, status: aiResp.status, body: t.slice(0, 200), durationMs: taylorDurationMs });
     cbFailure();
     return { error: "ai_error", status: aiResp.status };
   }
@@ -710,9 +736,12 @@ Proposed trade:
 What is your verdict?
 `.trim();
 
+  const BOBBY_TIMEOUT_MS = 30_000;
   try {
+    const bobbyStart = Date.now();
     const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
+      signal: AbortSignal.timeout(BOBBY_TIMEOUT_MS),
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: RISK_MANAGER_MODEL,
@@ -746,11 +775,13 @@ What is your verdict?
       }),
     });
 
+    const bobbyDurationMs = Date.now() - bobbyStart;
+    log("info", "ai_call_duration", { fn: "signal-engine", agent: "Bobby", durationMs: bobbyDurationMs });
+    if (bobbyDurationMs > BOBBY_TIMEOUT_MS * 0.8) {
+      log("warn", "ai_call_slow", { fn: "signal-engine", agent: "Bobby", durationMs: bobbyDurationMs, thresholdMs: BOBBY_TIMEOUT_MS * 0.8 });
+    }
     if (!resp.ok) {
-      console.error(
-        `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL}, status=${resp.status})`,
-        await resp.text().catch(() => ""),
-      );
+      log("error", "risk_manager_ai_failed", { fn: "signal-engine", model: RISK_MANAGER_MODEL, status: resp.status, body: (await resp.text().catch(() => "")).slice(0, 200), durationMs: bobbyDurationMs });
       cbFailure();
       return { verdict: "veto", reason: "Risk manager unavailable — failing safe. Retry next tick." };
     }
@@ -768,10 +799,7 @@ What is your verdict?
       reason: parsed.reason,
     };
   } catch (e) {
-    console.error(
-      `Risk Manager AI call failed — check model availability (model=${RISK_MANAGER_MODEL})`,
-      e,
-    );
+    log("error", "risk_manager_exception", { fn: "signal-engine", model: RISK_MANAGER_MODEL, err: String(e) });
     cbFailure();
     return { verdict: "veto", reason: "Risk manager exception — failing safe. Retry next tick." };
   }
@@ -890,9 +918,10 @@ async function runTickForUser(
   const RISK_PER_TRADE_PCT =
     settingsRow?.risk_per_trade_pct ?? activeProfile.riskPerTradePct;
 
-  // Paper mode flood gates: in paper mode lower setup_score and confidence bars
-  // so Taylor proposes more setups and the system builds pattern data faster.
-  // Live mode keeps full bars. Default to paper when mode is not explicitly "live".
+  // Paper mode: apply live entry discipline with marginally relaxed thresholds
+  // (setup_score 0.45 vs 0.55; confidence 0.55 vs 0.65) to build calibration data
+  // faster. Signals are annotated as paper_grade so performance distributions stay
+  // separate. Default to paper when mode is not explicitly "live".
   const isPaper = ((sys as { mode?: string } | null)?.mode ?? "paper") !== "live";
   const MIN_SETUP_SCORE = isPaper ? 0.45 : 0.55;   // paper: 0.45, live: 0.55
   const MIN_CONFIDENCE = isPaper ? 0.55 : 0.65;     // paper: 0.55, live: 0.65
@@ -944,11 +973,16 @@ async function runTickForUser(
   // MAX_BOOK_EXPOSURE_PCT of equity. Prevents oversizing across symbols.
   const MAX_BOOK_EXPOSURE_PCT = 0.40; // 40% of equity max
   const equity = acct ? Number(acct.equity) : 0;
-  if (equity > 0) {
-    const bookNotional = (openTrades ?? []).reduce((sum: number, t: { entry_price?: number; size?: number }) => {
-      const notional = (Number(t.entry_price ?? 0)) * (Number(t.size ?? 0));
+  // Hoisted outside the equity guard so per-symbol RiskContext can carry it
+  // for defense-in-depth inside risk.ts (even when equity is 0).
+  const bookNotional = (openTrades ?? []).reduce(
+    (sum: number, t: { entry_price?: number; size?: number }) => {
+      const notional = Number(t.entry_price ?? 0) * Number(t.size ?? 0);
       return sum + (isFinite(notional) ? notional : 0);
-    }, 0);
+    },
+    0,
+  );
+  if (equity > 0) {
     const bookExposurePct = bookNotional / equity;
     if (bookExposurePct >= MAX_BOOK_EXPOSURE_PCT) {
       const exposureGate = gate(
@@ -1191,7 +1225,7 @@ async function runTickForUser(
       .update({ doctrine_overlay_today: doctrineOverlay as unknown as Record<string, unknown> })
       .eq("user_id", userId);
   } catch (e) {
-    console.warn("signal-engine: doctrine overlay compute failed", e);
+    log("warn", "doctrine_overlay_failed", { fn: "signal-engine", userId, err: String(e) });
   }
 
   // If the overlay says LOCKOUT, halt new entries this tick. Existing
@@ -1226,7 +1260,7 @@ async function runTickForUser(
     { p_user_id: userId },
   );
   if (pnlErr) {
-    console.warn("signal-engine: realized_pnl_today RPC failed", pnlErr);
+    log("warn", "realized_pnl_rpc_failed", { fn: "signal-engine", userId, err: pnlErr.message });
   }
   const dailyRealizedPnlUsd = Number(pnlToday ?? 0);
 
@@ -1285,6 +1319,12 @@ async function runTickForUser(
       botStatus: sys.bot ?? "paused",
       hasOpenPosition: symbolsWithOpen.has(symbol),
       hasPendingSignal: symbolsWithPending.has(symbol),
+      // Portfolio-level context — gives risk.ts defense-in-depth over the
+      // correlation cap and book exposure cap (signal-engine's early exits
+      // already enforce these at the portfolio level; these fields make the
+      // per-symbol gate self-sufficient for any other caller of risk.ts).
+      openPositionCount: (openTrades ?? []).length,
+      bookExposureUsd: bookNotional,
       latestCandleEndedAt: candles && candles.length > 0
         ? new Date(candles[candles.length - 1].t * 1000).toISOString()
         : undefined,
@@ -1383,9 +1423,7 @@ async function runTickForUser(
         const before = regime.setupScore;
         // Mutate in place — downstream filter uses regime.setupScore directly.
         (regime as { setupScore: number }).setupScore = Math.max(0, before * penalty);
-        console.log(
-          `[signal-engine] ${symbol} stale-intel penalty ${(penalty*100).toFixed(0)}% — ${penaltyReason} — setupScore ${before.toFixed(2)} → ${regime.setupScore.toFixed(2)}`,
-        );
+        log("info", "stale_intel_penalty", { fn: "signal-engine", symbol, penaltyPct: Math.round(penalty * 100), reason: penaltyReason, scoreBefore: before.toFixed(2), scoreAfter: regime.setupScore.toFixed(2) });
       }
     }
 
@@ -1419,12 +1457,7 @@ async function runTickForUser(
       // P6-I: this was a silent skip. Surface it in logs and agent_health
       // so Jessica + the Risk Center know the candle feed dropped.
       const ranAt = new Date().toISOString();
-      console.error("[signal-engine] empty candle feed", {
-        symbol,
-        userId,
-        ranAt,
-        note: "Coinbase candle endpoint returned no data for this tick.",
-      });
+      log("error", "empty_candle_feed", { fn: "signal-engine", symbol, userId, ranAt });
       // Fire-and-forget — never let a health write block the rest of the tick.
       admin
         .from("agent_health")
@@ -1442,7 +1475,7 @@ async function runTickForUser(
         )
         .then(({ error }) => {
           if (error) {
-            console.error("[signal-engine] agent_health upsert failed", error);
+            log("error", "agent_health_upsert_failed", { fn: "signal-engine", userId, symbol, err: error.message });
           }
         });
 
@@ -1927,9 +1960,7 @@ async function runTickForUser(
     : rawConf;
   if (coachVerdict) {
     decision.reasoning = `[Coach] ${coachVerdict.warning} ${decision.reasoning ?? ""}`.trim();
-    console.log(
-      `coach: ${winner.symbol}/${side} conf ${rawConf.toFixed(2)} → ${conf.toFixed(2)} (${coachVerdict.warning})`,
-    );
+    log("info", "coach_penalty_applied", { fn: "signal-engine", userId, symbol: winner.symbol, side, confBefore: rawConf.toFixed(2), confAfter: conf.toFixed(2), warning: coachVerdict.warning });
   }
   // Re-check MIN_CONFIDENCE after coach penalty — the multiplier may have
   // pushed a borderline signal below the threshold. Drop it here rather than
@@ -2079,9 +2110,7 @@ async function runTickForUser(
       const mult = Math.max(0.25, Math.min(0.75, riskVerdict.sizeMultiplier ?? 0.5));
       sizeUsd = Math.max(0.25, sizeUsd * mult);
       fullSize = entry > 0 ? sizeUsd / entry : fullSize;
-      console.log(
-        `Risk Manager reduced size $${originalSizeUsd.toFixed(2)} → $${sizeUsd.toFixed(2)} (×${mult}): ${riskVerdict.reason}`,
-      );
+      log("info", "risk_manager_reduced_size", { fn: "signal-engine", userId, symbol: winner.symbol, sizeBefore: originalSizeUsd.toFixed(2), sizeAfter: sizeUsd.toFixed(2), multiplier: mult, reason: riskVerdict.reason });
       decision.reasoning = `${decision.reasoning ?? ""} [Risk Manager: ${riskVerdict.reason}]`;
     }
   }
@@ -2162,7 +2191,7 @@ async function runTickForUser(
     .single();
 
   if (insertErr) {
-    console.error("signal insert failed", insertErr);
+    log("error", "signal_insert_failed", { fn: "signal-engine", userId, symbol: winner.symbol, err: insertErr.message });
     const insGate = gate(
       GATE_CODES.INSERT_ERROR,
       "halt",
@@ -2212,7 +2241,7 @@ async function runTickForUser(
     executedTodayUsd = Number(notionalData ?? 0);
   } catch (e) {
     // If we can't read the notional, fail-closed: block auto-execute.
-    console.error("auto_executed_notional_today rpc failed:", e);
+    log("error", "auto_executed_notional_rpc_failed", { fn: "signal-engine", userId, err: String(e) });
     executedTodayUsd = Number.POSITIVE_INFINITY;
   }
   const totalAfter = executedTodayUsd + proposedNotionalUsd;
@@ -2224,10 +2253,7 @@ async function runTickForUser(
     (autonomy === "autonomous" || (autonomy === "assisted" && conf >= 0.85));
 
   if (dailyCapBlocked) {
-    console.warn(
-      `auto-execute blocked: daily $ cap. ` +
-        `today=$${executedTodayUsd.toFixed(4)} + proposed=$${proposedNotionalUsd.toFixed(4)} > cap=$${dailyAutoCapUsd.toFixed(2)}`,
-    );
+    log("warn", "auto_execute_daily_cap_blocked", { fn: "signal-engine", userId, symbol: winner.symbol, todayUsd: executedTodayUsd, proposedUsd: proposedNotionalUsd, capUsd: dailyAutoCapUsd });
   }
 
   if (autoApprove) {
@@ -2298,10 +2324,7 @@ async function runTickForUser(
       .single();
 
     if (pendingInsertErr || !pendingTradeRow) {
-      console.error(
-        "[signal-engine] PHASE-1 pre-insert failed — aborting auto-execute:",
-        pendingInsertErr,
-      );
+      log("error", "auto_execute_pre_insert_failed", { fn: "signal-engine", userId, symbol: winner.symbol, signalId: signalRow.id, err: pendingInsertErr?.message ?? "no row returned" });
       // Signal stays proposed; operator can approve manually.
       await persistSnapshot(admin, userId, {
         gateReasons: [{
@@ -2345,10 +2368,7 @@ async function runTickForUser(
         liveEntry = fill.fillPrice;
         liveSize = fill.filledBaseSize;
         brokerOrderId = fill.orderId;
-        console.log(
-          `[signal-engine] LIVE BUY auto-executed ${winner.symbol} ` +
-            `@ $${liveEntry} size=${liveSize} orderId=${brokerOrderId}`,
-        );
+        log("info", "live_buy_executed", { fn: "signal-engine", userId, symbol: winner.symbol, entryPrice: liveEntry, size: liveSize, orderId: brokerOrderId });
         // Promote pending → open with actual fill data
         await admin
           .from("trades")
@@ -2362,11 +2382,7 @@ async function runTickForUser(
           })
           .eq("id", pendingTradeRow.id);
       } catch (brokerErr) {
-        console.error(
-          `[signal-engine] LIVE auto-execute broker failed for ${winner.symbol} — ` +
-            `trade ${pendingTradeRow.id} marked broker_failed for manual reconciliation:`,
-          brokerErr,
-        );
+        log("error", "live_auto_execute_broker_failed", { fn: "signal-engine", userId, symbol: winner.symbol, tradeId: pendingTradeRow.id, err: String(brokerErr) });
         // Mark pre-inserted row as failed so operator can reconcile against Coinbase.
         await admin
           .from("trades")
@@ -2484,7 +2500,7 @@ async function runTickForUser(
       });
     } catch (e) {
       // Don't crash the engine on a notify failure.
-      console.error("notify_telegram failed (non-fatal):", e);
+      log("warn", "notify_telegram_failed", { fn: "signal-engine", userId, symbol: winner.symbol, err: String(e) });
     }
   }
 
@@ -2594,17 +2610,17 @@ Deno.serve(async (req) => {
       const r15 = candleResults15m[i];
       if (r1h.status === "fulfilled") candlesBySymbol[s] = r1h.value;
       else {
-        console.error(`Failed to fetch ${s} 1h:`, r1h.reason);
+        log("error", "candle_fetch_failed", { fn: "signal-engine", symbol: s, timeframe: "1h", err: String(r1h.reason) });
         candlesBySymbol[s] = [];
       }
       if (r4h.status === "fulfilled") candlesBySymbol4h[s] = r4h.value;
       else {
-        console.error(`Failed to fetch ${s} 4h:`, r4h.reason);
+        log("error", "candle_fetch_failed", { fn: "signal-engine", symbol: s, timeframe: "4h", err: String(r4h.reason) });
         candlesBySymbol4h[s] = [];
       }
       if (r15.status === "fulfilled") candlesBySymbol15m[s] = r15.value;
       else {
-        console.error(`Failed to fetch ${s} 15m:`, r15.reason);
+        log("error", "candle_fetch_failed", { fn: "signal-engine", symbol: s, timeframe: "15m", err: String(r15.reason) });
         candlesBySymbol15m[s] = [];
       }
     });
@@ -2642,8 +2658,13 @@ Deno.serve(async (req) => {
             LOVABLE_API_KEY,
           );
           results.push(r);
+          // Dead-man heartbeat — ping after every successful tick so an
+          // external monitor (HEALTHCHECK_URL) knows the engine is running.
+          // Fire-and-forget; the 5s AbortSignal inside pingHeartbeat ensures
+          // it never stalls the tick loop.
+          pingHeartbeat();
         } catch (e) {
-          console.error("user tick failed", u.user_id, e);
+          log("error", "user_tick_failed", { fn: "signal-engine", userId: u.user_id, err: String(e) });
           results.push({
             userId: u.user_id,
             tick: "error",
@@ -2702,7 +2723,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    console.error("signal-engine error:", e);
+    log("error", "handler_error", { fn: "signal-engine", err: String(e) });
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {

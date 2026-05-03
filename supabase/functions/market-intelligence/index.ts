@@ -15,6 +15,7 @@ import { SYMBOL_WHITELIST, type Symbol } from "../_shared/doctrine.ts";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { fetchCandles, type Candle } from "../_shared/market.ts";
+import { log } from "../_shared/logger.ts";
 
 // Tiered Brain Trust freshness — each expert has its own cadence so the desk
 // feels live without burning gateway credits on near-identical reads.
@@ -231,8 +232,10 @@ async function callExpert(
   toolSchema: object,
   model: string,
 ): Promise<Record<string, unknown> | null> {
+  const AI_TIMEOUT_MS = 45_000;
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), 45_000);
+  const t = setTimeout(() => ac.abort(), AI_TIMEOUT_MS);
+  const aiCallStart = Date.now();
   try {
     const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -256,9 +259,14 @@ async function callExpert(
         tool_choice: { type: "function", function: { name: toolName } },
       }),
     });
+    const durationMs = Date.now() - aiCallStart;
+    log("info", "ai_call_duration", { fn: "market-intelligence", expert: toolName, durationMs });
+    if (durationMs > AI_TIMEOUT_MS * 0.8) {
+      log("warn", "ai_call_slow", { fn: "market-intelligence", expert: toolName, durationMs, thresholdMs: AI_TIMEOUT_MS * 0.8 });
+    }
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
-      console.error(`Expert ${toolName} failed: ${resp.status} ${body.slice(0, 200)}`);
+      log("error", "expert_ai_failed", { fn: "market-intelligence", expert: toolName, status: resp.status, body: body.slice(0, 200), durationMs });
       return null;
     }
     const d = await resp.json();
@@ -270,7 +278,8 @@ async function callExpert(
       return null;
     }
   } catch (e) {
-    console.error(`Expert ${toolName} threw:`, e);
+    const durationMs = Date.now() - aiCallStart;
+    log("error", "expert_ai_threw", { fn: "market-intelligence", expert: toolName, err: String(e), durationMs });
     return null;
   } finally {
     clearTimeout(t);
@@ -719,9 +728,7 @@ async function runIntelligenceForSymbol(
 
   // If nothing needs running, short-circuit completely (no fetches, no writes).
   if (!runMafee && !runBill && !runHall) {
-    console.log(
-      `[brain-trust] ${symbol} all-fresh — Mafee ${Math.round(mafeeAge/60000)}m, Bill ${Math.round(billAge/60000)}m, Hall ${Math.round(hallAge/60000)}m`,
-    );
+    log("info", "brain_trust_all_fresh", { fn: "market-intelligence", symbol, mafeeAgeMin: Math.round(mafeeAge / 60000), billAgeMin: Math.round(billAge / 60000), hallAgeMin: Math.round(hallAge / 60000) });
     return { skipped: "fresh" };
   }
 
@@ -743,7 +750,19 @@ async function runIntelligenceForSymbol(
   for (const [tf, res] of [["1h", c1hRes], ["6h", c6hRes], ["1d", c1dRes]] as const) {
     if (res.status === "rejected") {
       const msg = res.reason instanceof Error ? res.reason.message : String(res.reason);
-      console.error(`[brain-trust] ${symbol} candle fetch failed (${tf}): ${msg}`);
+      log("error", "candle_fetch_failed", { fn: "market-intelligence", symbol, timeframe: tf, err: msg });
+      // Best-effort system_event audit trail — write on final failure after all retries exhausted.
+      admin
+        .from("system_events")
+        .insert({
+          user_id: userId,
+          event_type: "candle_fetch_failed",
+          actor: "system",
+          payload: { fn: "market-intelligence", symbol, timeframe: tf, err: msg },
+        })
+        .then(({ error: evtErr }: { error: { message: string } | null }) => {
+          if (evtErr) log("warn", "system_event_insert_failed", { fn: "market-intelligence", err: evtErr.message });
+        });
     }
   }
 
@@ -756,13 +775,13 @@ async function runIntelligenceForSymbol(
 
   // Hall needs 6h+1d to run meaningfully — degrade gracefully if missing.
   if (runHall && (candles6h.length === 0 || candles1d.length === 0)) {
-    console.warn(`[brain-trust] ${symbol} Hall skipped — insufficient 6h/1d candles`);
+    log("warn", "expert_skipped", { fn: "market-intelligence", symbol, expert: "Hall", reason: "insufficient 6h/1d candles" });
     runHall = false;
   }
   // Mafee needs 1h candles.
   const canRunMafee = runMafee && candles1h.length > 0;
   if (runMafee && !canRunMafee) {
-    console.warn(`[brain-trust] ${symbol} Mafee skipped — no 1h candles`);
+    log("warn", "expert_skipped", { fn: "market-intelligence", symbol, expert: "Mafee", reason: "no 1h candles" });
   }
 
   // Event-driven Hall trigger: if price has crossed prior S/R, force a re-run
@@ -772,7 +791,7 @@ async function runIntelligenceForSymbol(
     const prevSup = prev.nearest_support != null ? Number(prev.nearest_support) : null;
     const prevRes = prev.nearest_resistance != null ? Number(prev.nearest_resistance) : null;
     if ((prevSup != null && lastClose < prevSup) || (prevRes != null && lastClose > prevRes)) {
-      console.log(`[brain-trust] ${symbol} Hall force-rerun — price ${lastClose} broke S/R (${prevSup}/${prevRes})`);
+      log("info", "hall_sr_breach_rerun", { fn: "market-intelligence", symbol, lastClose, prevSup, prevRes });
       runHall = candles6h.length > 0 && candles1d.length > 0;
     }
   }
@@ -822,9 +841,12 @@ async function runIntelligenceForSymbol(
     : null;
   if (canRunMafee) ran.push(patternResult ? "Mafee" : "Mafee(failed)");
 
-  console.log(`[brain-trust] ${symbol} ran: [${ran.join(", ")}] (skipped: ${
-    [!runHall && "Hall", !runBill && "Bill", !canRunMafee && "Mafee"].filter(Boolean).join(", ") || "none"
-  })`);
+  log("info", "brain_trust_ran", {
+    fn: "market-intelligence",
+    symbol,
+    ran: ran.join(", "),
+    skipped: [!runHall && "Hall", !runBill && "Bill", !canRunMafee && "Mafee"].filter(Boolean).join(", ") || "none",
+  });
 
   // ── Build upsert: use fresh values where we ran, else carry from prev ──
   // Carry-over helper: if expert didn't run (or returned null), keep prior value.
@@ -897,13 +919,13 @@ async function runIntelligenceForSymbol(
     .select("id, user_id, symbol, generated_at, recent_momentum_at");
 
   if (error) {
-    console.error(`Upsert failed for ${userId}/${symbol}:`, error.message, JSON.stringify(error));
+    log("error", "intelligence_upsert_failed", { fn: "market-intelligence", userId, symbol, err: error.message, detail: JSON.stringify(error) });
     throw error;
   }
   if (!upsertData || upsertData.length === 0) {
     throw new Error(`Upsert wrote 0 rows for ${userId}/${symbol}`);
   }
-  console.log(`[upsert] ${userId}/${symbol} OK — momentum_at=${upsertData[0].recent_momentum_at}, generated_at=${upsertData[0].generated_at}`);
+  log("info", "intelligence_upsert_ok", { fn: "market-intelligence", userId, symbol, momentum_at: upsertData[0].recent_momentum_at, generated_at: upsertData[0].generated_at });
   return { ran };
 }
 
@@ -961,7 +983,7 @@ Deno.serve(async (req) => {
           await runIntelligenceForSymbol(admin, userId, symbol as Symbol, LOVABLE_API_KEY, { skipFreshness: !isCron });
           results.push({ userId, symbol, ok: true });
         } catch (e) {
-          console.error(`Intelligence failed for ${userId}/${symbol}:`, e);
+          log("error", "intelligence_symbol_failed", { fn: "market-intelligence", userId, symbol, err: String(e) });
           results.push({ userId, symbol, ok: false, error: String(e) });
         }
       }
@@ -1011,13 +1033,13 @@ Deno.serve(async (req) => {
           { onConflict: "user_id,agent_name" },
         );
       } catch (e) {
-        console.error(`[brain-trust] agent_health upsert failed for ${userId}`, e);
+        log("error", "agent_health_upsert_failed", { fn: "market-intelligence", userId, err: String(e) });
       }
     }
 
     return json({ ok: true, mode: isCron ? "cron" : "on_demand", results });
   } catch (e) {
-    console.error("market-intelligence error:", e);
+    log("error", "handler_error", { fn: "market-intelligence", err: String(e) });
     return json({ error: String(e) }, 500);
   }
 });

@@ -1,4 +1,5 @@
 import { corsHeaders } from "../_shared/cors.ts";
+import { log } from "../_shared/logger.ts";
 // ============================================================
 // post-trade-learn — automatic per-trade learning artifact
 // ------------------------------------------------------------
@@ -320,10 +321,13 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
 - Macro summary: "${intel?.macro_summary ?? "not available"}"
 `.trim();
 
+  const COACH_TIMEOUT_MS = 45_000;
+  const coachStart = Date.now();
   const aiResp = await fetch(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
     {
       method: "POST",
+      signal: AbortSignal.timeout(COACH_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -401,8 +405,14 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
     },
   );
 
+  const coachDurationMs = Date.now() - coachStart;
+  log("info", "ai_call_duration", { fn: "post-trade-learn", agent: "Coach", durationMs: coachDurationMs });
+  if (coachDurationMs > COACH_TIMEOUT_MS * 0.8) {
+    log("warn", "ai_call_slow", { fn: "post-trade-learn", agent: "Coach", durationMs: coachDurationMs, thresholdMs: COACH_TIMEOUT_MS * 0.8 });
+  }
+
   if (!aiResp.ok) {
-    console.error("trade coach AI error", aiResp.status, await aiResp.text());
+    log("error", "trade_coach_ai_failed", { fn: "post-trade-learn", status: aiResp.status, body: (await aiResp.text().catch(() => "")).slice(0, 200) });
     return;
   }
   const aiJson = await aiResp.json();
@@ -703,7 +713,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (insErr) {
-      console.error("journal insert failed", insErr);
+      log("error", "journal_insert_failed", { fn: "post-trade-learn", err: insErr.message });
       return new Response(
         JSON.stringify({ error: "Journal insert failed", detail: insErr.message }),
         {
@@ -718,7 +728,7 @@ Deno.serve(async (req) => {
       try {
         await refreshStrategyMetrics(admin, t.strategy_id, t.user_id);
       } catch (e) {
-        console.error("rolling metric refresh failed", e);
+        log("error", "metric_refresh_failed", { fn: "post-trade-learn", strategyId: t.strategy_id, err: String(e) });
       }
     }
 
@@ -729,7 +739,7 @@ Deno.serve(async (req) => {
       try {
         await runTradeCoach(admin, t, sig, outcome, LOVABLE_API_KEY);
       } catch (e) {
-        console.error("trade coach failed (non-fatal):", e);
+        log("error", "trade_coach_failed", { fn: "post-trade-learn", tradeId: t.id, err: String(e) });
       }
     }
 
@@ -743,17 +753,15 @@ Deno.serve(async (req) => {
         .eq("user_id", t.user_id)
         .eq("status", "closed");
       if (count && count > 0 && count % 10 === 0) {
-        console.log(`[post-trade-learn] milestone ${count} closed trades — triggering katrina for user ${t.user_id}`);
+        log("info", "katrina_milestone_trigger", { fn: "post-trade-learn", userId: t.user_id, closedCount: count });
         const internalSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
         const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
           Deno.env.get("SERVICE_KEY") ??
           "";
         if (!internalSecret) {
-          console.warn("[post-trade-learn] INTERNAL_FUNCTION_SECRET missing; skipping Katrina milestone trigger");
+          log("warn", "katrina_trigger_skipped", { fn: "post-trade-learn", reason: "INTERNAL_FUNCTION_SECRET missing" });
         } else if (!serviceRoleKey) {
-          console.warn(
-            "[post-trade-learn] SUPABASE_SERVICE_ROLE_KEY/SERVICE_KEY missing; skipping Katrina milestone trigger",
-          );
+          log("warn", "katrina_trigger_skipped", { fn: "post-trade-learn", reason: "SUPABASE_SERVICE_ROLE_KEY missing" });
         } else {
           fetch(`${SUPABASE_URL}/functions/v1/katrina`, {
             method: "POST",
@@ -766,11 +774,11 @@ Deno.serve(async (req) => {
               "x-internal-function-secret": internalSecret,
             },
             body: JSON.stringify({ trigger: "trade_milestone", user_id: t.user_id }),
-          }).catch((err) => console.error("[post-trade-learn] katrina dispatch failed (non-fatal):", err));
+          }).catch((err) => log("error", "katrina_dispatch_failed", { fn: "post-trade-learn", err: String(err) }));
         }
       }
     } catch (e) {
-      console.error("[post-trade-learn] milestone check failed (non-fatal):", e);
+      log("error", "milestone_check_failed", { fn: "post-trade-learn", err: String(e) });
     }
 
     return new Response(
@@ -784,7 +792,7 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
-    console.error("post-trade-learn error:", e);
+    log("error", "handler_error", { fn: "post-trade-learn", err: String(e) });
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {

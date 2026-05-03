@@ -79,3 +79,34 @@ Deno.test("risk — guardrail blocked halts", () => {
   });
   assertEquals(r.some((x) => x.code === "GUARDRAIL_BLOCKED"), true);
 });
+
+Deno.test("risk — correlated positions cap blocks when at limit", () => {
+  // Sentinel profile maxCorrelatedPositions = 3; supplying 3 open positions triggers the gate.
+  const r = evaluateRiskGates({ ...baseCtx, openPositionCount: 3 });
+  assertEquals(r.some((x) => x.code === "CORRELATED_POSITIONS_CAP"), true);
+  assertEquals(r.find((x) => x.code === "CORRELATED_POSITIONS_CAP")?.severity, "block");
+});
+
+Deno.test("risk — correlated positions cap does not fire below limit", () => {
+  const r = evaluateRiskGates({ ...baseCtx, openPositionCount: 2 });
+  assertEquals(r.some((x) => x.code === "CORRELATED_POSITIONS_CAP"), false);
+});
+
+Deno.test("risk — book exposure cap blocks when at or above 40%", () => {
+  // equityUsd = 100, bookExposureUsd = 40 → 40% → should block.
+  const r = evaluateRiskGates({ ...baseCtx, bookExposureUsd: 40 });
+  assertEquals(r.some((x) => x.code === "BOOK_EXPOSURE"), true);
+  assertEquals(r.find((x) => x.code === "BOOK_EXPOSURE")?.severity, "block");
+});
+
+Deno.test("risk — book exposure cap does not fire below 40%", () => {
+  // equityUsd = 100, bookExposureUsd = 39 → 39% → clear.
+  const r = evaluateRiskGates({ ...baseCtx, bookExposureUsd: 39 });
+  assertEquals(r.some((x) => x.code === "BOOK_EXPOSURE"), false);
+});
+
+Deno.test("risk — book exposure cap does not fire when equity is 0", () => {
+  // Avoid division-by-zero guard: equity = 0 should not produce a false positive.
+  const r = evaluateRiskGates({ ...baseCtx, equityUsd: 0, bookExposureUsd: 50 });
+  assertEquals(r.some((x) => x.code === "BOOK_EXPOSURE"), false);
+});
