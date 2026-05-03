@@ -117,12 +117,13 @@ function fmtAgo(iso: string | null): string {
 export default function Edge() {
   const [rows, setRows] = useState<StrategyRow[] | null>(null);
   const [metaById, setMetaById] = useState<Record<string, StrategyMeta>>({});
+  const [ciById, setCiById] = useState<Record<string, StrategyCIRow>>({});
   const [recentRouter, setRecentRouter] = useState<RouterDecisionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = async () => {
-    const [perfRes, metaRes, sigRes] = await Promise.all([
+    const [perfRes, metaRes, ciRes, sigRes] = await Promise.all([
       supabase
         .from("strategy_performance_v" as never)
         .select("*")
@@ -131,6 +132,9 @@ export default function Edge() {
       supabase
         .from("strategies")
         .select("id, consecutive_losses, auto_paused_at, auto_pause_reason"),
+      supabase
+        .from("strategy_performance_ci_v" as never)
+        .select("*"),
       supabase
         .from("trade_signals")
         .select("id, symbol, side, regime, created_at, context_snapshot")
@@ -148,6 +152,11 @@ export default function Edge() {
       metaMap[m.id] = m;
     }
     setMetaById(metaMap);
+    const ciMap: Record<string, StrategyCIRow> = {};
+    for (const c of ((ciRes.data ?? []) as unknown as StrategyCIRow[])) {
+      ciMap[c.strategy_id] = c;
+    }
+    setCiById(ciMap);
     setRecentRouter((sigRes.data ?? []) as unknown as RouterDecisionRow[]);
   };
 
