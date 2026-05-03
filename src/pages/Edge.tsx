@@ -337,6 +337,19 @@ export default function Edge() {
                           {verdict.replace(/_/g, " ")}
                         </Badge>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          disabled={replayingId === r.strategy_id || (ci?.closed_trades ?? 0) < 30}
+                          onClick={() => handleReplay(r.strategy_id, r.strategy_name)}
+                          title={(ci?.closed_trades ?? 0) < 30 ? "Need 30+ closed trades to replay" : "Walk-forward replay"}
+                        >
+                          <Repeat className="h-3 w-3 mr-1" />
+                          {replayingId === r.strategy_id ? "Replaying…" : "Replay"}
+                        </Button>
+                      </td>
                     </tr>
                   );
                 })}
