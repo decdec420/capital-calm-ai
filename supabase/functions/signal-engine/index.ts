@@ -1146,7 +1146,7 @@ async function runTickForUser(
   // zero effect on real trades.
   const { data: approvedStrategy } = await admin
     .from("strategies")
-    .select("id,version,params")
+    .select("id,version,params,risk_weight")
     .eq("user_id", userId)
     .eq("status", "approved")
     .order("updated_at", { ascending: false })
@@ -1154,6 +1154,13 @@ async function runTickForUser(
   const strategyId: string | null = approvedStrategy?.id ?? null;
   const strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
+  // Phase 1 (Kelly-lite): per-strategy risk weight scales the doctrine
+  // RISK_PER_TRADE_PCT. Bounded [0.25, 2.0] so a misconfigured weight
+  // can't blow past doctrine; the clamp/floor still has the final word.
+  const strategyRiskWeight: number = Math.max(
+    0.25,
+    Math.min(2.0, Number(approvedStrategy?.risk_weight ?? 1.0)),
+  );
 
   // Pull the live-tunable knobs out of the strategy params.
   type StratParam = { key: string; value: number | string | boolean };
