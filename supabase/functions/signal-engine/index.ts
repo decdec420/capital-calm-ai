@@ -77,6 +77,7 @@ import {
   getBrokerCredentials,
   placeMarketBuy,
 } from "../_shared/broker.ts";
+import { recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 
