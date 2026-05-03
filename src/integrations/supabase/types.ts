@@ -182,6 +182,71 @@ export type Database = {
         }
         Relationships: []
       }
+      broker_fills: {
+        Row: {
+          base_size: number
+          broker_order_id: string | null
+          client_order_id: string
+          created_at: string
+          fees_usd: number
+          fill_kind: string
+          fill_price: number
+          id: string
+          proposed_price: number | null
+          quote_size: number
+          raw: Json
+          side: string
+          slippage_pct: number | null
+          symbol: string
+          trade_id: string | null
+          user_id: string
+        }
+        Insert: {
+          base_size: number
+          broker_order_id?: string | null
+          client_order_id: string
+          created_at?: string
+          fees_usd?: number
+          fill_kind: string
+          fill_price: number
+          id?: string
+          proposed_price?: number | null
+          quote_size: number
+          raw?: Json
+          side: string
+          slippage_pct?: number | null
+          symbol: string
+          trade_id?: string | null
+          user_id: string
+        }
+        Update: {
+          base_size?: number
+          broker_order_id?: string | null
+          client_order_id?: string
+          created_at?: string
+          fees_usd?: number
+          fill_kind?: string
+          fill_price?: number
+          id?: string
+          proposed_price?: number | null
+          quote_size?: number
+          raw?: Json
+          side?: string
+          slippage_pct?: number | null
+          symbol?: string
+          trade_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broker_fills_trade_id_fkey"
+            columns: ["trade_id"]
+            isOneToOne: false
+            referencedRelation: "trades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       broker_health: {
         Row: {
           created_at: string
@@ -397,6 +462,7 @@ export type Database = {
           max_order_pct: number
           max_trades_per_day: number
           mode: string
+          prefer_maker_orders: boolean
           risk_per_trade_pct: number
           scan_interval_seconds: number
           starting_equity_usd: number | null
@@ -418,6 +484,7 @@ export type Database = {
           max_order_pct?: number
           max_trades_per_day?: number
           mode?: string
+          prefer_maker_orders?: boolean
           risk_per_trade_pct?: number
           scan_interval_seconds?: number
           starting_equity_usd?: number | null
@@ -439,6 +506,7 @@ export type Database = {
           max_order_pct?: number
           max_trades_per_day?: number
           mode?: string
+          prefer_maker_orders?: boolean
           risk_per_trade_pct?: number
           scan_interval_seconds?: number
           starting_equity_usd?: number | null
@@ -456,6 +524,7 @@ export type Database = {
           id: string
           max_order_pct: number | null
           max_trades_per_day: number | null
+          prefer_maker_orders: boolean | null
           risk_per_trade_pct: number | null
           symbol: string
           updated_at: string
@@ -468,6 +537,7 @@ export type Database = {
           id?: string
           max_order_pct?: number | null
           max_trades_per_day?: number | null
+          prefer_maker_orders?: boolean | null
           risk_per_trade_pct?: number | null
           symbol: string
           updated_at?: string
@@ -480,6 +550,7 @@ export type Database = {
           id?: string
           max_order_pct?: number | null
           max_trades_per_day?: number | null
+          prefer_maker_orders?: boolean | null
           risk_per_trade_pct?: number | null
           symbol?: string
           updated_at?: string
@@ -1437,7 +1508,11 @@ export type Database = {
           created_at: string
           current_price: number | null
           direction_basis: string | null
+          effective_pnl: number | null
+          entry_fees_usd: number
           entry_price: number
+          entry_slippage_pct: number | null
+          exit_fees_usd: number
           exit_price: number | null
           horizon: string
           horizon_history: Json
@@ -1448,9 +1523,11 @@ export type Database = {
           opened_at: string
           original_size: number | null
           outcome: string | null
+          partial_fill: boolean
           pnl: number | null
           pnl_pct: number | null
           reason_tags: string[]
+          requested_size: number | null
           scale_ins: Json
           side: string
           size: number
@@ -1477,7 +1554,11 @@ export type Database = {
           created_at?: string
           current_price?: number | null
           direction_basis?: string | null
+          effective_pnl?: number | null
+          entry_fees_usd?: number
           entry_price: number
+          entry_slippage_pct?: number | null
+          exit_fees_usd?: number
           exit_price?: number | null
           horizon?: string
           horizon_history?: Json
@@ -1488,9 +1569,11 @@ export type Database = {
           opened_at?: string
           original_size?: number | null
           outcome?: string | null
+          partial_fill?: boolean
           pnl?: number | null
           pnl_pct?: number | null
           reason_tags?: string[]
+          requested_size?: number | null
           scale_ins?: Json
           side: string
           size: number
@@ -1517,7 +1600,11 @@ export type Database = {
           created_at?: string
           current_price?: number | null
           direction_basis?: string | null
+          effective_pnl?: number | null
+          entry_fees_usd?: number
           entry_price?: number
+          entry_slippage_pct?: number | null
+          exit_fees_usd?: number
           exit_price?: number | null
           horizon?: string
           horizon_history?: Json
@@ -1528,9 +1615,11 @@ export type Database = {
           opened_at?: string
           original_size?: number | null
           outcome?: string | null
+          partial_fill?: boolean
           pnl?: number | null
           pnl_pct?: number | null
           reason_tags?: string[]
+          requested_size?: number | null
           scale_ins?: Json
           side?: string
           size?: number
@@ -1556,6 +1645,16 @@ export type Database = {
       }
     }
     Views: {
+      live_execution_stats_v: {
+        Row: {
+          avg_fee_pct_per_side: number | null
+          avg_slippage_pct_per_side: number | null
+          fill_count: number | null
+          last_fill_at: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       strategy_performance_ci_v: {
         Row: {
           avg_pnl: number | null
