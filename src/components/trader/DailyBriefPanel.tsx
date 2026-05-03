@@ -103,6 +103,7 @@ export function DailyBriefPanel({
                     weekday: "long",
                     month: "short",
                     day: "numeric",
+                    timeZone: "UTC",
                   })
                 : "Today's session"}
             </div>
