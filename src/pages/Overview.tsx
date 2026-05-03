@@ -3,12 +3,9 @@ import { SectionHeader } from "@/components/trader/SectionHeader";
 import { MetricCard } from "@/components/trader/MetricCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
-import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { DailyBriefPanel } from "@/components/trader/DailyBriefPanel";
-import { DeskRosterStrip } from "@/components/trader/DeskRosterStrip";
 import { DoctrineProposalBanner } from "@/components/trader/DoctrineProposalBanner";
-import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
-import { useStrategies } from "@/hooks/useStrategies";
+import { SymbolStrip } from "@/components/trader/SymbolStrip";
 
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
