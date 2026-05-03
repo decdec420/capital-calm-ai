@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { MetricCard } from "@/components/trader/MetricCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
-import { AIInsightPanel } from "@/components/trader/AIInsightPanel";
 import { DailyBriefPanel } from "@/components/trader/DailyBriefPanel";
-import { DeskRosterStrip } from "@/components/trader/DeskRosterStrip";
 import { DoctrineProposalBanner } from "@/components/trader/DoctrineProposalBanner";
-import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
-import { useStrategies } from "@/hooks/useStrategies";
+import { SymbolStrip } from "@/components/trader/SymbolStrip";
 
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
@@ -24,10 +21,8 @@ import {
   Pause,
   Play,
   ShieldAlert,
-  Sparkles,
   TrendingDown,
   TrendingUp,
-  Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAccountState } from "@/hooks/useAccountState";
@@ -38,7 +33,7 @@ import { useGuardrails } from "@/hooks/useGuardrails";
 import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
-import { supabase } from "@/integrations/supabase/client";
+
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
 import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
@@ -63,14 +58,11 @@ function FreshnessDot({ timestamp }: { timestamp: number | null }) {
 export default function Overview() {
   const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
-  const { approved: approvedStrategy, candidates: candidateStrategies } = useStrategies();
   const { open, closed } = useTrades();
   
   const { guardrails } = useGuardrails();
   const { candles } = useCandles();
   const { pending: pendingSignals } = useSignals();
-  const [brief, setBrief] = useState<string>("");
-  const [briefLoading, setBriefLoading] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownKind | null>(null);
   
@@ -89,9 +81,8 @@ export default function Overview() {
       }
     : { regime: localRegime.regime, confidence: localRegime.confidence, setupScore: localRegime.setupScore };
   const lastGateReasons = snapshot?.gateReasons ?? [];
-  const lastPrice = btcSnap?.lastPrice ?? candles[candles.length - 1]?.c ?? 0;
-  const firstPrice = candles[0]?.c ?? lastPrice;
-  const pctChange = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
+  
+  // (Per-symbol prices are now rendered by SymbolStrip from the snapshot.)
 
   const openPosition = open[0];
   const closedToday = closed.filter((t) => t.closedAt && new Date(t.closedAt).toDateString() === new Date().toDateString());
@@ -100,7 +91,7 @@ export default function Overview() {
   const lossToday = Math.min(0, realizedToday);
 
 
-  const lastCandleTime = candles[candles.length - 1]?.t != null ? candles[candles.length - 1].t * 1000 : null;
+  
 
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
@@ -140,49 +131,6 @@ export default function Overview() {
   };
 
 
-  const requestBrief = async () => {
-    setBriefLoading(true);
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) {
-        toast.error("Sign in first.");
-        return;
-      }
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-brief`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({
-          regime: regime.regime,
-          lastPrice: lastPrice.toFixed(2),
-          pctChange: pctChange.toFixed(2),
-          openTradesCount: open.length,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        if (res.status === 429) toast.error("Rate limit reached. Try again in a moment.");
-        else if (res.status === 402) toast.error("AI credits depleted. Top up in Workspace usage.");
-        else toast.error(json.error ?? "Brief failed");
-        return;
-      }
-      setBrief(json.brief);
-    } catch {
-      toast.error("Couldn't reach the brief service.");
-    } finally {
-      setBriefLoading(false);
-    }
-  };
-
-  // Auto-fetch brief once on mount when we have candles
-  useEffect(() => {
-    if (candles.length > 0 && !brief && !briefLoading) requestBrief();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles.length]);
 
   const toggleBot = async () => {
     if (!system) return;
@@ -208,15 +156,10 @@ export default function Overview() {
         title="Overview"
         description="Calm, decisive view of the bot, the market, and your guardrails."
         actions={
-          <>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={toggleBot}>
-              {system?.bot === "running" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              {system?.bot === "running" ? "Pause bot" : "Resume bot"}
-            </Button>
-            <Button size="sm" className="gap-1.5" onClick={requestBrief} disabled={briefLoading}>
-              <Sparkles className="h-3.5 w-3.5" /> {briefLoading ? "Briefing…" : "Request brief"}
-            </Button>
-          </>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={toggleBot}>
+            {system?.bot === "running" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            {system?.bot === "running" ? "Pause bot" : "Resume bot"}
+          </Button>
         }
       />
 
@@ -229,48 +172,40 @@ export default function Overview() {
 
       {/* Trading pause — shown inline in DailyBriefPanel above */}
 
-      {/* Hero strip */}
-      <div className="panel p-5 flex flex-wrap items-center gap-4 bg-gradient-surface">
+      {/* Compact status row */}
+      <div className="panel p-4 flex flex-wrap items-center gap-x-6 gap-y-3 bg-gradient-surface">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-md bg-primary/15 text-primary flex items-center justify-center">
-            <Activity className="h-5 w-5" />
+          <div className="h-9 w-9 rounded-md bg-primary/15 text-primary flex items-center justify-center">
+            <Activity className="h-4 w-4" />
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">System mode</div>
-            <div className="text-base font-semibold text-foreground capitalize">{system?.mode ?? "—"}</div>
+            <div className="text-sm font-semibold text-foreground capitalize">{system?.mode ?? "—"}</div>
           </div>
         </div>
-        <div className="h-10 w-px bg-border hidden md:block" />
+        <div className="h-9 w-px bg-border hidden md:block" />
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Market regime</div>
-          <div className="mt-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC regime</div>
+          <div className="mt-0.5">
             <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
           </div>
         </div>
-        <div className="h-10 w-px bg-border hidden md:block" />
+        <div className="h-9 w-px bg-border hidden md:block" />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk posture</div>
-          <div className="mt-1">
+          <div className="mt-0.5">
             <StatusBadge tone={floorDistance > 2 ? "safe" : "caution"} dot>
               {floorDistance > 2 ? "capital protected" : "near floor"}
             </StatusBadge>
           </div>
         </div>
-        <div className="flex-1" />
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC-USD live</div>
-          <div className="flex items-center justify-end gap-2">
-            <span className="text-sm font-medium text-foreground tabular">
-              ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </span>
-            <FreshnessDot timestamp={lastCandleTime} />
-          </div>
-          <div className={`text-[11px] tabular ${pctChange >= 0 ? "text-status-safe" : "text-status-blocked"}`}>
-            {pctChange >= 0 ? "+" : ""}
-            {pctChange.toFixed(2)}% window
-          </div>
-        </div>
       </div>
+
+      {/* Per-symbol price + regime strip */}
+      <SymbolStrip
+        perSymbol={snapshot?.perSymbol ?? []}
+        ranAt={snapshot?.ranAt ?? null}
+      />
 
       {/* Pending signal banner */}
       {activeSignal && (
@@ -319,6 +254,21 @@ export default function Overview() {
           <Link to="/copilot" className="text-xs text-primary hover:underline inline-block">
             Open Copilot to act →
           </Link>
+        </div>
+      )}
+
+      {/* Small-account warning — surface why orders look like rounding errors. */}
+      {account && account.equity > 0 && account.equity < 50 && (
+        <div className="panel p-3 flex items-start gap-2.5 border-status-caution/40 bg-status-caution/5">
+          <ShieldAlert className="h-4 w-4 text-status-caution shrink-0 mt-0.5" />
+          <div className="text-xs leading-snug">
+            <span className="font-medium text-foreground">Small account mode.</span>{" "}
+            <span className="text-muted-foreground">
+              Equity is ${fmtMoney(account.equity, true)} — every order will be a tiny
+              fraction of a coin. The engine will still gate trades the same way; expected
+              edge just has to clear round-trip fees, which is harder at this size.
+            </span>
+          </div>
         </div>
       )}
 
@@ -435,24 +385,43 @@ export default function Overview() {
             pauseReason={system?.pauseReason ?? null}
           />
 
-          <AIInsightPanel
-            title="Today's market brief"
-            body={brief || (briefLoading ? "Cooking up a brief…" : "No brief yet. Tap Request brief.")}
-            timestamp={brief ? "now" : undefined}
-            loading={briefLoading && !brief}
-            footer={
-              <Link to="/copilot" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
-                Open Copilot <Zap className="h-3 w-3" />
-              </Link>
-            }
-          />
-
-          <MarketIntelligencePanel />
-
-          <DeskRosterStrip
-            approved={approvedStrategy}
-            candidates={candidateStrategies}
-          />
+          {/* Tactical reads & strategy roster live on dedicated tabs to keep
+              Overview scannable. Quick links surface the freshest context. */}
+          <div className="panel p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Link
+              to="/market-intel"
+              className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Market Intel
+              </div>
+              <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                Macro · regimes · key levels →
+              </div>
+            </Link>
+            <Link
+              to="/copilot"
+              className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Copilot
+              </div>
+              <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                Bobby's live tactical read →
+              </div>
+            </Link>
+            <Link
+              to="/edge"
+              className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Edge
+              </div>
+              <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                Strategy roster · performance →
+              </div>
+            </Link>
+          </div>
 
           {openPosition && (
             <Link
