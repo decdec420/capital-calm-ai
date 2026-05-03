@@ -1979,7 +1979,12 @@ async function runTickForUser(
       reason: `coach_penalty: conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
     };
   }
-  const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
+  // Phase 1 (Kelly-lite): scale the doctrine RISK_PER_TRADE_PCT by the
+  // approved strategy's risk_weight. A weight of 1.0 = no change. The
+  // doctrine clamp + kill-switch floor still bound the final notional,
+  // so a misconfigured weight cannot escape doctrine.
+  const effectiveRiskPct = RISK_PER_TRADE_PCT * strategyRiskWeight;
+  const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, effectiveRiskPct);
   // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
   const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
   // Allow the AI to *shrink* via size_pct vs the 0.25 maximum slot.
