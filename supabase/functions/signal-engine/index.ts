@@ -412,6 +412,14 @@ async function decideForSymbol(opts: {
    * Thresholds are marginally relaxed (0.45/0.55 vs 0.55/0.65) to accumulate
    * calibration data faster; the edge requirement is the same. Defaults to false. */
   isPaper?: boolean;
+  /** Phase 4 — playbook menu eligible for this symbol's current regime.
+   * Tells the AI what strategy "personalities" are available so reasoning
+   * can match the chosen side to a playbook the router will actually pick. */
+  strategyMenu?: string;
+  /** Phase 4 — cross-symbol context (e.g. BTC's regime when sizing alts). */
+  crossSymbolContext?: string;
+  /** Phase 4 — correlation note when user already holds a correlated position. */
+  correlationNote?: string;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
