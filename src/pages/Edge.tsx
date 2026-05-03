@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Layers, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
+import { ArrowUpRight, BarChart3, Layers, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { Badge } from "@/components/ui/badge";
