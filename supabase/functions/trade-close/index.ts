@@ -234,6 +234,13 @@ if (req.method === "OPTIONS") {
 
     const nowIso = new Date().toISOString();
 
+    // Cumulative exit fees: any prior partial-close fees on this trade
+    // already live in trades.exit_fees_usd (set by mark-to-market TP1/TP2/stop).
+    // Add the fees from this final close on top.
+    const cumulativeExitFees = Number(trade.exit_fees_usd ?? 0) + exitFeesUsd;
+    const entryFees = Number(trade.entry_fees_usd ?? 0);
+    const netPnl = effectivePnl(cumulativePnl, entryFees, cumulativeExitFees);
+
     await admin
       .from("trades")
       .update({
@@ -245,11 +252,13 @@ if (req.method === "OPTIONS") {
         exit_price: fillPx,
         pnl: cumulativePnl,
         pnl_pct: pnlPct,
+        exit_fees_usd: cumulativeExitFees,
+        effective_pnl: netPnl,
         closed_at: nowIso,
         outcome,
         lifecycle_phase: "exited",
         lifecycle_transitions: nextTransitions,
-        notes: `${trade.notes ?? ""}\n${liveEnabled ? "LIVE " : ""}Closed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)}${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`
+        notes: `${trade.notes ?? ""}\n${liveEnabled ? "LIVE " : ""}Closed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)} · net $${netPnl.toFixed(2)} (fees $${(entryFees + cumulativeExitFees).toFixed(4)})${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`
           .trim(),
         ...(brokerOrderId ? { broker_close_order_id: brokerOrderId } : {}),
       })
