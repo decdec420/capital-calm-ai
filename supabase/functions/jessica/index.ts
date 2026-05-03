@@ -704,15 +704,8 @@ async function runJessicaForUser(
 // ─── Main Handler ─────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
-    const cors = makeCorsHeaders(req);
-  const json = await res.json().catch(() => null);
-      const choice = json?.choices?.[0];
-      const toolCalls = choice?.message?.tool_calls ?? [];
-      const assistantContent = choice?.message?.content ?? "";
-  
-      if (toolCalls.length === 0) {
-        jessicaCbSuccess();
-if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  const cors = makeCorsHeaders(req);
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
