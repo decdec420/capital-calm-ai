@@ -2275,8 +2275,33 @@ async function runTickForUser(
   //
   // Conservative defaults: 0.6% per-side fee + 0.10% per-side slippage
   // = 1.4% round-trip. So edgeToTp1Pct must be ≥ 2.8%.
-  const FEE_PCT_PER_SIDE = 0.006;        // Coinbase Advanced taker upper bound
-  const SLIPPAGE_PCT_PER_SIDE = 0.001;    // 10bps each side, generous for BTC/ETH/SOL
+  //
+  // Phase 5: once we have ≥10 real fills in the rolling 30-day window,
+  // we replace the hardcoded fee/slippage with the per-user observed
+  // values from live_execution_stats_v. That way profitable maker users
+  // get a tighter gate and unlucky high-slippage symbols get a stricter one.
+  let feePctPerSide = 0.006;        // Coinbase Advanced taker upper bound
+  let slippagePctPerSide = 0.001;    // 10bps each side, generous for BTC/ETH/SOL
+  let costSource: "default" | "observed" = "default";
+  try {
+    const { data: execStats } = await admin
+      .from("live_execution_stats_v")
+      .select("fill_count, avg_fee_pct_per_side, avg_slippage_pct_per_side")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (execStats && Number(execStats.fill_count ?? 0) >= 10) {
+      // Floor at the conservative defaults so a lucky streak doesn't make
+      // the gate too lax; cap at 2× defaults so one bad fill doesn't
+      // permanently freeze trading.
+      feePctPerSide = Math.min(0.012, Math.max(0.003, Number(execStats.avg_fee_pct_per_side)));
+      slippagePctPerSide = Math.min(0.005, Math.max(0.0005, Number(execStats.avg_slippage_pct_per_side)));
+      costSource = "observed";
+    }
+  } catch (_e) {
+    // View errors are non-fatal — fall back to defaults.
+  }
+  const FEE_PCT_PER_SIDE = feePctPerSide;
+  const SLIPPAGE_PCT_PER_SIDE = slippagePctPerSide;
   const ROUND_TRIP_COST_PCT = 2 * (FEE_PCT_PER_SIDE + SLIPPAGE_PCT_PER_SIDE);
   const EDGE_MULT_REQUIRED = 2.0;
   const minEdgePctRequired = ROUND_TRIP_COST_PCT * EDGE_MULT_REQUIRED;
@@ -2287,7 +2312,7 @@ async function runTickForUser(
     const edgeGate = gate(
       GATE_CODES.EDGE_BELOW_COSTS,
       "skip",
-      `${winner.symbol}: TP1 edge ${(edgeToTp1Pct * 100).toFixed(2)}% < required ${(minEdgePctRequired * 100).toFixed(2)}% (covers ~${(ROUND_TRIP_COST_PCT * 100).toFixed(2)}% round-trip costs).`,
+      `${winner.symbol}: TP1 edge ${(edgeToTp1Pct * 100).toFixed(2)}% < required ${(minEdgePctRequired * 100).toFixed(2)}% (covers ~${(ROUND_TRIP_COST_PCT * 100).toFixed(2)}% round-trip costs · ${costSource}).`,
       {
         symbol: winner.symbol,
         edgeToTp1Pct,
@@ -2296,6 +2321,7 @@ async function runTickForUser(
         edgeMultRequired: EDGE_MULT_REQUIRED,
         feePctPerSide: FEE_PCT_PER_SIDE,
         slippagePctPerSide: SLIPPAGE_PCT_PER_SIDE,
+        costSource,
       },
     );
     await admin.from("journal_entries").insert({
