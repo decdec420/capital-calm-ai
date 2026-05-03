@@ -130,7 +130,9 @@ async function waitForFill(
         fillPrice: Number(order.average_filled_price ?? 0),
         filledBaseSize: Number(order.filled_size ?? 0),
         filledQuoteSize: Number(order.total_value_after_fees ?? order.filled_value ?? 0),
+        feesUsd: Number(order.total_fees ?? 0),
         status: order.status,
+        raw: order,
       };
     }
 
