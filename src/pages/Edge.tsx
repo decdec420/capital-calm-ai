@@ -165,9 +165,9 @@ export default function Edge() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="Phase 1"
+        eyebrow="Phase 2"
         title="Edge"
-        description="Per-strategy performance, regime affinity, and risk budget. The portfolio that actually generates the money."
+        description="Per-strategy performance, regime router decisions, and circuit-breaker status. The portfolio that actually generates the money."
       />
 
       {/* Portfolio summary strip */}
