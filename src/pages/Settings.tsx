@@ -243,19 +243,41 @@ function AccountControls({
   cash,
   startOfDayEquity,
   balanceFloor,
+  liveArmed,
   onSaveFloor,
+  onTopUp,
 }: {
   equity: number;
   cash: number;
   startOfDayEquity: number;
   balanceFloor: number;
+  liveArmed: boolean;
   onSaveFloor: (floor: number) => void;
+  onTopUp: (amount: number) => Promise<void>;
 }) {
   const [floor, setFloor] = useState(String(balanceFloor));
+  const [customAmount, setCustomAmount] = useState("");
+  const [busyAmount, setBusyAmount] = useState<number | null>(null);
   const dirty = Number(floor) !== balanceFloor;
 
   const dailyPnl = equity - startOfDayEquity;
   const dailyPnlPct = startOfDayEquity > 0 ? (dailyPnl / startOfDayEquity) * 100 : 0;
+
+  const handleTopUp = async (amount: number) => {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a positive amount.");
+      return;
+    }
+    setBusyAmount(amount);
+    try {
+      await onTopUp(amount);
+      setCustomAmount("");
+    } finally {
+      setBusyAmount(null);
+    }
+  };
+
+  const PRESETS = [50, 100, 1000];
 
   return (
     <div className="space-y-4">
@@ -277,6 +299,57 @@ function AccountControls({
         >
           Save floor
         </Button>
+      </div>
+
+      {/* Paper top-up — only meaningful while in paper mode. */}
+      <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-2.5">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <Wallet className="h-3.5 w-3.5 text-primary" />
+          Top up paper balance
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Add synthetic USD to the paper account so position sizing has room to
+          breathe. Disabled while live trading is armed (real cash must come from
+          the broker, not here).
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {PRESETS.map((amt) => (
+            <Button
+              key={amt}
+              size="sm"
+              variant="outline"
+              disabled={liveArmed || busyAmount !== null}
+              onClick={() => handleTopUp(amt)}
+            >
+              {busyAmount === amt ? "Adding…" : `+ $${amt.toLocaleString()}`}
+            </Button>
+          ))}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">$</span>
+            <Input
+              type="number"
+              min={1}
+              max={1_000_000}
+              placeholder="custom"
+              value={customAmount}
+              onChange={(e) => setCustomAmount(e.target.value)}
+              disabled={liveArmed || busyAmount !== null}
+              className="h-8 w-28 text-sm tabular"
+            />
+            <Button
+              size="sm"
+              disabled={liveArmed || busyAmount !== null || !customAmount}
+              onClick={() => handleTopUp(Number(customAmount))}
+            >
+              {busyAmount !== null && busyAmount === Number(customAmount) ? "Adding…" : "Add"}
+            </Button>
+          </div>
+        </div>
+        {liveArmed && (
+          <p className="text-[11px] text-status-caution">
+            Live trading is armed — disarm it above to top up paper balance.
+          </p>
+        )}
       </div>
 
       <div className="rounded-md border border-border/60 bg-muted/20 p-3">
