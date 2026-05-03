@@ -422,24 +422,43 @@ export default function Overview() {
             pauseReason={system?.pauseReason ?? null}
           />
 
-          <AIInsightPanel
-            title="Today's market brief"
-            body={brief || (briefLoading ? "Cooking up a brief…" : "No brief yet. Tap Request brief.")}
-            timestamp={brief ? "now" : undefined}
-            loading={briefLoading && !brief}
-            footer={
-              <Link to="/copilot" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
-                Open Copilot <Zap className="h-3 w-3" />
-              </Link>
-            }
-          />
-
-          <MarketIntelligencePanel />
-
-          <DeskRosterStrip
-            approved={approvedStrategy}
-            candidates={candidateStrategies}
-          />
+          {/* Tactical reads & strategy roster live on dedicated tabs to keep
+              Overview scannable. Quick links surface the freshest context. */}
+          <div className="panel p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Link
+              to="/market-intel"
+              className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Market Intel
+              </div>
+              <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                Macro · regimes · key levels →
+              </div>
+            </Link>
+            <Link
+              to="/copilot"
+              className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Copilot
+              </div>
+              <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                Bobby's live tactical read →
+              </div>
+            </Link>
+            <Link
+              to="/edge"
+              className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Edge
+              </div>
+              <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                Strategy roster · performance →
+              </div>
+            </Link>
+          </div>
 
           {openPosition && (
             <Link
