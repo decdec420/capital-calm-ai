@@ -352,25 +352,67 @@ export default function Edge() {
         </div>
       )}
 
-      {/* What's coming next */}
-      <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm">
-        <div className="font-medium">Coming in Phase 2</div>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-          <li>
-            Two more strategies — <code>range-fade v1</code> and{" "}
-            <code>breakout-confirm v1</code> — so the engine has an edge in every
-            regime, not just trends.
-          </li>
-          <li>
-            Regime router that picks the right strategy per symbol per tick.
-          </li>
-          <li>
-            Per-strategy equity curve and rolling 30-trade Sharpe sparkline.
-          </li>
-        </ul>
+      {/* Recent router decisions — Phase 2 transparency */}
+      <div className="rounded-lg border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <div className="text-sm font-medium">Recent router decisions</div>
+          <div className="text-xs text-muted-foreground">
+            Last 10 signals · which strategy fired and why
+          </div>
+        </div>
+        {recentRouter.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-muted-foreground">
+            No signals yet. The router will log its picks here as they fire.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border text-sm">
+            {recentRouter.map((s) => {
+              const rd = s.context_snapshot?.routerDecision;
+              const synth = s.context_snapshot?.syntheticShort;
+              return (
+                <li key={s.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{s.symbol}</span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px] uppercase",
+                          s.side === "long" && "text-success border-success/30",
+                          s.side === "short" && "text-destructive border-destructive/30",
+                        )}
+                      >
+                        {s.side}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {s.regime}
+                      </Badge>
+                      {synth && (
+                        <Badge variant="outline" className="text-[10px] text-warning border-warning/30">
+                          synthetic short
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      {rd?.chosenStrategyName
+                        ? `→ ${rd.chosenStrategyName} v${rd.chosenStrategyVersion}: ${rd.reason}`
+                        : "no router decision recorded"}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {fmtAgo(s.created_at)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end">
         <Link
           to="/strategy"
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           Open Strategy Lab
           <ArrowUpRight className="h-3 w-3" />
