@@ -1875,6 +1875,54 @@ async function runTickForUser(
     },
   };
 
+  // Phase 4: build a "playbook menu" for the AI based on which strategies
+  // are eligible at this symbol's current regime. The router will assign
+  // the actual strategy after the AI picks a side; this just nudges the AI
+  // to reason in a style the router can honor.
+  const PERSONALITY: Record<string, string> = {
+    "trend-rev": "Trend continuation with mean-reversion exits. Favors pullbacks in established trends. Long or short.",
+    "vwap-revert": "Mean-reversion to VWAP/EMA. Fades extensions in range/chop. Tight stops, modest targets. Long or short.",
+    "momentum-burst": "Long-only breakout chaser. Wide stop, longer runner. Wants confirmed breakouts in uptrends.",
+  };
+  const eligibleHere = routerStrategies.filter(
+    (s) => Array.isArray(s.regime_affinity) && s.regime_affinity.includes(winner.regime.regime),
+  );
+  const strategyMenu = eligibleHere.length === 0
+    ? "(no playbook is wired for this regime — the signal will be dropped if you propose a trade)"
+    : eligibleHere.map((s) => {
+        const sides = (s.side_capability ?? ["long"]).join("/");
+        const desc = PERSONALITY[s.name] ?? "(custom playbook)";
+        return `• ${s.name} v${s.version} — sides: ${sides} — ${desc}`;
+      }).join("\n");
+
+  // Phase 4: cross-symbol context. For non-BTC, surface BTC's regime so
+  // the AI knows whether crypto beta is helping or hurting the trade.
+  let crossSymbolContext: string | undefined = undefined;
+  if (winner.symbol !== "BTC-USD") {
+    const btc = candidates.find((c) => c.symbol === "BTC-USD");
+    if (btc) {
+      crossSymbolContext = `BTC-USD is currently in regime=${btc.regime.regime} (setupScore ${btc.regime.setupScore.toFixed(2)}). Most alts inherit BTC's beta — consider this when sizing or skipping. A long alt against trending_down BTC needs exceptional alt-specific edge.`;
+    }
+  }
+
+  // Phase 4: correlation gate. If user already holds an open BTC long and
+  // we're considering a long on a correlated alt, raise the bar. Soft —
+  // the AI may still propose; doctrine still enforces the hard cap.
+  const correlatedAlts = new Set(["ETH-USD", "SOL-USD"]);
+  let correlationNote: string | undefined = undefined;
+  const openBtcLong = (openTrades ?? []).find(
+    (t: { symbol: string; side: string; status?: string }) =>
+      t.symbol === "BTC-USD" && t.side === "long",
+  );
+  const openBtcShort = (openTrades ?? []).find(
+    (t: { symbol: string; side: string }) => t.symbol === "BTC-USD" && t.side === "short",
+  );
+  if (openBtcLong && correlatedAlts.has(winner.symbol)) {
+    correlationNote = `User already holds an open BTC-USD LONG. A new long on ${winner.symbol} is correlated risk (crypto beta). Require confidence ≥ 0.80 and a clear ${winner.symbol}-specific reason (decoupling, sector strength) — otherwise prefer skip.`;
+  } else if (openBtcShort && correlatedAlts.has(winner.symbol)) {
+    correlationNote = `User already holds an open BTC-USD SHORT. A new long on ${winner.symbol} fights the existing book; a new short on ${winner.symbol} doubles concentration. Either way, demand confidence ≥ 0.80.`;
+  }
+
   const aiResult = await decideForSymbol({
     symbol: winner.symbol,
     lastPrice: winner.lastPrice,
@@ -1886,6 +1934,9 @@ async function runTickForUser(
     profile: activeProfile,
     maxOrderUsdOverride: resolvedDoctrine.maxOrderUsd,
     isPaper,
+    strategyMenu,
+    crossSymbolContext,
+    correlationNote,
   });
 
   if ("error" in aiResult) {
