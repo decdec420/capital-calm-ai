@@ -54,12 +54,13 @@ export default function Settings() {
       </Section>
 
       {account && (
-        <Section title="Paper account">
+        <Section id="paper-account" title="Paper account">
           <AccountControls
             equity={account.equity}
             cash={account.cash}
             startOfDayEquity={account.startOfDayEquity}
             balanceFloor={account.balanceFloor}
+            liveArmed={!!system?.liveTradingEnabled}
             onSaveFloor={async (floor) => {
               try {
                 await updateAccount({ balanceFloor: floor });
@@ -67,6 +68,18 @@ export default function Settings() {
               } catch {
                 toast.error("Couldn't update balance floor.");
               }
+            }}
+            onTopUp={async (amount) => {
+              const { data, error } = await supabase.functions.invoke("topup-paper-balance", {
+                body: { amount_usd: amount },
+              });
+              if (error || (data && (data as { error?: string }).error)) {
+                const msg = (data as { error?: string } | null)?.error ?? error?.message ?? "Top-up failed";
+                toast.error(msg);
+                return;
+              }
+              toast.success(`Added $${amount.toLocaleString()} to paper balance.`);
+              await refetchAccount();
             }}
           />
         </Section>
