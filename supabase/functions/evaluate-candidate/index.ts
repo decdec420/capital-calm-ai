@@ -197,6 +197,16 @@ async function evaluateForUser(
     const sharpeOk = cSharpe >= aSharpe;
     const allPass = expOk && winOk && ddOk && sharpeOk;
 
+    // Phase 3 honest-edge gate. Even if point-estimate margins beat
+    // the baseline, we refuse to crown a candidate whose edge is
+    // statistically indistinguishable from luck.
+    const ci = ciByStrategy.get(c.id);
+    const verdict = ci?.edge_verdict ?? "unproven";
+    const evidence = ci?.evidence_status ?? "no_data";
+    const ciAcceptable = isPaper
+      ? (verdict === "positive_edge" || (verdict === "inconclusive" && evidence === "sufficient"))
+      : (verdict === "positive_edge" && evidence === "sufficient");
+
     if (ddCritical) {
       await createAlert(
         admin,
@@ -210,6 +220,20 @@ async function evaluateForUser(
         outcome: "paused",
         trades,
         reason: "drawdown_critical",
+      });
+      continue;
+    }
+
+    if (allPass && !ciAcceptable) {
+      // Point estimates look great but the CI says we can't be sure.
+      // Don't retire — keep gathering trades. Surface as "ready" so the
+      // operator can see the candidate is on track but waiting on stats.
+      results.push({
+        candidate: c.version,
+        outcome: "skipped",
+        reason: "not_enough_trades",
+        trades,
+        need: Math.max(minTrades, 30),
       });
       continue;
     }
