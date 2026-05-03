@@ -25,6 +25,7 @@ async function proposeForSymbol(
   trades: any[],
   sys: any,
   allMemory: any[],
+  ci: any,
   LOVABLE_API_KEY: string,
 ) {
   const params: Array<{ key: string; value: number | string | boolean }> = (strategy.params ?? []) as any;
@@ -58,9 +59,28 @@ async function proposeForSymbol(
     onCooldownUntil: m.retry_after?.slice(0, 10) ?? null,
   }));
 
+  const baselineEdge = ci ? {
+    closedTrades: ci.closed_trades,
+    evidenceStatus: ci.evidence_status,
+    edgeVerdict: ci.edge_verdict,
+    expectancyCi95: ci.avg_pnl_lo != null ? [Number(ci.avg_pnl_lo).toFixed(3), Number(ci.avg_pnl_hi).toFixed(3)] : null,
+    winRateCi95: ci.win_rate_lo != null ? [Number(ci.win_rate_lo).toFixed(3), Number(ci.win_rate_hi).toFixed(3)] : null,
+    sharpe: ci.sharpe != null ? Number(ci.sharpe).toFixed(2) : null,
+    sharpeCi95: ci.sharpe_lo != null ? [Number(ci.sharpe_lo).toFixed(2), Number(ci.sharpe_hi).toFixed(2)] : null,
+  } : null;
+
+  const ciGuidance = !ci || ci.edge_verdict === "unproven"
+    ? "Baseline edge is UNPROVEN (n<30). Bias toward exploration: try parameter changes that could surface signal, not micro-tweaks."
+    : ci.edge_verdict === "positive_edge"
+    ? "Baseline has STATISTICALLY POSITIVE edge. Be conservative: propose small refinements (≤15%) that are unlikely to break what's working. Do not flip parameter directions wildly."
+    : ci.edge_verdict === "negative_edge"
+    ? "Baseline has STATISTICALLY NEGATIVE edge. Be aggressive: propose larger structural changes (20-30%) or even direction flips on a parameter."
+    : "Baseline edge is INCONCLUSIVE. Moderate exploration: 15-25% changes are reasonable.";
+
   const contextPacket = {
     symbol,
     strategy: { name: strategy.name, version: strategy.version, currentParams: tweakable },
+    baselineEdge,
     recentTrades: {
       total: symbolTrades.length, wins, losses,
       lastFew: symbolTrades.slice(0, 8).map((t: any) => ({
@@ -78,7 +98,8 @@ async function proposeForSymbol(
         "Actively diversify: rotate parameters instead of grinding the same knob.",
       ].join(" "),
     },
-    proposalInstructions: `Pick exactly ONE parameter from currentParams that is NOT on cooldown for ${symbol}. Propose a meaningful adjustment (10-30% change). Hypothesis must reference ${symbol}'s recent behavior or gate reasons.`,
+    statisticalGuidance: ciGuidance,
+    proposalInstructions: `Pick exactly ONE parameter from currentParams that is NOT on cooldown for ${symbol}. Adjust per statisticalGuidance. Hypothesis must reference ${symbol}'s recent behavior, gate reasons, or baselineEdge.`,
   };
 
   const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -176,6 +197,16 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   ]);
   if (!strategy) return { userId, skipped: "no_approved_strategy" };
 
+  // Phase 3: pull statistical-honesty snapshot for the approved strategy
+  // so the copilot knows whether we already have a proven edge (avoid
+  // breaking what works) or are still scrambling for one.
+  const { data: ciRow } = await admin
+    .from("strategy_performance_ci_v")
+    .select("edge_verdict, evidence_status, closed_trades, avg_pnl_lo, avg_pnl_hi, win_rate_lo, win_rate_hi, sharpe, sharpe_lo, sharpe_hi")
+    .eq("strategy_id", (strategy as { id: string }).id)
+    .maybeSingle();
+
+
   // 3. Pick the next symbol to propose for: round-robin by least-recent
   // memory activity, so every symbol eventually gets attention.
   const lastTriedBySymbol: Record<string, number> = {};
@@ -191,7 +222,7 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   const results = [];
   for (const symbol of targetSymbols) {
     try {
-      results.push(await proposeForSymbol(admin, userId, symbol, strategy, trades ?? [], sys, memory ?? [], LOVABLE_API_KEY));
+      results.push(await proposeForSymbol(admin, userId, symbol, strategy, trades ?? [], sys, memory ?? [], ciRow ?? null, LOVABLE_API_KEY));
     } catch (e) {
       results.push({ userId, symbol, error: String(e) });
     }

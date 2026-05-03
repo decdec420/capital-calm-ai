@@ -130,6 +130,39 @@ async function evaluateForUser(
   const aDD = metric(approved, "maxDrawdown");
   const aSharpe = metric(approved, "sharpe");
 
+  // Phase 3 CI gate: pull honest verdicts for every candidate (and the
+  // baseline) from the strategy_performance_ci_v view. We refuse to
+  // promote anything that hasn't earned a `positive_edge` verdict in
+  // live mode; paper mode is more permissive (`positive_edge` OR
+  // `inconclusive` with sufficient evidence) so the system can still
+  // learn from candidates that beat the baseline on point estimates
+  // but haven't crossed the CI bar yet.
+  const candidateIds = candidates.map((c) => c.id);
+  const { data: ciRows } = await admin
+    .from("strategy_performance_ci_v")
+    .select("strategy_id, edge_verdict, evidence_status, avg_pnl_lo, avg_pnl_hi, win_rate_lo, win_rate_hi, closed_trades")
+    .in("strategy_id", candidateIds.length ? candidateIds : ["00000000-0000-0000-0000-000000000000"]);
+  const ciByStrategy = new Map<string, {
+    edge_verdict: string | null;
+    evidence_status: string | null;
+    avg_pnl_lo: number | null;
+    avg_pnl_hi: number | null;
+    win_rate_lo: number | null;
+    win_rate_hi: number | null;
+    closed_trades: number | null;
+  }>();
+  for (const r of (ciRows ?? []) as Array<Record<string, unknown>>) {
+    ciByStrategy.set(r.strategy_id as string, {
+      edge_verdict: (r.edge_verdict as string) ?? null,
+      evidence_status: (r.evidence_status as string) ?? null,
+      avg_pnl_lo: r.avg_pnl_lo as number | null,
+      avg_pnl_hi: r.avg_pnl_hi as number | null,
+      win_rate_lo: r.win_rate_lo as number | null,
+      win_rate_hi: r.win_rate_hi as number | null,
+      closed_trades: r.closed_trades as number | null,
+    });
+  }
+
   const results: CandidateResult[] = [];
   // Pass 1: classify every candidate. Don't promote yet — we want to pick
   // the best of any that pass before mutating state.
@@ -164,6 +197,16 @@ async function evaluateForUser(
     const sharpeOk = cSharpe >= aSharpe;
     const allPass = expOk && winOk && ddOk && sharpeOk;
 
+    // Phase 3 honest-edge gate. Even if point-estimate margins beat
+    // the baseline, we refuse to crown a candidate whose edge is
+    // statistically indistinguishable from luck.
+    const ci = ciByStrategy.get(c.id);
+    const verdict = ci?.edge_verdict ?? "unproven";
+    const evidence = ci?.evidence_status ?? "no_data";
+    const ciAcceptable = isPaper
+      ? (verdict === "positive_edge" || (verdict === "inconclusive" && evidence === "sufficient"))
+      : (verdict === "positive_edge" && evidence === "sufficient");
+
     if (ddCritical) {
       await createAlert(
         admin,
@@ -177,6 +220,20 @@ async function evaluateForUser(
         outcome: "paused",
         trades,
         reason: "drawdown_critical",
+      });
+      continue;
+    }
+
+    if (allPass && !ciAcceptable) {
+      // Point estimates look great but the CI says we can't be sure.
+      // Don't retire — keep gathering trades. Surface as "ready" so the
+      // operator can see the candidate is on track but waiting on stats.
+      results.push({
+        candidate: c.version,
+        outcome: "skipped",
+        reason: "not_enough_trades",
+        trades,
+        need: Math.max(minTrades, 30),
       });
       continue;
     }
@@ -242,13 +299,19 @@ async function evaluateForUser(
       .update({ last_auto_promoted_at: new Date().toISOString() })
       .eq("user_id", userId);
 
+    const winnerCi = ciByStrategy.get(winner.row.id);
+    const ciNote = winnerCi && typeof winnerCi.avg_pnl_lo === "number"
+      ? ` · 95% CI on expectancy lower-bound = ${Number(winnerCi.avg_pnl_lo).toFixed(2)}R (${winnerCi.evidence_status})`
+      : "";
+
     await createAlert(
       admin,
       userId,
       "info",
       `🚀 Strategy auto-promoted to ${winner.row.version}`,
-      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades. Auto-promotions paused for ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`,
+      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades${ciNote}. Auto-promotions paused for ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`,
     );
+
 
     // Mark the winner's "ready" entry as "promoted"; remaining "ready"
     // entries become "skipped" (they'll get re-evaluated after cooldown).

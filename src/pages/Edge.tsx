@@ -14,11 +14,13 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, BarChart3, Layers, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
+import { ArrowUpRight, BarChart3, Layers, Repeat, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface StrategyRow {
@@ -121,6 +123,30 @@ export default function Edge() {
   const [recentRouter, setRecentRouter] = useState<RouterDecisionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
+
+  async function handleReplay(strategyId: string, strategyName: string) {
+    setReplayingId(strategyId);
+    try {
+      const { data, error } = await supabase.functions.invoke("replay-strategy", {
+        body: { strategy_id: strategyId, folds: 5, window_size: 30, window_step: 5 },
+      });
+      if (error) throw error;
+      const verdict = (data as { verdict?: string; stability_score?: number | null; folds?: unknown[] })?.verdict ?? "n/a";
+      const score = (data as { stability_score?: number | null })?.stability_score;
+      const folds = ((data as { folds?: unknown[] })?.folds ?? []).length;
+      const scoreStr = typeof score === "number" ? `${(score * 100).toFixed(0)}%` : "—";
+      const tone = verdict === "stable_edge" ? "success" : verdict === "unstable_or_overfit" ? "error" : "info";
+      const msg = `${strategyName}: ${verdict.replace(/_/g, " ")} · stability ${scoreStr} across ${folds} folds`;
+      if (tone === "success") toast.success(msg);
+      else if (tone === "error") toast.error(msg);
+      else toast(msg);
+    } catch (e) {
+      toast.error(`Replay failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setReplayingId(null);
+    }
+  }
 
   const load = async () => {
     const [perfRes, metaRes, ciRes, sigRes] = await Promise.all([
@@ -279,6 +305,7 @@ export default function Edge() {
                   <th className="px-4 py-2 text-right font-medium">Expectancy $ (95% CI)</th>
                   <th className="px-4 py-2 text-right font-medium">Sharpe (per trade)</th>
                   <th className="px-4 py-2 text-left font-medium">Verdict</th>
+                  <th className="px-4 py-2 text-right font-medium">Replay</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -333,6 +360,19 @@ export default function Edge() {
                         <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", verdictTone)}>
                           {verdict.replace(/_/g, " ")}
                         </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-xs"
+                          disabled={replayingId === r.strategy_id || (ci?.closed_trades ?? 0) < 30}
+                          onClick={() => handleReplay(r.strategy_id, r.strategy_name)}
+                          title={(ci?.closed_trades ?? 0) < 30 ? "Need 30+ closed trades to replay" : "Walk-forward replay"}
+                        >
+                          <Repeat className="h-3 w-3 mr-1" />
+                          {replayingId === r.strategy_id ? "Replaying…" : "Replay"}
+                        </Button>
                       </td>
                     </tr>
                   );
