@@ -59,6 +59,7 @@ async function buildBriefForUser(
     { data: acct },
     { data: closedYesterday },
     { data: openTrades },
+    { data: pendingSignals },
     { data: intel },
   ] = await Promise.all([
     admin.from("account_state").select("equity,balance_floor,start_of_day_equity,base_currency").eq("user_id", userId).maybeSingle(),
@@ -75,6 +76,11 @@ async function buildBriefForUser(
       .select("symbol,side,entry_price,size,unrealized_pnl,unrealized_pnl_pct")
       .eq("user_id", userId)
       .eq("status", "open"),
+    admin
+      .from("trade_signals")
+      .select("id,symbol,side")
+      .eq("user_id", userId)
+      .eq("status", "pending"),
     admin
       .from("market_intelligence")
       .select(
@@ -149,11 +155,16 @@ async function buildBriefForUser(
     })
     .join("\n");
 
+  const pendingCount = (pendingSignals ?? []).length;
+  const smallAccount = equity > 0 && equity < 50;
+
   const context = `
 ACCOUNT
 - Equity: $${equity.toFixed(2)} (floor $${Number(acct?.balance_floor ?? 0).toFixed(2)})
 - Today so far: ${dayDeltaPct >= 0 ? "+" : ""}${dayDeltaPct.toFixed(2)}%
 - Open positions: ${(openTrades ?? []).length}
+- Pending signals awaiting approval: ${pendingCount}
+${smallAccount ? "- ⚠ Small account: equity under $50, even max-size orders are tiny." : ""}
 
 YESTERDAY (${yStart.slice(0, 10)})
 - Closed trades: ${(closedYesterday ?? []).length} (${yWins}W / ${yLosses}L)
@@ -185,7 +196,14 @@ ${cautionSet.size === 0 ? "- (none)" : Array.from(cautionSet).map((f) => `- ${f}
           {
             role: "system",
             content:
-              "Write like a head of desk reading out the morning brief. Sharp, specific, no filler sentences. If yesterday was flat, say flat. If today's setup is clean, say clean.\n\nYou are the Trader OS pre-market brief. Be terse, witty, risk-first. 3-4 sentences max. No emojis. Trader vernacular but precise. Reference yesterday's result if relevant. If caution flags are active, lead with them. If everything is mid, say sit on hands. Never invent prices.",
+              "You write the morning desk brief for an autonomous crypto trading system. Hard rules:\n" +
+              "• 3-4 sentences MAX. No emojis. Trader vernacular but precise.\n" +
+              "• Reference yesterday's realized P&L if it was non-zero. If flat, say flat.\n" +
+              "• If caution flags are active, lead with them.\n" +
+              "• If everything is mid, tell the operator to sit on hands.\n" +
+              "• Never invent prices, win-rates, or events not in the context.\n" +
+              "• ONLY mention pending approvals if 'Pending signals awaiting approval' is > 0. If it is 0, do not say anything is waiting on the operator.\n" +
+              "• If the small-account warning is present, acknowledge that position sizing will look tiny — that is expected, not a bug.",
           },
           { role: "user", content: `Write today's pre-market brief.\n\n${context}` },
         ],
