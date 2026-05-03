@@ -40,9 +40,34 @@ interface StrategyRow {
   last_closed_at: string | null;
 }
 
+interface StrategyMeta {
+  id: string;
+  consecutive_losses: number;
+  auto_paused_at: string | null;
+  auto_pause_reason: string | null;
+}
+
+interface RouterDecisionRow {
+  id: string;
+  symbol: string;
+  side: string;
+  regime: string;
+  created_at: string;
+  context_snapshot: {
+    routerDecision?: {
+      chosenStrategyName: string | null;
+      chosenStrategyVersion: string | null;
+      reason: string;
+      candidates: Array<{ id: string; name: string; version: string; score: number }>;
+    };
+    syntheticShort?: boolean;
+  } | null;
+}
+
 const STATUS_TONE: Record<string, string> = {
   approved: "bg-success/10 text-success border-success/20",
   candidate: "bg-warning/10 text-warning border-warning/20",
+  paused: "bg-destructive/10 text-destructive border-destructive/20",
   archived: "bg-muted text-muted-foreground border-border",
 };
 
