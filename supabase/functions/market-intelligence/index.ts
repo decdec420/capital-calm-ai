@@ -45,6 +45,10 @@ function setMemo<T>(key: string, value: T): void {
   memoCache.set(key, { at: Date.now(), value });
 }
 
+// Per-expert model assignment. Mafee runs every minute on a tightly-scoped
+// numeric task → cheaper flash-lite is plenty. Hall and Bill reason over text-
+// heavy macro/news context less frequently → standard flash for nuance.
+const HALL_MODEL  = "google/gemini-2.5-flash";
 const BILL_MODEL  = "google/gemini-2.5-flash";
 const MAFEE_MODEL = "google/gemini-2.5-flash-lite";
 
@@ -972,10 +976,6 @@ Deno.serve(async (req) => {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   
-  // Per-expert model assignment. Mafee runs every minute on a tightly-scoped
-  // numeric task → cheaper flash-lite is plenty. Hall and Bill reason over text-
-  // heavy macro/news context less frequently → standard flash for nuance.
-  const HALL_MODEL  = "google/gemini-2.5-flash";
 if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
