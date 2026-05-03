@@ -130,6 +130,39 @@ async function evaluateForUser(
   const aDD = metric(approved, "maxDrawdown");
   const aSharpe = metric(approved, "sharpe");
 
+  // Phase 3 CI gate: pull honest verdicts for every candidate (and the
+  // baseline) from the strategy_performance_ci_v view. We refuse to
+  // promote anything that hasn't earned a `positive_edge` verdict in
+  // live mode; paper mode is more permissive (`positive_edge` OR
+  // `inconclusive` with sufficient evidence) so the system can still
+  // learn from candidates that beat the baseline on point estimates
+  // but haven't crossed the CI bar yet.
+  const candidateIds = candidates.map((c) => c.id);
+  const { data: ciRows } = await admin
+    .from("strategy_performance_ci_v")
+    .select("strategy_id, edge_verdict, evidence_status, avg_pnl_lo, avg_pnl_hi, win_rate_lo, win_rate_hi, closed_trades")
+    .in("strategy_id", candidateIds.length ? candidateIds : ["00000000-0000-0000-0000-000000000000"]);
+  const ciByStrategy = new Map<string, {
+    edge_verdict: string | null;
+    evidence_status: string | null;
+    avg_pnl_lo: number | null;
+    avg_pnl_hi: number | null;
+    win_rate_lo: number | null;
+    win_rate_hi: number | null;
+    closed_trades: number | null;
+  }>();
+  for (const r of (ciRows ?? []) as Array<Record<string, unknown>>) {
+    ciByStrategy.set(r.strategy_id as string, {
+      edge_verdict: (r.edge_verdict as string) ?? null,
+      evidence_status: (r.evidence_status as string) ?? null,
+      avg_pnl_lo: r.avg_pnl_lo as number | null,
+      avg_pnl_hi: r.avg_pnl_hi as number | null,
+      win_rate_lo: r.win_rate_lo as number | null,
+      win_rate_hi: r.win_rate_hi as number | null,
+      closed_trades: r.closed_trades as number | null,
+    });
+  }
+
   const results: CandidateResult[] = [];
   // Pass 1: classify every candidate. Don't promote yet — we want to pick
   // the best of any that pass before mutating state.
