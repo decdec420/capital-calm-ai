@@ -95,28 +95,66 @@ function fmtAgo(iso: string | null): string {
 
 export default function Edge() {
   const [rows, setRows] = useState<StrategyRow[] | null>(null);
+  const [metaById, setMetaById] = useState<Record<string, StrategyMeta>>({});
+  const [recentRouter, setRecentRouter] = useState<RouterDecisionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = async () => {
+    const [perfRes, metaRes, sigRes] = await Promise.all([
+      supabase
+        .from("strategy_performance_v" as never)
+        .select("*")
+        .order("status", { ascending: true })
+        .order("total_pnl", { ascending: false }),
+      supabase
+        .from("strategies")
+        .select("id, consecutive_losses, auto_paused_at, auto_pause_reason"),
+      supabase
+        .from("trade_signals")
+        .select("id, symbol, side, regime, created_at, context_snapshot")
+        .order("created_at", { ascending: false })
+        .limit(10),
+    ]);
+    if (perfRes.error) {
+      setError(perfRes.error.message);
+      setRows([]);
+      return;
+    }
+    setRows((perfRes.data ?? []) as unknown as StrategyRow[]);
+    const metaMap: Record<string, StrategyMeta> = {};
+    for (const m of (metaRes.data ?? []) as StrategyMeta[]) {
+      metaMap[m.id] = m;
+    }
+    setMetaById(metaMap);
+    setRecentRouter((sigRes.data ?? []) as unknown as RouterDecisionRow[]);
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("strategy_performance_v" as never)
-        .select("*")
-        .order("status", { ascending: true })
-        .order("total_pnl", { ascending: false });
-      if (cancelled) return;
-      if (error) {
-        setError(error.message);
-        setRows([]);
-        return;
-      }
-      setRows((data ?? []) as unknown as StrategyRow[]);
+      await load();
     })();
     return () => {
       cancelled = true;
+      void cancelled;
     };
   }, []);
+
+  const rearmStrategy = async (strategyId: string) => {
+    setBusyId(strategyId);
+    const { error: updErr } = await supabase
+      .from("strategies")
+      .update({
+        status: "approved",
+        consecutive_losses: 0,
+        auto_paused_at: null,
+        auto_pause_reason: null,
+      })
+      .eq("id", strategyId);
+    setBusyId(null);
+    if (!updErr) await load();
+  };
 
   // Portfolio rollup
   const approved = (rows ?? []).filter((r) => r.status === "approved");
