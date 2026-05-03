@@ -258,7 +258,7 @@ export default function Edge() {
                   <tr key={r.strategy_id} className="hover:bg-muted/20">
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">{r.strategy_name}</span>
                           <Badge
                             variant="outline"
@@ -269,9 +269,29 @@ export default function Edge() {
                           >
                             {r.status}
                           </Badge>
+                          {metaById[r.strategy_id]?.auto_paused_at && (
+                            <button
+                              type="button"
+                              disabled={busyId === r.strategy_id}
+                              onClick={() => rearmStrategy(r.strategy_id)}
+                              className="text-[10px] font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                            >
+                              {busyId === r.strategy_id ? "re-arming…" : "re-arm"}
+                            </button>
+                          )}
                         </div>
                         <span className="text-xs text-muted-foreground">
                           {r.strategy_version}
+                          {(metaById[r.strategy_id]?.consecutive_losses ?? 0) > 0 && (
+                            <span className="ml-2 text-warning">
+                              · {metaById[r.strategy_id].consecutive_losses} loss streak
+                            </span>
+                          )}
+                          {metaById[r.strategy_id]?.auto_pause_reason && (
+                            <span className="ml-2 text-destructive">
+                              · {metaById[r.strategy_id].auto_pause_reason}
+                            </span>
+                          )}
                         </span>
                       </div>
                     </td>
