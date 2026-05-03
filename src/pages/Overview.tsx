@@ -64,8 +64,6 @@ export default function Overview() {
   const { guardrails } = useGuardrails();
   const { candles } = useCandles();
   const { pending: pendingSignals } = useSignals();
-  const [brief, setBrief] = useState<string>("");
-  const [briefLoading, setBriefLoading] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownKind | null>(null);
   
@@ -135,49 +133,6 @@ export default function Overview() {
   };
 
 
-  const requestBrief = async () => {
-    setBriefLoading(true);
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) {
-        toast.error("Sign in first.");
-        return;
-      }
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-brief`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({
-          regime: regime.regime,
-          lastPrice: lastPrice.toFixed(2),
-          pctChange: pctChange.toFixed(2),
-          openTradesCount: open.length,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        if (res.status === 429) toast.error("Rate limit reached. Try again in a moment.");
-        else if (res.status === 402) toast.error("AI credits depleted. Top up in Workspace usage.");
-        else toast.error(json.error ?? "Brief failed");
-        return;
-      }
-      setBrief(json.brief);
-    } catch {
-      toast.error("Couldn't reach the brief service.");
-    } finally {
-      setBriefLoading(false);
-    }
-  };
-
-  // Auto-fetch brief once on mount when we have candles
-  useEffect(() => {
-    if (candles.length > 0 && !brief && !briefLoading) requestBrief();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles.length]);
 
   const toggleBot = async () => {
     if (!system) return;
@@ -203,15 +158,10 @@ export default function Overview() {
         title="Overview"
         description="Calm, decisive view of the bot, the market, and your guardrails."
         actions={
-          <>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={toggleBot}>
-              {system?.bot === "running" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              {system?.bot === "running" ? "Pause bot" : "Resume bot"}
-            </Button>
-            <Button size="sm" className="gap-1.5" onClick={requestBrief} disabled={briefLoading}>
-              <Sparkles className="h-3.5 w-3.5" /> {briefLoading ? "Briefing…" : "Request brief"}
-            </Button>
-          </>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={toggleBot}>
+            {system?.bot === "running" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            {system?.bot === "running" ? "Pause bot" : "Resume bot"}
+          </Button>
         }
       />
 
