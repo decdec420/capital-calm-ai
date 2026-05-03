@@ -281,6 +281,7 @@ export default function Edge() {
                   <th className="px-4 py-2 text-right font-medium">Expectancy $ (95% CI)</th>
                   <th className="px-4 py-2 text-right font-medium">Sharpe (per trade)</th>
                   <th className="px-4 py-2 text-left font-medium">Verdict</th>
+                  <th className="px-4 py-2 text-right font-medium">Replay</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
