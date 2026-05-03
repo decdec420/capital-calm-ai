@@ -296,6 +296,8 @@ Deno.serve(async (req: Request) => {
     // Server-authoritative Katrina context so Wags can reference latest review
     // even when the client omits or stales this section.
     let latestReview: Record<string, unknown> | null = null;
+    let actionableKillCount = 0;
+    let liveNeedsReviewCount = 0;
     try {
       const { data } = await supabase
         .from("strategy_reviews")
@@ -305,6 +307,29 @@ Deno.serve(async (req: Request) => {
         .limit(1)
         .maybeSingle();
       latestReview = (data as Record<string, unknown> | null) ?? null;
+
+      // Cross-check Katrina's kill_ids against currently-OPEN experiments.
+      // Anything already accepted/rejected is closed business — surfacing it
+      // as "needs your decision" is misleading. Audit 2026-05-03.
+      const killIds = Array.isArray(latestReview?.kill_ids)
+        ? (latestReview!.kill_ids as unknown[]).filter((x): x is string => typeof x === "string")
+        : [];
+      if (killIds.length > 0) {
+        const { data: openKill } = await supabase
+          .from("experiments")
+          .select("id")
+          .eq("user_id", userId)
+          .in("status", ["queued", "running", "needs_review"])
+          .in("id", killIds);
+        actionableKillCount = openKill?.length ?? 0;
+      }
+
+      const { count: nrCount } = await supabase
+        .from("experiments")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("needs_review", true);
+      liveNeedsReviewCount = nrCount ?? 0;
     } catch (e) {
       console.error("[copilot-chat] strategy_reviews load failed", e);
     }
