@@ -923,9 +923,13 @@ async function runIntelligenceForSymbol(
     // ── Mafee (carry over when skipped — momentum_at only refreshes on a real run) ──
     pattern_context:        mafeeVal(patternResult?.pattern_context as string | undefined, "pattern_context", ""),
     entry_quality_context:  mafeeVal(patternResult?.entry_quality_context as string | undefined, "entry_quality_context", ""),
-    recent_momentum_1h:     mafeeVal(patternResult?.recent_momentum_1h as string | undefined, "recent_momentum_1h", null as string | null),
-    recent_momentum_4h:     mafeeVal(patternResult?.recent_momentum_4h as string | undefined, "recent_momentum_4h", null as string | null),
-    recent_momentum_notes:  mafeeVal(patternResult?.recent_momentum_notes as string | undefined, "recent_momentum_notes", null as string | null),
+    recent_momentum_1h:     (patternResult?.recent_momentum_1h as string | undefined) ?? fallback1h ?? (prev?.recent_momentum_1h as string | null) ?? null,
+    recent_momentum_4h:     (patternResult?.recent_momentum_4h as string | undefined) ?? fallback4h ?? (prev?.recent_momentum_4h as string | null) ?? null,
+    recent_momentum_notes:  (patternResult?.recent_momentum_notes as string | undefined)
+                              ?? (usingFallback
+                                    ? `Deterministic fallback: 1h=${fallback1h ?? "n/a"}, 4h=${fallback4h ?? "n/a"} (Mafee AI unavailable).`
+                                    : null)
+                              ?? (prev?.recent_momentum_notes as string | null) ?? null,
     recent_momentum_at:     mafeeFreshlyStamped
       ? new Date().toISOString()
       : (prev?.recent_momentum_at ?? null),
