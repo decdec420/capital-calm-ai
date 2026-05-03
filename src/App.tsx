@@ -21,6 +21,7 @@ import Learning from "./pages/Learning";
 import Copilot from "./pages/Copilot";
 import Alerts from "./pages/Alerts";
 import Performance from "./pages/Performance";
+import Edge from "./pages/Edge";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -63,6 +64,7 @@ const App = () => (
               <Route path="/copilot" element={<Copilot />} />
               <Route path="/alerts" element={<Alerts />} />
               <Route path="/performance" element={<Performance />} />
+              <Route path="/edge" element={<Edge />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

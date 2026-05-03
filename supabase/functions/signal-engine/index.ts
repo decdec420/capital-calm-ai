@@ -1146,7 +1146,7 @@ async function runTickForUser(
   // zero effect on real trades.
   const { data: approvedStrategy } = await admin
     .from("strategies")
-    .select("id,version,params")
+    .select("id,version,params,risk_weight")
     .eq("user_id", userId)
     .eq("status", "approved")
     .order("updated_at", { ascending: false })
@@ -1154,6 +1154,13 @@ async function runTickForUser(
   const strategyId: string | null = approvedStrategy?.id ?? null;
   const strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
+  // Phase 1 (Kelly-lite): per-strategy risk weight scales the doctrine
+  // RISK_PER_TRADE_PCT. Bounded [0.25, 2.0] so a misconfigured weight
+  // can't blow past doctrine; the clamp/floor still has the final word.
+  const strategyRiskWeight: number = Math.max(
+    0.25,
+    Math.min(2.0, Number(approvedStrategy?.risk_weight ?? 1.0)),
+  );
 
   // Pull the live-tunable knobs out of the strategy params.
   type StratParam = { key: string; value: number | string | boolean };
@@ -1972,7 +1979,12 @@ async function runTickForUser(
       reason: `coach_penalty: conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
     };
   }
-  const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, RISK_PER_TRADE_PCT);
+  // Phase 1 (Kelly-lite): scale the doctrine RISK_PER_TRADE_PCT by the
+  // approved strategy's risk_weight. A weight of 1.0 = no change. The
+  // doctrine clamp + kill-switch floor still bound the final notional,
+  // so a misconfigured weight cannot escape doctrine.
+  const effectiveRiskPct = RISK_PER_TRADE_PCT * strategyRiskWeight;
+  const riskBasedUsd = notionalFromRiskPct(equity, entry, stop, effectiveRiskPct);
   // Confidence multiplier: 0.55 → 0.5×, 1.0 → 1.0× (linear).
   const confMult = Math.max(0.5, Math.min(1.0, (conf - 0.55) / 0.45 + 0.5));
   // Allow the AI to *shrink* via size_pct vs the 0.25 maximum slot.
@@ -2050,6 +2062,61 @@ async function runTickForUser(
         ? entry + riskPerUnit * tp1RMult
         : entry - riskPerUnit * tp1RMult),
   );
+
+  // ── Phase 1: Cost-aware edge gate ────────────────────────────
+  // Reject signals where the expected move to TP1 doesn't cover round-trip
+  // costs by a healthy margin. On a $10 paper account a single 3% win on
+  // a $1 position is $0.03 gross — Coinbase taker fees alone (≈0.35% per
+  // side ~= 0.7% round-trip) plus realistic slippage (≈0.10% per side)
+  // wipe that out and turn it into a guaranteed loss. We require the
+  // expected edge to TP1 to be ≥ 2× the all-in cost estimate.
+  //
+  // Conservative defaults: 0.6% per-side fee + 0.10% per-side slippage
+  // = 1.4% round-trip. So edgeToTp1Pct must be ≥ 2.8%.
+  const FEE_PCT_PER_SIDE = 0.006;        // Coinbase Advanced taker upper bound
+  const SLIPPAGE_PCT_PER_SIDE = 0.001;    // 10bps each side, generous for BTC/ETH/SOL
+  const ROUND_TRIP_COST_PCT = 2 * (FEE_PCT_PER_SIDE + SLIPPAGE_PCT_PER_SIDE);
+  const EDGE_MULT_REQUIRED = 2.0;
+  const minEdgePctRequired = ROUND_TRIP_COST_PCT * EDGE_MULT_REQUIRED;
+  const edgeToTp1Pct = entry > 0
+    ? Math.abs(tp1 - entry) / entry
+    : 0;
+  if (edgeToTp1Pct > 0 && edgeToTp1Pct < minEdgePctRequired) {
+    const edgeGate = gate(
+      GATE_CODES.EDGE_BELOW_COSTS,
+      "skip",
+      `${winner.symbol}: TP1 edge ${(edgeToTp1Pct * 100).toFixed(2)}% < required ${(minEdgePctRequired * 100).toFixed(2)}% (covers ~${(ROUND_TRIP_COST_PCT * 100).toFixed(2)}% round-trip costs).`,
+      {
+        symbol: winner.symbol,
+        edgeToTp1Pct,
+        minEdgePctRequired,
+        roundTripCostPct: ROUND_TRIP_COST_PCT,
+        edgeMultRequired: EDGE_MULT_REQUIRED,
+        feePctPerSide: FEE_PCT_PER_SIDE,
+        slippagePctPerSide: SLIPPAGE_PCT_PER_SIDE,
+      },
+    );
+    await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "skip",
+      title: `Edge below costs · ${winner.symbol}`,
+      summary: `Skipped ${side.toUpperCase()} @ $${entry.toFixed(2)}: expected TP1 move ${(edgeToTp1Pct * 100).toFixed(2)}% wouldn't beat round-trip fees + slippage (${(ROUND_TRIP_COST_PCT * 100).toFixed(2)}%).`,
+      tags: [winner.symbol, "edge-below-costs", winner.regime.regime],
+    });
+    await persistSnapshot(admin, userId, {
+      gateReasons: [edgeGate],
+      perSymbol,
+      chosenSymbol: winner.symbol,
+    });
+    return {
+      userId,
+      tick: "edge_below_costs",
+      symbol: winner.symbol,
+      gateReasons: [edgeGate],
+      expiredCount,
+      perSymbol,
+    };
+  }
 
   // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
   // Only fires when a trade is actually proposed — keeps cost low since
