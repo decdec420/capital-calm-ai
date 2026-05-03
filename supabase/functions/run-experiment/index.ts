@@ -221,13 +221,13 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
 }
 
 Deno.serve(async (req: Request) => {
-    const cors = makeCorsHeaders(req);
+  const cors = makeCorsHeaders(req);
   const json = (b: unknown, s: number) =>
     new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
-  
-  async function fetchCandles(symbol = "BTC-USD"): Promise<SharedCandle[]> {
-    const url = `https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=3600`;
-if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+
+  try {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
