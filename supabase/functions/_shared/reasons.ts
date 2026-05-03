@@ -79,6 +79,7 @@ export const GATE_CODES = {
 
   // Live broker execution
   BROKER_ORDER_FAILED: "BROKER_ORDER_FAILED",
+  LIMIT_NOT_FILLED: "LIMIT_NOT_FILLED",
 
   // Phase 1 — execution quality / cost-aware edge
   EDGE_BELOW_COSTS: "EDGE_BELOW_COSTS",

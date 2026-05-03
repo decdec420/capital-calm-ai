@@ -253,3 +253,72 @@ export async function placeMarketSell(
 
   return waitForFill(creds, orderId);
 }
+
+/**
+ * Place a limit IOC (Immediate Or Cancel) BUY order.
+ *
+ * Fills at `limitPrice` or better, cancels immediately if no liquidity exists
+ * at that level. Use for mean-reversion entries (e.g. vwap-revert in range
+ * regime) where price discipline matters — if the market has already moved
+ * beyond our level we'd rather skip than chase at market.
+ *
+ * @param creds         Coinbase API credentials
+ * @param productId     e.g. "BTC-USD"
+ * @param baseSize      Quantity of base asset to buy, e.g. "0.00012345"
+ * @param limitPrice    Maximum price per unit in USD, e.g. "79500.00"
+ * @param clientOrderId Caller-supplied idempotency key (UUID)
+ *
+ * @throws if the order is rejected or CANCELLED (limit not filled).
+ *         Callers wanting graceful "limit missed" handling should catch
+ *         errors containing "CANCELLED" and treat them as skip-not-error.
+ */
+export async function placeLimitBuyIOC(
+  creds: BrokerCredentials,
+  productId: string,
+  baseSize: string,
+  limitPrice: string,
+  clientOrderId: string,
+): Promise<BrokerFill> {
+  const jwt = await signCoinbaseJwt(creds.apiKeyName, creds.apiKeyPrivatePem);
+
+  const orderBody = {
+    client_order_id: clientOrderId,
+    product_id: productId,
+    side: "BUY",
+    order_configuration: {
+      limit_limit_ioc: {
+        base_size: baseSize,
+        limit_price: limitPrice,
+        post_only: false,
+      },
+    },
+  };
+
+  const r = await fetch(`${CB_BASE}/api/v3/brokerage/orders`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(orderBody),
+  });
+
+  if (!r.ok) {
+    const errText = await r.text();
+    throw new Error(`[broker] LIMIT BUY IOC HTTP ${r.status}: ${errText}`);
+  }
+
+  const resp = await r.json();
+  if (!resp.success) {
+    const msg = resp.error_response?.message ?? resp.error ?? JSON.stringify(resp);
+    throw new Error(`[broker] LIMIT BUY IOC rejected by Coinbase: ${msg}`);
+  }
+
+  const orderId: string = resp.success_response.order_id;
+  console.log(
+    `[broker] LIMIT BUY IOC placed ${productId} ${baseSize} @ $${limitPrice} — orderId ${orderId}`,
+  );
+
+  // IOC orders resolve quickly — use a short timeout (5s)
+  return waitForFill(creds, orderId, 5_000);
+}

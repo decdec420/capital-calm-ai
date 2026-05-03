@@ -75,7 +75,9 @@ import {
 } from "../_shared/snapshot.ts";
 import {
   getBrokerCredentials,
+  placeLimitBuyIOC,
   placeMarketBuy,
+  type BrokerFill,
 } from "../_shared/broker.ts";
 import { recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
@@ -452,6 +454,12 @@ async function decideForSymbol(opts: {
   const macroBiasStr = intel?.macro_bias ?? "unknown";
   const envRating = intel?.environment_rating ?? "unknown";
 
+  // Mean-reversion context — used to inject regime-specific instructions below.
+  const isRangeFade = opts.regime.regime === "range";
+  const regimeRsiNow = opts.regime.rsiNow;
+  const regimeEmaSlow = opts.regime.emaSlow;
+  const rangeFadeDirection = regimeRsiNow >= 70 ? "short" : regimeRsiNow <= 30 ? "long" : "unclear";
+
   const systemPrompt = `
 You are the Technical Analyst on a professional multi-expert crypto trading desk.
 You are the execution specialist — your job is to find HIGH QUALITY entries
@@ -508,6 +516,43 @@ DECISION HIERARCHY (work through all of these before deciding):
      and the breakout is from a tight consolidation.
      Breakouts from wide, loose patterns fail most of the time.
 
+${isRangeFade ? `
+*** REGIME OVERRIDE: MEAN-REVERSION PLAYBOOK ***
+The market is in RANGE regime with RSI ${regimeRsiNow.toFixed(0)}.
+This is NOT a trend trade. Ignore sections 3–4 above (multi-timeframe trend alignment
+and pullback preference do not apply to fades). Use this playbook instead:
+
+DIRECTION (mandatory — determined by RSI extreme):
+- RSI ≥ 70 (overbought) → SIDE: short. You are fading an overextended move UP.
+- RSI ≤ 30 (oversold) → SIDE: long. You are fading an overextended move DOWN.
+- Current RSI: ${regimeRsiNow.toFixed(0)} → required side: ${rangeFadeDirection.toUpperCase()}.
+  If you disagree with this direction, SKIP — do not take the opposing side in a fade setup.
+
+ENTRY (set proposed_entry):
+- Enter near current price. You are fading the extreme NOW, not waiting for a pullback.
+- proposed_entry ≈ last price (within 0.2%). Do NOT aim for a lower/higher entry than current.
+
+STOP (set proposed_stop — MUST be tight):
+- Long (oversold fade): stop just below the most recent 3-bar LOW. Max 0.8% from entry.
+- Short (overbought fade): stop just above the most recent 3-bar HIGH. Max 0.8% from entry.
+- If a valid stop placement requires > 0.8% from entry → SKIP. The range is too wide.
+
+TARGET (set proposed_target):
+- Mean-reversion target: slow EMA (~$${regimeEmaSlow.toFixed(0)}). That is the "mean" you are reverting to.
+- TP1 at halfway to slow EMA. Full exit at slow EMA.
+- Expected R-multiple: 1.5-2.5×. Do not hold for more — this is a range trade, not a trend.
+
+SIZING: 10-15% of equity maximum (use size_pct 0.10-0.15). Mean-reversion is smaller stakes.
+Never propose 20%+ for a fade.
+
+CONFIDENCE: A clean RSI extreme (≥70 or ≤30) with 15m exhaustion candle = 0.65-0.75.
+Add 0.05 if the 1h trend is flat (not fighting you). Cap at 0.80 — this is a counter-move.
+
+ADDITIONAL SKIP CRITERIA for fades:
+- 4h trend is strongly directional (not range/flat) — do not fade a genuine trend.
+- RSI is deepening further into overbought/oversold on 15m (momentum accelerating) → wait.
+- Strong news/macro event driving the move (dollar_bill.news_flag = "critical") → skip.
+` : ""}
 5. KEY LEVEL QUALITY:
    From the Pattern Recognition Specialist:
    "${intel?.entry_quality_context ?? "No pattern context available — be conservative."}"
@@ -1651,13 +1696,15 @@ async function runTickForUser(
           ),
         ];
       }
-      if (c.regime.regime === "range") {
+      if (c.regime.regime === "range" && c.regime.setupScore < MIN_SETUP_SCORE) {
+        // Range is tradeable but only at RSI extremes (≥70 overbought / ≤30 oversold).
+        // setupScore < MIN_SETUP_SCORE here means rangeReversionBoost wasn't earned.
         return [
           gate(
             GATE_CODES.RANGE_REGIME,
             "skip",
-            `${c.symbol}: pure range — sitting out.`,
-            { symbol: c.symbol },
+            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion fade). setupScore ${c.regime.setupScore.toFixed(2)}.`,
+            { symbol: c.symbol, rsiNow: c.regime.rsiNow, setupScore: c.regime.setupScore },
           ),
         ];
       }
@@ -2685,8 +2732,106 @@ async function runTickForUser(
     let brokerOrderId: string | null = null;
 
     if (liveEnabled && !liveBlockedByAck) {
+      // IV-B: Mean-reversion (vwap-revert in range regime) uses limit IOC at the
+      // AI's proposed_entry rather than a market order. This enforces price discipline:
+      // we only enter at the fade level — if price has already bounced past our limit
+      // the IOC cancels and we skip cleanly rather than chasing a recovering move.
+      const useLimitIOC =
+        winner.regime.regime === "range" &&
+        routerDecision.strategy?.name === "vwap-revert" &&
+        side === "long"; // limit IOC only for long fades; short fades not supported in spot
+
       try {
         const creds = await getBrokerCredentials(admin);
+
+        // ── Limit IOC path (vwap-revert mean-reversion) ──
+        if (useLimitIOC) {
+          const limitPrice = entry; // AI's proposed_entry is the fade level
+          const baseSize = sizeUsd / limitPrice;
+          let limitFill: BrokerFill | null = null;
+          try {
+            limitFill = await placeLimitBuyIOC(
+              creds,
+              winner.symbol,
+              baseSize.toFixed(8),
+              limitPrice.toFixed(2),
+              clientOrderId,
+            );
+          } catch (limitErr) {
+            const errMsg = String(limitErr);
+            const isCancelled = errMsg.includes("CANCELLED");
+            log(isCancelled ? "info" : "warn", "limit_ioc_not_filled", {
+              fn: "signal-engine",
+              userId,
+              symbol: winner.symbol,
+              limitPrice,
+              sizeUsd,
+              isCancelled,
+              err: errMsg,
+            });
+            // Update the pre-inserted pending row to cancelled status
+            await admin
+              .from("trades")
+              .update({
+                status: "limit_not_filled",
+                notes: `Limit IOC @ $${limitPrice.toFixed(2)} not filled — price moved past our level before fill. No position opened.`,
+              })
+              .eq("id", pendingTradeRow.id);
+            await admin.from("journal_entries").insert({
+              user_id: userId,
+              kind: "skip",
+              title: `Limit not filled: ${winner.symbol} range fade @ $${limitPrice.toFixed(0)}`,
+              summary: `vwap-revert limit IOC at $${limitPrice.toFixed(2)} was not filled — price moved before our order could execute. No position opened. Will re-evaluate next tick.`,
+              tags: [winner.symbol, "range", "limit-not-filled", "vwap-revert"],
+            });
+            return {
+              userId,
+              tick: "limit_not_filled",
+              symbol: winner.symbol,
+              gateReasons: [{
+                code: GATE_CODES.LIMIT_NOT_FILLED,
+                severity: "skip" as const,
+                message: `${winner.symbol}: limit IOC @ $${limitPrice.toFixed(2)} not filled — price moved.`,
+                meta: { limitPrice, symbol: winner.symbol },
+              }],
+              expiredCount,
+              perSymbol,
+            };
+          }
+          if (!limitFill) throw new Error("[signal-engine] limitFill unexpectedly null");
+          liveEntry = limitFill.fillPrice;
+          liveSize = limitFill.filledBaseSize;
+          brokerOrderId = limitFill.orderId;
+          log("info", "live_limit_ioc_executed", {
+            fn: "signal-engine", userId, symbol: winner.symbol,
+            limitPrice, fillPrice: liveEntry, size: liveSize, orderId: brokerOrderId,
+            feesUsd: limitFill.feesUsd,
+          });
+          await recordFill(admin, {
+            userId,
+            tradeId: pendingTradeRow.id,
+            symbol: winner.symbol,
+            fillKind: "entry",
+            proposedPrice: entry,
+            fill: limitFill,
+          });
+          await admin
+            .from("trades")
+            .update({
+              status: "open",
+              entry_price: liveEntry,
+              size: liveSize,
+              original_size: liveSize,
+              requested_size: baseSize,
+              partial_fill: false,
+              entry_fees_usd: Number.isFinite(limitFill.feesUsd) ? limitFill.feesUsd : 0,
+              entry_slippage_pct: 0,
+              broker_order_id: brokerOrderId,
+              notes: `LIVE Limit IOC (vwap-revert) @ $${liveEntry.toFixed(2)} · Auto-approved (${autonomy}) conf ${(conf * 100).toFixed(0)}% · fees $${limitFill.feesUsd.toFixed(4)}`,
+            })
+            .eq("id", pendingTradeRow.id);
+        } else {
+        // ── Market order path (all other strategies) ──
         const fill = await placeMarketBuy(
           creds,
           winner.symbol,
@@ -2788,6 +2933,7 @@ async function runTickForUser(
             if (jErr) log("warn", "journal_insert_failed", { fn: "signal-engine", err: jErr.message });
           });
         }
+        } // end else (market order path)
       } catch (brokerErr) {
         log("error", "live_auto_execute_broker_failed", { fn: "signal-engine", userId, symbol: winner.symbol, tradeId: pendingTradeRow.id, err: String(brokerErr) });
         // Mark pre-inserted row as failed so operator can reconcile against Coinbase.
