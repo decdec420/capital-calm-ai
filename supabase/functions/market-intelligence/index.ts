@@ -858,9 +858,48 @@ async function runIntelligenceForSymbol(
     ? cryptoResult.news_flags
     : (prev?.news_flags ?? []);
 
-  // recent_momentum_at — only stamp NOW if Mafee actually returned both reads.
-  const mafeeFreshlyStamped =
+  // recent_momentum_at — stamp NOW if either:
+  //   (a) Mafee (the AI expert) returned both 1h and 4h reads, OR
+  //   (b) we have at least 8 fresh 1h candles to compute a deterministic
+  //       fallback ourselves.
+  // The deterministic fallback exists so a single AI hiccup doesn't leave
+  // momentum stale for hours and gate every trade with BRAIN_TRUST_MOMENTUM_STALE.
+  // (Phase A1 — May 2026.)
+  type MomentumRead = "up" | "down" | "flat" | "mixed";
+  const computeMomentum = (cs: Candle[], window: number): MomentumRead | null => {
+    if (cs.length < window * 2) return null;
+    const recent = cs.slice(-window);
+    const prior  = cs.slice(-window * 2, -window);
+    const avg    = (xs: Candle[]) => xs.reduce((s, c) => s + c.c, 0) / xs.length;
+    const recentAvg = avg(recent);
+    const priorAvg  = avg(prior);
+    const pct = ((recentAvg - priorAvg) / priorAvg) * 100;
+    // Per-bar agreement check — if direction is mixed within the window, say so.
+    const ups = recent.filter((c, i, a) => i > 0 && c.c > a[i - 1].c).length;
+    const dns = recent.filter((c, i, a) => i > 0 && c.c < a[i - 1].c).length;
+    const conflicted = ups > 0 && dns > 0 && Math.abs(ups - dns) <= 1;
+    if (conflicted && Math.abs(pct) < 0.6) return "mixed";
+    if (pct > 0.3) return "up";
+    if (pct < -0.3) return "down";
+    return "flat";
+  };
+  const fallback1h = computeMomentum(candles1h, 4);   // ~last 4h vs prior 4h
+  const fallback4h = computeMomentum(candles1h, 16);  // ~last 16h vs prior 16h
+  const aiHasBoth =
     !!(patternResult?.recent_momentum_1h && patternResult?.recent_momentum_4h);
+  const fallbackHasBoth = !!(fallback1h && fallback4h);
+  const mafeeFreshlyStamped = aiHasBoth || fallbackHasBoth;
+  const usingFallback = !aiHasBoth && fallbackHasBoth;
+  if (usingFallback) {
+    log("warn", "mafee_momentum_fallback_used", {
+      fn: "market-intelligence",
+      symbol,
+      reason: patternResult ? "ai_response_missing_fields" : "ai_call_failed_or_skipped",
+      fallback_1h: fallback1h,
+      fallback_4h: fallback4h,
+      candle_count: candles1h.length,
+    });
+  }
 
   const upsertPayload = {
     user_id: userId,
