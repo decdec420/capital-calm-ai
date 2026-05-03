@@ -2649,8 +2649,27 @@ async function runTickForUser(
         liveEntry = fill.fillPrice;
         liveSize = fill.filledBaseSize;
         brokerOrderId = fill.orderId;
-        log("info", "live_buy_executed", { fn: "signal-engine", userId, symbol: winner.symbol, entryPrice: liveEntry, size: liveSize, orderId: brokerOrderId });
-        // Promote pending → open with actual fill data
+        // Phase 5: capture observed slippage vs the proposed entry,
+        // and detect partial fills (Coinbase IOC can return < requested
+        // base size if liquidity dries up mid-fill).
+        const expectedBase = entry > 0 ? sizeUsd / entry : 0;
+        const isPartial = expectedBase > 0
+          && fill.filledBaseSize > 0
+          && fill.filledBaseSize < expectedBase * 0.99;
+        const slippageRaw = entry > 0 ? (fill.fillPrice - entry) / entry : 0;
+        const entrySlippagePct = side === "long" ? slippageRaw : -slippageRaw;
+        log("info", "live_buy_executed", { fn: "signal-engine", userId, symbol: winner.symbol, entryPrice: liveEntry, size: liveSize, orderId: brokerOrderId, feesUsd: fill.feesUsd, entrySlippagePct, isPartial });
+
+        await recordFill(admin, {
+          userId,
+          tradeId: pendingTradeRow.id,
+          symbol: winner.symbol,
+          fillKind: "entry",
+          proposedPrice: entry,
+          fill,
+        });
+
+        // Promote pending → open with actual fill data + cost ledger
         const { error: openUpdateErr } = await admin
           .from("trades")
           .update({
@@ -2658,8 +2677,12 @@ async function runTickForUser(
             entry_price: liveEntry,
             size: liveSize,
             original_size: liveSize,
+            requested_size: expectedBase,
+            partial_fill: isPartial,
+            entry_fees_usd: Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0,
+            entry_slippage_pct: entrySlippagePct,
             broker_order_id: brokerOrderId,
-            notes: `LIVE Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""} · Coinbase orderId: ${brokerOrderId}`,
+            notes: `LIVE Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}${isPartial ? " · PARTIAL fill" : ""} · Coinbase orderId: ${brokerOrderId} · fees $${fill.feesUsd.toFixed(4)} · slip ${(entrySlippagePct * 100).toFixed(3)}%`,
           })
           .eq("id", pendingTradeRow.id);
 
