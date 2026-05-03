@@ -548,6 +548,22 @@ A SKIP IS NOT FAILURE. Most ticks should be skips.
 The edge is in the quality of trades taken, not the quantity.
 "The money is made in the waiting." — Jesse Livermore
 `}
+${strategyMenu ? `
+PLAYBOOK MENU FOR THIS REGIME:
+${strategyMenu}
+Match your reasoning to the playbook style that fits. The router will assign
+the trade to the right playbook based on your chosen side. If no playbook
+fits the side you're considering, the signal will be dropped — so prefer
+sides that have an eligible playbook.
+` : ""}
+${crossSymbolContext ? `
+CROSS-SYMBOL CONTEXT:
+${crossSymbolContext}
+` : ""}
+${correlationNote ? `
+CORRELATION CHECK:
+${correlationNote}
+` : ""}
 You MUST call submit_decision. No plain text responses.
 `.trim();
 
