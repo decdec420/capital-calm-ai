@@ -57,7 +57,9 @@ SELECT cron.schedule(
   $$
 );
 
--- Also fix jessica-tick (job 18) which uses the same hardcoded pattern
+-- Also fix jessica-tick (job 18).
+-- IMPORTANT: jessica validates body.cronToken against get_jessica_cron_token(),
+-- NOT get_signal_engine_cron_token(). Must use the jessica-specific vault token.
 SELECT cron.unschedule('jessica-tick');
 
 SELECT cron.schedule(
@@ -68,11 +70,11 @@ SELECT cron.schedule(
       url     := 'https://klgotmhyxxtppzpbjkfu.supabase.co/functions/v1/jessica',
       headers := jsonb_build_object(
         'Content-Type',  'application/json',
-        'Authorization', 'Bearer ' || COALESCE(public.get_signal_engine_cron_token(), '')
+        'Authorization', 'Bearer ' || COALESCE(public.get_jessica_cron_token(), '')
       ),
       body    := jsonb_build_object(
         'cronAll',   true,
-        'cronToken', COALESCE(public.get_signal_engine_cron_token(), '')
+        'cronToken', COALESCE(public.get_jessica_cron_token(), '')
       )
     ) AS request_id;
   $$
