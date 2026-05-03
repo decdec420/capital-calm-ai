@@ -30,6 +30,7 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useTrades } from "@/hooks/useTrades";
 
 import { useGuardrails } from "@/hooks/useGuardrails";
+import { useDoctrineSettings } from "@/hooks/useDoctrineSettings";
 import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
@@ -61,6 +62,7 @@ export default function Overview() {
   const { open, closed } = useTrades();
   
   const { guardrails } = useGuardrails();
+  const { settings: doctrine } = useDoctrineSettings();
   const { candles } = useCandles();
   const { pending: pendingSignals } = useSignals();
   const [killOpen, setKillOpen] = useState(false);
@@ -257,20 +259,34 @@ export default function Overview() {
         </div>
       )}
 
-      {/* Small-account warning — surface why orders look like rounding errors. */}
-      {account && account.equity > 0 && account.equity < 50 && (
-        <div className="panel p-3 flex items-start gap-2.5 border-status-caution/40 bg-status-caution/5">
-          <ShieldAlert className="h-4 w-4 text-status-caution shrink-0 mt-0.5" />
-          <div className="text-xs leading-snug">
-            <span className="font-medium text-foreground">Small account mode.</span>{" "}
-            <span className="text-muted-foreground">
-              Equity is ${fmtMoney(account.equity, true)} — every order will be a tiny
-              fraction of a coin. The engine will still gate trades the same way; expected
-              edge just has to clear round-trip fees, which is harder at this size.
-            </span>
+      {/* Small-account callout — honest math + a real path to fix it. */}
+      {account && account.equity > 0 && account.equity < 50 && (() => {
+        const pct = doctrine?.max_order_pct ?? 0.05;
+        const floor = doctrine?.max_order_abs_floor ?? 0.25;
+        const cap = doctrine?.max_order_abs_cap ?? 50;
+        const projected = Math.min(Math.max(account.equity * pct, floor), cap);
+        return (
+          <div className="panel p-3 flex items-start gap-2.5 border-status-caution/40 bg-status-caution/5">
+            <ShieldAlert className="h-4 w-4 text-status-caution shrink-0 mt-0.5" />
+            <div className="text-xs leading-snug">
+              <span className="font-medium text-foreground">
+                Account too small for meaningful position sizing.
+              </span>{" "}
+              <span className="text-muted-foreground">
+                Equity ${fmtMoney(account.equity, true)} × max-order {(pct * 100).toFixed(2)}% ≈
+                {" "}<span className="tabular">${projected.toFixed(2)}</span> per trade — below practical
+                crypto fill granularity.{" "}
+                <Link
+                  to="/settings#paper-account"
+                  className="text-primary hover:underline font-medium"
+                >
+                  Top up paper balance →
+                </Link>
+              </span>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Metric grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
