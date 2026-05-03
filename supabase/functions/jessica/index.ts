@@ -22,7 +22,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 import { log } from "../_shared/logger.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
 // Flash for latency — Bobby runs every 60 seconds. He doesn't need deep
@@ -602,14 +602,7 @@ async function runJessicaForUser(
       break;
     }
 
-    const json = await res.json().catch(() => null);
-    const choice = json?.choices?.[0];
-    const toolCalls = choice?.message?.tool_calls ?? [];
-    const assistantContent = choice?.message?.content ?? "";
-
-    if (toolCalls.length === 0) {
-      jessicaCbSuccess();
-      finalDecision = assistantContent || "Sitting — no action warranted this tick.";
+          finalDecision = assistantContent || "Sitting — no action warranted this tick.";
       break;
     }
 
@@ -711,7 +704,15 @@ async function runJessicaForUser(
 // ─── Main Handler ─────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = await res.json().catch(() => null);
+      const choice = json?.choices?.[0];
+      const toolCalls = choice?.message?.tool_calls ?? [];
+      const assistantContent = choice?.message?.content ?? "";
+  
+      if (toolCalls.length === 0) {
+        jessicaCbSuccess();
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -721,7 +722,7 @@ Deno.serve(async (req: Request) => {
   if (!supabaseUrl || !serviceRoleKey || !lovableApiKey) {
     return new Response(JSON.stringify({ error: "Missing env vars" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -747,7 +748,7 @@ Deno.serve(async (req: Request) => {
     if (!validToken) {
       return new Response(JSON.stringify({ error: "Invalid cron token" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -769,7 +770,7 @@ Deno.serve(async (req: Request) => {
     }
     return new Response(JSON.stringify({ fanout: true, results }), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -778,7 +779,7 @@ Deno.serve(async (req: Request) => {
   if (!authHeader.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -790,7 +791,7 @@ Deno.serve(async (req: Request) => {
   if (!userData?.user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -799,6 +800,6 @@ Deno.serve(async (req: Request) => {
   );
   return new Response(JSON.stringify(result), {
     status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...cors, "Content-Type": "application/json" },
   });
 });

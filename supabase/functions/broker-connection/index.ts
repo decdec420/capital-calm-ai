@@ -28,7 +28,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // ── Handler ──────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   // Auth
   const authHeader = req.headers.get("Authorization") ?? "";
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
   if (userErr || !userData.user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
   const userId = userData.user.id;
@@ -59,7 +60,7 @@ Deno.serve(async (req) => {
     if (action === "status") {
       const { data } = await admin.from("broker_health").select("*").eq("user_id", userId).maybeSingle();
       return new Response(JSON.stringify({ ok: true, health: data ?? { status: "not_connected" } }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -68,12 +69,12 @@ Deno.serve(async (req) => {
       const rawPem = String(body.privatePem ?? "").trim();
       if (!keyName || keyName.length < 8 || keyName.length > 500) {
         return new Response(JSON.stringify({ error: "keyName must be 8-500 chars" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       if (!rawPem || rawPem.length > 5000) {
         return new Response(JSON.stringify({ error: "privatePem missing or too large" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
@@ -82,7 +83,7 @@ Deno.serve(async (req) => {
         pkcs8 = normalizeCoinbasePrivateKeyPem(rawPem);
       } catch (e) {
         return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Invalid PEM" }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
           p_user_id: userId, p_status: "auth_failed", p_key_name: keyName, p_error: friendly,
         });
         return new Response(JSON.stringify({ error: friendly, status: probe.status }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 400, headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
@@ -115,7 +116,7 @@ Deno.serve(async (req) => {
       });
 
       return new Response(JSON.stringify({ ok: true, status: "healthy", keyName }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -126,7 +127,7 @@ Deno.serve(async (req) => {
         p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: null,
       });
       return new Response(JSON.stringify({ ok: true, status: "not_connected" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -141,7 +142,7 @@ Deno.serve(async (req) => {
           p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: "No credentials in Vault",
         });
         return new Response(JSON.stringify({ ok: true, status: "not_connected" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       const probe = await probeCoinbaseAccounts(row.api_key_name, row.api_key_private_pem);
@@ -150,7 +151,7 @@ Deno.serve(async (req) => {
           p_user_id: userId, p_status: "healthy", p_key_name: row.api_key_name, p_error: null,
         });
         return new Response(JSON.stringify({ ok: true, status: "healthy" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       const friendly = probe.status === 401 || probe.status === 403
@@ -160,18 +161,18 @@ Deno.serve(async (req) => {
         p_user_id: userId, p_status: "auth_failed", p_key_name: row.api_key_name, p_error: friendly,
       });
       return new Response(JSON.stringify({ ok: false, status: "auth_failed", error: friendly }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
     return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
-      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 400, headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[broker-connection] error", msg);
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500, headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

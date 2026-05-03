@@ -11,7 +11,7 @@
 // writes the result to strategy_reviews. Surfaced in the Learning tab and to Wags.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 
 
@@ -442,7 +442,8 @@ Return a structured JSON object with these exact keys:
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = makeCorsHeaders(req);
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -453,7 +454,7 @@ Deno.serve(async (req: Request) => {
     console.error("[katrina] Missing env vars");
     return new Response(JSON.stringify({ error: "Missing env vars" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -462,7 +463,7 @@ Deno.serve(async (req: Request) => {
   if (!authHeader.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -491,13 +492,13 @@ Deno.serve(async (req: Request) => {
     if (!targetUserId) {
       return new Response(JSON.stringify({ error: "Missing user_id" }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const result = await runKatrinaForUser(targetUserId, admin, lovableApiKey, "trade_milestone");
     return new Response(JSON.stringify({ ok: true, ...result }), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -529,7 +530,7 @@ Deno.serve(async (req: Request) => {
     }
     return new Response(JSON.stringify({ ok: true, fanout: !targetUserId, count: results.length, results }), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -540,7 +541,7 @@ Deno.serve(async (req: Request) => {
   if (userErr || !userData?.user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 
@@ -548,13 +549,13 @@ Deno.serve(async (req: Request) => {
     const result = await runKatrinaForUser(userData.user.id, admin, lovableApiKey, "manual");
     return new Response(JSON.stringify({ ok: true, ...result }), {
       status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("[katrina] manual run threw:", err);
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

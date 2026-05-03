@@ -14,7 +14,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 import { buildEventModeContextInstruction } from "./event-mode-context.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
 interface ChatMessage {
@@ -164,14 +164,15 @@ ${eventModeInstruction}
 ${ctxBlock}`;
 };
 
-const json = (body: unknown, status: number) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = (body: unknown, status: number) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     // --- AuthN ---
@@ -196,7 +197,7 @@ Deno.serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const rlAdmin = createClient(supabaseUrl, serviceRoleKey);
     const rl = await checkRateLimit(rlAdmin, userId, "copilot-chat", 20);
-    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+    if (!rl.allowed) return rateLimitResponse(rl, cors);
 
     // --- Input validation ---
     let payload: { conversationId?: unknown; userMessage?: unknown; context?: unknown };
@@ -658,7 +659,7 @@ Deno.serve(async (req: Request) => {
       });
 
       return new Response(passthrough.pipeThrough(makeTeeTransform()), {
-        headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+        headers: { ...cors, "Content-Type": "text/event-stream" },
       });
     }
 
@@ -731,7 +732,7 @@ Deno.serve(async (req: Request) => {
     }
 
     return new Response(followupResp.body.pipeThrough(makeTeeTransform()), {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      headers: { ...cors, "Content-Type": "text/event-stream" },
     });
   } catch (e) {
     console.error("copilot-chat error", e);

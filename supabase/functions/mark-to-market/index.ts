@@ -44,7 +44,7 @@ import {
   placeMarketSell,
   type BrokerCredentials,
 } from "../_shared/broker.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 validateDoctrineInvariants();
 
@@ -536,8 +536,9 @@ async function runMarkToMarket(
 
 // ─── HTTP entry ─────────────────────────────────────────────────
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -577,13 +578,13 @@ Deno.serve(async (req) => {
           }),
           {
             status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...cors, "Content-Type": "application/json" },
           },
         );
       }
       const result = await runMarkToMarket(admin);
       return new Response(JSON.stringify({ mode: "cron", ...result }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -591,7 +592,7 @@ Deno.serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -601,7 +602,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData.user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -614,7 +615,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ mode: "user", userId: userData.user.id, ...result }),
       {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   } catch (e) {
@@ -623,7 +624,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   }

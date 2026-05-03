@@ -6,13 +6,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runSharedBacktest, type SharedCandle, type SharedParam } from "./backtest-shared.ts";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
-const json = (b: unknown, s: number) =>
-  new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-async function fetchCandles(symbol = "BTC-USD"): Promise<SharedCandle[]> {
-  const url = `https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=3600`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Coinbase ${res.status}`);
   const raw = (await res.json()) as number[][];
@@ -224,7 +219,13 @@ async function runOneForUser(admin: any, userId: string, candles: SharedCandle[]
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = (b: unknown, s: number) =>
+    new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
+  
+  async function fetchCandles(symbol = "BTC-USD"): Promise<SharedCandle[]> {
+    const url = `https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=3600`;
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -253,7 +254,7 @@ Deno.serve(async (req: Request) => {
 
       // Rate limit user-triggered runs only.
       const rl = await checkRateLimit(admin, userData.user.id, "run-experiment", 5);
-      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+      if (!rl.allowed) return rateLimitResponse(rl, cors);
     }
 
     if (userIds.length === 0) return json({ ok: true, processed: 0 }, 200);

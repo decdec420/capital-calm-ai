@@ -14,7 +14,7 @@
 //   { ok: true, lookback_days, before, after, delta, trade_count }
 // ============================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import {
   resolveDoctrine,
   type DoctrineSettingsRow,
@@ -47,7 +47,8 @@ interface ImpactSummary {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -180,6 +181,6 @@ function simulate(trades: Trade[], settings: DoctrineSettingsRow, equity: number
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...cors, "Content-Type": "application/json" },
   });
 }

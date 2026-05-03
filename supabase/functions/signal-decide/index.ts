@@ -27,14 +27,15 @@ import {
   getBrokerCredentials,
   placeMarketBuy,
 } from "../_shared/broker.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 validateDoctrineInvariants();
 
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
 
   try {
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -58,7 +59,7 @@ Deno.serve(async (req) => {
         }),
         {
           status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -77,7 +78,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData.user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const userId = userData.user.id;
@@ -85,7 +86,7 @@ Deno.serve(async (req) => {
 
     // Rate limit: 20 req / 60s per user
     const rl = await checkRateLimit(admin, userId, "signal-decide", 20);
-    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+    if (!rl.allowed) return rateLimitResponse(rl, cors);
 
     const { data: sig, error: sigErr } = await admin
       .from("trade_signals")
@@ -97,7 +98,7 @@ Deno.serve(async (req) => {
     if (sigErr || !sig) {
       return new Response(JSON.stringify({ error: "Signal not found" }), {
         status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -106,7 +107,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: `Signal already ${sig.status}` }),
         {
           status: 409,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -131,7 +132,7 @@ Deno.serve(async (req) => {
           JSON.stringify({ error: result.error ?? "Illegal transition" }),
           {
             status: 409,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...cors, "Content-Type": "application/json" },
           },
         );
       }
@@ -162,7 +163,7 @@ Deno.serve(async (req) => {
       return new Response(
         JSON.stringify({ ok: true, status: "rejected" }),
         {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -193,7 +194,7 @@ Deno.serve(async (req) => {
         }),
         {
           status: 409,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -209,7 +210,7 @@ Deno.serve(async (req) => {
         }),
         {
           status: 409,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -261,7 +262,7 @@ Deno.serve(async (req) => {
           }),
           {
             status: 502,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            headers: { ...cors, "Content-Type": "application/json" },
           },
         );
       }
@@ -316,7 +317,7 @@ Deno.serve(async (req) => {
       console.error("trade insert failed", tradeErr);
       return new Response(JSON.stringify({ error: tradeErr.message }), {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -359,7 +360,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ ok: true, status: "executed", trade: tradeRow }),
       {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   } catch (e) {
@@ -368,7 +369,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   }

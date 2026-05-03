@@ -2,18 +2,19 @@
 // Reads the caller's recent trades + journals via service-role, plus client-supplied
 // market context (regime + recent candles), and returns a 2-3 sentence brief.
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -31,7 +32,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData.user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const userId = userData.user.id;
@@ -44,7 +45,7 @@ Deno.serve(async (req) => {
 
     // Rate limit: 10 req / 60s per user
     const rl = await checkRateLimit(admin, userId, "market-brief", 10);
-    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+    if (!rl.allowed) return rateLimitResponse(rl, cors);
 
     const { data: journals } = await admin
       .from("journal_entries")
@@ -104,7 +105,7 @@ ${(closedTrades ?? []).map((t: any) => `- ${t.side} ${t.symbol} ${t.outcome} ${t
       if (err instanceof Error && err.name === "AbortError") {
         return new Response(JSON.stringify({ error: "Brief timed out. Try again." }), {
           status: 504,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       throw err;
@@ -115,20 +116,20 @@ ${(closedTrades ?? []).map((t: any) => `- ${t.side} ${t.symbol} ${t.outcome} ${t
       if (aiResp.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limited. Try again in a moment." }), {
           status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       if (aiResp.status === 402) {
         return new Response(JSON.stringify({ error: "AI credits exhausted. Add funds in Lovable Cloud." }), {
           status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
       const t = await aiResp.text();
       console.error("AI gateway error", aiResp.status, t);
       return new Response(JSON.stringify({ error: "AI gateway failed" }), {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -136,13 +137,13 @@ ${(closedTrades ?? []).map((t: any) => `- ${t.side} ${t.symbol} ${t.outcome} ${t
     const brief = json.choices?.[0]?.message?.content ?? "(no brief generated)";
 
     return new Response(JSON.stringify({ brief }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("market-brief error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

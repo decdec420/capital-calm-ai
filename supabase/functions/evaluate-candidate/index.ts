@@ -32,16 +32,9 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
-const json = (b: unknown, s: number) =>
-  new Response(JSON.stringify(b), {
-    status: s,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-
-const MIN_TRADES_TO_EVALUATE = 100;
 const MIN_EXP_MARGIN = 0.05;
 const MIN_WIN_RATE_MARGIN = 0.03;
 const DRAWDOWN_TOLERANCE_PP = 0.10;
@@ -280,7 +273,15 @@ async function evaluateForUser(
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = (b: unknown, s: number) =>
+    new Response(JSON.stringify(b), {
+      status: s,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  
+  const MIN_TRADES_TO_EVALUATE = 100;
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -318,7 +319,7 @@ Deno.serve(async (req: Request) => {
 
       // Rate limit user-triggered runs only.
       const rl = await checkRateLimit(admin, userData.user.id, "evaluate-candidate", 10);
-      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+      if (!rl.allowed) return rateLimitResponse(rl, cors);
     }
 
     if (userIds.length === 0) {

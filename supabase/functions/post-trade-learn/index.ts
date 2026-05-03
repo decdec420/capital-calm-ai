@@ -1,4 +1,4 @@
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 // ============================================================
 // post-trade-learn — automatic per-trade learning artifact
@@ -522,8 +522,9 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
 
   try {
@@ -548,7 +549,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Missing trade_id" }),
         {
           status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -577,7 +578,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Unauthorized" }),
         {
           status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -592,7 +593,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Trade not found" }),
         {
           status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -694,7 +695,7 @@ Deno.serve(async (req) => {
     if (existing) {
       return new Response(
         JSON.stringify({ ok: true, skipped: "already journaled", entry: existing.id }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        { headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
 
@@ -718,7 +719,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Journal insert failed", detail: insErr.message }),
         {
           status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -789,7 +790,7 @@ Deno.serve(async (req) => {
         outcome,
         calibrationDelta: calDelta,
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { headers: { ...cors, "Content-Type": "application/json" } },
     );
   } catch (e) {
     log("error", "handler_error", { fn: "post-trade-learn", err: String(e) });
@@ -797,7 +798,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   }

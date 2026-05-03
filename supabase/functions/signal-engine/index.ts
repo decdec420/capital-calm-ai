@@ -71,7 +71,7 @@ import {
   getBrokerCredentials,
   placeMarketBuy,
 } from "../_shared/broker.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
@@ -2605,8 +2605,9 @@ async function runTickForUser(
 
 // ─── HTTP entry point ────────────────────────────────────────────
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
 
   try {
@@ -2741,7 +2742,7 @@ Deno.serve(async (req) => {
           results,
         }),
         {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -2750,7 +2751,7 @@ Deno.serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
@@ -2760,7 +2761,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData.user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -2776,7 +2777,7 @@ Deno.serve(async (req) => {
     const status = result.tick === "ai_error" ? 500 : 200;
     return new Response(JSON.stringify(result), {
       status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
     log("error", "handler_error", { fn: "signal-engine", err: String(e) });
@@ -2784,7 +2785,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   }

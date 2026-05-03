@@ -20,7 +20,7 @@
 
 import { SYMBOL_WHITELIST } from "../_shared/doctrine.ts";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
 const BRIEF_MODEL = "google/gemini-2.5-flash";
@@ -207,18 +207,7 @@ ${cautionSet.size === 0 ? "- (none)" : Array.from(cautionSet).map((f) => `- ${f}
     throw new Error(`AI gateway error ${aiResp.status}: ${t.slice(0, 200)}`);
   }
 
-  const json = await aiResp.json();
-  const briefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
-
-  return {
-    briefText,
-    sessionBias,
-    keyLevels,
-    watchSymbols,
-    cautionFlags: Array.from(cautionSet),
-    aiModel: BRIEF_MODEL,
-  };
-}
+  }
 
 async function upsertBrief(
   admin: Admin,
@@ -245,7 +234,19 @@ async function upsertBrief(
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = await aiResp.json();
+    const briefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
+  
+    return {
+      briefText,
+      sessionBias,
+      keyLevels,
+      watchSymbols,
+      cautionFlags: Array.from(cautionSet),
+      aiModel: BRIEF_MODEL,
+    };
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -269,7 +270,7 @@ Deno.serve(async (req) => {
       if (!expected || provided !== expected) {
         return new Response(JSON.stringify({ error: "Invalid cron token" }), {
           status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         });
       }
 
@@ -294,7 +295,7 @@ Deno.serve(async (req) => {
         }
       }
       return new Response(JSON.stringify({ fanout: true, count: summary.length, summary }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
@@ -303,7 +304,7 @@ Deno.serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
     const userClient = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
@@ -313,13 +314,13 @@ Deno.serve(async (req) => {
     if (userErr || !userData.user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       });
     }
 
     // Rate limit single-user JWT path: 5 req / 60s
     const rl = await checkRateLimit(admin, userData.user.id, "daily-brief", 5);
-    if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+    if (!rl.allowed) return rateLimitResponse(rl, cors);
 
     const result = await buildBriefForUser(admin, userData.user.id, LOVABLE_API_KEY);
     await upsertBrief(admin, userData.user.id, result);
@@ -333,7 +334,7 @@ Deno.serve(async (req) => {
         watchSymbols: result.watchSymbols,
         cautionFlags: result.cautionFlags,
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { headers: { ...cors, "Content-Type": "application/json" } },
     );
   } catch (e) {
     console.error("daily-brief error:", e);
@@ -344,7 +345,7 @@ Deno.serve(async (req) => {
       : 500;
     return new Response(JSON.stringify({ error: msg }), {
       status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
   }
 });

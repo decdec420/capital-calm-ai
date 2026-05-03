@@ -13,7 +13,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { SYMBOL_WHITELIST, type Symbol } from "../_shared/doctrine.ts";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { fetchCandles, type Candle } from "../_shared/market.ts";
 import { log } from "../_shared/logger.ts";
 
@@ -45,16 +45,6 @@ function setMemo<T>(key: string, value: T): void {
   memoCache.set(key, { at: Date.now(), value });
 }
 
-const json = (b: unknown, s = 200) =>
-  new Response(JSON.stringify(b), {
-    status: s,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-
-// Per-expert model assignment. Mafee runs every minute on a tightly-scoped
-// numeric task → cheaper flash-lite is plenty. Hall and Bill reason over text-
-// heavy macro/news context less frequently → standard flash for nuance.
-const HALL_MODEL  = "google/gemini-2.5-flash";
 const BILL_MODEL  = "google/gemini-2.5-flash";
 const MAFEE_MODEL = "google/gemini-2.5-flash-lite";
 
@@ -932,7 +922,18 @@ async function runIntelligenceForSymbol(
 // ─── HTTP Handler ────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = (b: unknown, s = 200) =>
+    new Response(JSON.stringify(b), {
+      status: s,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+  
+  // Per-expert model assignment. Mafee runs every minute on a tightly-scoped
+  // numeric task → cheaper flash-lite is plenty. Hall and Bill reason over text-
+  // heavy macro/news context less frequently → standard flash for nuance.
+  const HALL_MODEL  = "google/gemini-2.5-flash";
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -973,7 +974,7 @@ Deno.serve(async (req) => {
 
       // Rate limit user-triggered runs only (cron path is system-driven).
       const rl = await checkRateLimit(admin, ud.user.id, "market-intelligence", 5);
-      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+      if (!rl.allowed) return rateLimitResponse(rl, cors);
     }
 
     const results: Array<{ userId: string; symbol: string; ok: boolean; error?: string }> = [];

@@ -9,14 +9,9 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
-const json = (b: unknown, s: number) =>
-  new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
-// Numeric, Copilot-tweakable knobs only. Strings/bools stay off-limits for now.
-const TWEAKABLE = ["ema_fast", "ema_slow", "rsi_period", "stop_atr_mult", "tp_r_mult", "max_order_pct"] as const;
 
 // Symbols the copilot rotates through. Each gets its own learning lane so a
 // "noise" outcome on BTC doesn't block exploration on more volatile assets.
@@ -205,7 +200,13 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+  const json = (b: unknown, s: number) =>
+    new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
+  
+  // Numeric, Copilot-tweakable knobs only. Strings/bools stay off-limits for now.
+  const TWEAKABLE = ["ema_fast", "ema_slow", "rsi_period", "stop_atr_mult", "tp_r_mult", "max_order_pct"] as const;
+if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -239,7 +240,7 @@ Deno.serve(async (req: Request) => {
 
       // Rate limit user-triggered runs only.
       const rl = await checkRateLimit(admin, userData.user.id, "propose-experiment", 10);
-      if (!rl.allowed) return rateLimitResponse(rl, corsHeaders);
+      if (!rl.allowed) return rateLimitResponse(rl, cors);
     }
 
     const results = await Promise.all(userIds.map((uid) => proposeForUser(admin, uid, LOVABLE_API_KEY).catch((e) => ({ userId: uid, error: String(e) }))));

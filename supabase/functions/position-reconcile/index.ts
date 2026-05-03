@@ -18,7 +18,7 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { getBrokerCredentials } from "../_shared/broker.ts";
 import { signCoinbaseJwt } from "../_shared/coinbase-auth.ts";
 import { log } from "../_shared/logger.ts";
@@ -287,14 +287,15 @@ async function reconcileUser(admin: any, userId: string): Promise<ReconcileResul
 // ── HTTP entry point ──────────────────────────────────────────
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
 
   const json = (b: unknown, s = 200) =>
     new Response(JSON.stringify(b), {
       status: s,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...cors, "Content-Type": "application/json" },
     });
 
   try {

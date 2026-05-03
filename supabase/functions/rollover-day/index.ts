@@ -1,4 +1,4 @@
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 // ============================================================
 // rollover-day — UTC midnight start-of-day equity rollover
 // ------------------------------------------------------------
@@ -17,8 +17,9 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    const cors = makeCorsHeaders(req);
+if (req.method === "OPTIONS") {
+    return new Response(null, { headers: cors });
   }
 
   try {
@@ -54,7 +55,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "rollover-day: unauthorized" }),
         {
           status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          headers: { ...cors, "Content-Type": "application/json" },
         },
       );
     }
@@ -110,7 +111,7 @@ Deno.serve(async (req) => {
         // for observability — but we ignore it in production logic.
         wouldHaveCaught: (rows ?? []).length,
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { headers: { ...cors, "Content-Type": "application/json" } },
     );
   } catch (e) {
     console.error("rollover-day error:", e);
@@ -118,7 +119,7 @@ Deno.serve(async (req) => {
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown" }),
       {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...cors, "Content-Type": "application/json" },
       },
     );
   }
