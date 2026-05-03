@@ -46,6 +46,7 @@ export const TRADEABLE_REGIMES: ReadonlySet<RegimeLabel> = new Set<RegimeLabel>(
   "trending_up",
   "trending_down",
   "breakout",
+  "range",        // mean-reversion playbook (range-fade, vwap-revert) — gated by RSI extremes
 ]);
 
 export function ema(values: number[], period: number): number[] {
@@ -167,6 +168,13 @@ export function computeRegime(
         : 0;
   const volBoost = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
 
+  // Mean-reversion boost: range regime + RSI at extremes signals a high-quality
+  // fade opportunity. Overbought (RSI ≥ 70) near resistance → short fade.
+  // Oversold (RSI ≤ 30) near support → long fade. Without RSI extreme, no boost.
+  const rsiOverbought = rsiNow >= 70;
+  const rsiOversold = rsiNow <= 30;
+  const rangeReversionBoost = regime === "range" && (rsiOverbought || rsiOversold) ? 0.15 : 0;
+
   // Pullback detection (buy-the-dip inside an uptrend) — uses strategy params.
   const emaFastArr = ema(closes, fastP);
   const emaSlowArr = ema(closes, slowP);
@@ -191,7 +199,8 @@ export function computeRegime(
         todScore * 0.25 +
         trendBoost +
         volBoost +
-        pullbackBoost,
+        pullbackBoost +
+        rangeReversionBoost,
     ),
   );
 
@@ -203,8 +212,12 @@ export function computeRegime(
     noTradeReasons.push(`Setup score ${setupScore.toFixed(2)} below 0.55`);
   }
   if (volatility === "extreme") noTradeReasons.push("Volatility extreme");
-  if (regime === "chop" || regime === "range") {
-    noTradeReasons.push(`${regime} regime — no edge`);
+  if (regime === "chop") {
+    noTradeReasons.push("Chop regime — no edge, sitting out");
+  }
+  if (regime === "range" && !rsiOverbought && !rsiOversold) {
+    // Range in the middle of the band = no fade edge. Only trade range at RSI extremes.
+    noTradeReasons.push(`Range regime — RSI ${rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion)`);
   }
   if (todScore < 0.4) noTradeReasons.push("Outside prime liquidity window");
 
