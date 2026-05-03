@@ -35,9 +35,15 @@ import {
 } from "../_shared/market.ts";
 import {
   computeRegime,
-  TRADEABLE_REGIMES,
+  TRADEABLE_REGIMES as STATIC_TRADEABLE_REGIMES,
   type RegimeResult,
 } from "../_shared/regime.ts";
+import {
+  selectStrategy,
+  tradeableRegimesFor,
+  type RouterPerformance,
+  type RouterStrategy,
+} from "../_shared/strategy-router.ts";
 import {
   anyRefusal,
   evaluateRiskGates,
