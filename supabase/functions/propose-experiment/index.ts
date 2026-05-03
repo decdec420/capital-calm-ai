@@ -201,7 +201,7 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   const results = [];
   for (const symbol of targetSymbols) {
     try {
-      results.push(await proposeForSymbol(admin, userId, symbol, strategy, trades ?? [], sys, memory ?? [], LOVABLE_API_KEY));
+      results.push(await proposeForSymbol(admin, userId, symbol, strategy, trades ?? [], sys, memory ?? [], ciRow ?? null, LOVABLE_API_KEY));
     } catch (e) {
       results.push({ userId, symbol, error: String(e) });
     }
