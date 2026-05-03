@@ -1966,6 +1966,83 @@ async function runTickForUser(
     };
   }
 
+  // ── Phase 2: Regime router — pick the strategy that fits this signal ──
+  // Now that we know symbol + regime + side, choose the best-fit strategy
+  // from the approved portfolio. If no strategy supports this combination
+  // we drop the signal (e.g. short signal but no strategy with short
+  // capability for this regime).
+  const routerDecision = selectStrategy(
+    winner.regime.regime,
+    side,
+    routerStrategies,
+    routerPerformance,
+  );
+
+  if (decision.decision === "propose_trade" && !routerDecision.strategy) {
+    const noStratGate = gate(
+      GATE_CODES.NO_STRATEGY_FOR_REGIME,
+      "skip",
+      `${winner.symbol}: no approved strategy supports regime=${winner.regime.regime} side=${side}.`,
+      {
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        side,
+        candidates: routerDecision.candidates,
+      },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [noStratGate],
+      perSymbol,
+      chosenSymbol: winner.symbol,
+    });
+    await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "skip",
+      title: `No strategy for ${winner.symbol} ${side.toUpperCase()} in ${winner.regime.regime}`,
+      summary: `Engine had a signal but no approved strategy declares affinity for regime=${winner.regime.regime} with side=${side}. Add or unpause a matching strategy.`,
+      tags: [winner.symbol, "no-strategy", winner.regime.regime, side],
+    });
+    return {
+      userId,
+      tick: "no_strategy_for_regime",
+      symbol: winner.symbol,
+      gateReasons: [noStratGate],
+      expiredCount,
+      perSymbol,
+    };
+  }
+
+  // Override defaults with the router-picked strategy for this signal.
+  if (routerDecision.strategy) {
+    const picked = routerDecision.strategy;
+    strategyId = picked.id;
+    strategyVersion = picked.version;
+    strategyRiskWeight = Math.max(
+      0.25,
+      Math.min(2.0, Number(picked.risk_weight ?? 1.0)),
+    );
+    stratStopAtrMult = paramNumOf(picked.params, "stop_atr_mult", stratStopAtrMult);
+    stratTpRMult = paramNumOf(picked.params, "tp_r_mult", stratTpRMult);
+    log("info", "router_picked_strategy", {
+      fn: "signal-engine",
+      userId,
+      symbol: winner.symbol,
+      regime: winner.regime.regime,
+      side,
+      strategyId: picked.id,
+      strategyName: picked.name,
+      strategyVersion: picked.version,
+      reason: routerDecision.reason,
+      candidateCount: routerDecision.candidates.length,
+    });
+  }
+
+  // Phase 2: Synthetic short audit flag. Real spot shorting isn't possible
+  // on Coinbase; in paper mode we simulate as if it were. Mark the trade
+  // so we can audit later. Live mode would need a separate enforcement
+  // path — currently every short in paper is "synthetic".
+  const isSyntheticShort = side === "short";
+
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
 
   // ── Coach: penalize confidence if recent (symbol, side) has bled ──
