@@ -945,6 +945,9 @@ export type Database = {
       }
       strategies: {
         Row: {
+          auto_pause_reason: string | null
+          auto_paused_at: string | null
+          consecutive_losses: number
           created_at: string
           created_by: string
           description: string
@@ -966,6 +969,9 @@ export type Database = {
           version: string
         }
         Insert: {
+          auto_pause_reason?: string | null
+          auto_paused_at?: string | null
+          consecutive_losses?: number
           created_at?: string
           created_by?: string
           description?: string
@@ -987,6 +993,9 @@ export type Database = {
           version: string
         }
         Update: {
+          auto_pause_reason?: string | null
+          auto_paused_at?: string | null
+          consecutive_losses?: number
           created_at?: string
           created_by?: string
           description?: string
@@ -1436,6 +1445,7 @@ export type Database = {
           strategy_id: string | null
           strategy_version: string
           symbol: string
+          synthetic_short: boolean
           take_profit: number | null
           tp1_filled: boolean
           tp1_price: number | null
@@ -1475,6 +1485,7 @@ export type Database = {
           strategy_id?: string | null
           strategy_version?: string
           symbol: string
+          synthetic_short?: boolean
           take_profit?: number | null
           tp1_filled?: boolean
           tp1_price?: number | null
@@ -1514,6 +1525,7 @@ export type Database = {
           strategy_id?: string | null
           strategy_version?: string
           symbol?: string
+          synthetic_short?: boolean
           take_profit?: number | null
           tp1_filled?: boolean
           tp1_price?: number | null
