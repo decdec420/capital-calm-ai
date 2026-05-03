@@ -1144,26 +1144,62 @@ async function runTickForUser(
     }
   }
 
-  // Persisted approved strategy (if any) so signals & trades carry identity.
-  // CRITICAL: we now load `params` too so the live engine actually uses
-  // ema_fast / ema_slow / rsi_period / stop_atr_mult / tp_r_mult from the
-  // approved strategy. Previously the engine only loaded id/version, which
-  // meant the entire learning loop was tuning a backtest model that had
-  // zero effect on real trades.
-  const { data: approvedStrategy } = await admin
+  // Phase 2: load ALL approved (non-auto-paused) strategies for the regime
+  // router. The router picks per-symbol after we know the regime + side.
+  // We keep `approvedStrategy` as the highest-priority default for regime
+  // computation (EMA/RSI knobs are uniform across our seeded strategies,
+  // so this matters mainly when only one strategy is approved).
+  const { data: allApprovedStrategies } = await admin
     .from("strategies")
-    .select("id,version,params,risk_weight")
+    .select("id,name,version,status,params,risk_weight,regime_affinity,side_capability,auto_paused_at")
     .eq("user_id", userId)
     .eq("status", "approved")
-    .order("updated_at", { ascending: false })
-    .maybeSingle();
+    .is("auto_paused_at", null)
+    .order("updated_at", { ascending: false });
+  const routerStrategies: RouterStrategy[] = (allApprovedStrategies ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    version: s.version,
+    status: s.status,
+    risk_weight: Number(s.risk_weight ?? 1.0),
+    regime_affinity: Array.isArray(s.regime_affinity) ? s.regime_affinity : [],
+    side_capability: Array.isArray(s.side_capability) ? s.side_capability : ["long"],
+    auto_paused_at: s.auto_paused_at ?? null,
+    params: Array.isArray(s.params) ? s.params as Array<{ key: string; value: number | string | boolean }> : [],
+  }));
+  const approvedStrategy = routerStrategies[0] ?? null;
+  // Pull rolling perf for tie-breaking (best-effort).
+  const { data: perfRows } = await admin
+    .from("strategy_performance_v")
+    .select("strategy_id,closed_trades,wins,losses,total_pnl,avg_pnl_pct,win_rate")
+    .eq("user_id", userId);
+  const routerPerformance: RouterPerformance[] = (perfRows ?? []).map((p) => ({
+    strategy_id: p.strategy_id,
+    closed_trades: Number(p.closed_trades ?? 0),
+    wins: Number(p.wins ?? 0),
+    losses: Number(p.losses ?? 0),
+    total_pnl: Number(p.total_pnl ?? 0),
+    avg_pnl_pct: Number(p.avg_pnl_pct ?? 0),
+    win_rate: Number(p.win_rate ?? 0),
+  }));
+  // Tradeable regimes = union across all approved strategies. If we have
+  // any approved strategies, that union supersedes the static set so range
+  // becomes tradeable when range-fade is approved, etc. Fallback to the
+  // static set if no strategies are approved (defensive — keeps engine alive).
+  const dynamicTradeable = tradeableRegimesFor(routerStrategies);
+  const TRADEABLE_REGIMES = dynamicTradeable.size > 0
+    ? dynamicTradeable
+    : STATIC_TRADEABLE_REGIMES;
+
   const strategyId: string | null = approvedStrategy?.id ?? null;
   const strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
   // Phase 1 (Kelly-lite): per-strategy risk weight scales the doctrine
   // RISK_PER_TRADE_PCT. Bounded [0.25, 2.0] so a misconfigured weight
   // can't blow past doctrine; the clamp/floor still has the final word.
-  const strategyRiskWeight: number = Math.max(
+  // NOTE: this is the *default* (top approved); after the router picks
+  // a per-signal strategy below, we re-derive the effective risk_weight.
+  let strategyRiskWeight: number = Math.max(
     0.25,
     Math.min(2.0, Number(approvedStrategy?.risk_weight ?? 1.0)),
   );
