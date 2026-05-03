@@ -26,7 +26,7 @@ Deno.test("computeSlippagePct — null on missing inputs", () => {
 
 Deno.test("effectivePnl — subtracts both legs", () => {
   // Gross win of $5, paid $0.40 entry fees + $0.45 exit fees → $4.15 net.
-  assertEquals(effectivePnl(5, 0.4, 0.45), 4.15);
+  assertAlmostEquals(effectivePnl(5, 0.4, 0.45), 4.15, 1e-9);
 });
 
 Deno.test("effectivePnl — handles missing fee fields", () => {
