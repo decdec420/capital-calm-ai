@@ -417,6 +417,14 @@ Deno.serve(async (req: Request) => {
             kill_count: Array.isArray(latestReview.kill_ids)
               ? latestReview.kill_ids.length
               : 0,
+            // Of the kill_ids, how many are still OPEN experiments (queued/
+            // running/needs_review). The rest are already closed and not
+            // operator-actionable.
+            actionable_kill_count: actionableKillCount,
+            // Distinct count: experiments with needs_review=true the operator
+            // must actually decide on. The ONLY signal that warrants
+            // "needs your decision" framing.
+            live_needs_review_count: liveNeedsReviewCount,
             needs_action: latestReview.needs_action === true,
           }
         : ((safeContext as Record<string, unknown> | undefined)?.katrinaLatestReview ?? null),
