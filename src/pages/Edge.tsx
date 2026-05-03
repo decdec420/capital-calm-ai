@@ -195,9 +195,9 @@ export default function Edge() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="Phase 2"
+        eyebrow="Phase 3"
         title="Edge"
-        description="Per-strategy performance, regime router decisions, and circuit-breaker status. The portfolio that actually generates the money."
+        description="Per-strategy performance with confidence intervals, regime router decisions, and circuit-breaker status. Honest metrics or no metrics."
       />
 
       {/* Portfolio summary strip */}
