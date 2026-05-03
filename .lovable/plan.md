@@ -1,109 +1,109 @@
-## Phase 3 — Statistical honesty (SHIPPED)
 
-Goal: distinguish proven edge from a hot streak before risking real money.
+## What I found (so you trust the plan)
 
-### What shipped
+I queried the live DB and read the engine code. Three concrete things explain everything you're seeing:
 
-**New views (read-only, RLS via security_invoker):**
+### 1. Brain Trust "12h ago" is correct — Mafee is silently failing
 
-- `strategy_performance_ci_v` — every strategy's metrics with 95% confidence intervals:
-  - **Win-rate**: Wilson score interval (honest at small N, doesn't break at p=0/p=1)
-  - **Expectancy (avg_pnl)**: t-based 95% CI
-  - **Sharpe (per trade)**: Lo (2002) standard error
-  - **`evidence_status`**: `no_data` / `insufficient_evidence` (<30) / `developing` (<100) / `sufficient`
-  - **`edge_verdict`**: `unproven` (n<30) / `positive_edge` (lower bound of expectancy > 0) / `negative_edge` (upper bound < 0) / `inconclusive`
+`market_intelligence.recent_momentum_at` for all three symbols = **2026-05-03 04:00 UTC**. Now is ~16:50 UTC. That's 768 minutes old vs. a 120-minute gate, so the engine blocks every symbol with `BRAIN_TRUST_MOMENTUM_STALE`.
 
-- `strategy_regime_perf_v` — same metrics broken down per (strategy × regime). Catches the "looks great overall, only works in trending_up BTC" trap.
+When you hit "Run full pipeline", `market-intelligence` does run (logs say `refresh_trigger_result: success`), but the **Mafee expert** (short-horizon momentum) is returning empty `recent_momentum_1h` / `recent_momentum_4h`. The function only stamps a fresh `recent_momentum_at` if **both** are populated — otherwise it carries the stale value forward. So we refresh but the freshness clock never advances. This is the dominant reason Bobby can't day-trade.
 
-**UI:**
+### 2. Bobby's loop is also blocked above the engine
 
-- `/edge` page: new "Statistical honesty" panel between portfolio strip and strategies table. Per-strategy row showing evidence status, win-rate with CI, expectancy with CI, Sharpe with CI, and the honest verdict badge.
-- Methodology footnote so we never forget what the numbers mean.
+`last_jessica_decision = "Coinbase probe failed — sitting" (reason: coinbase_unreachable)`. Bobby pings Coinbase `best_bid_ask` before every tick; if it fails she returns `skipped: true` and never invokes the engine. Two independent failures stacked on top of each other.
 
-### Why analytical CIs instead of true bootstrap
+### 3. I was wrong about "Bobby is waiting for your approval"
 
-True bootstrap requires resampling N×B times (B≈1000 reps). Implementable in Postgres but expensive on every page load. The analytical formulas chosen are the standard textbook equivalents:
-- Wilson interval converges to bootstrap for proportions
-- t-CI converges to bootstrap for means with N≥30
-- Lo (2002) is the published asymptotic for Sharpe
+There is no `signals` table (the project uses a different name now) and `pending` is empty. Nothing to approve. Apologies — that was a hallucination on my part.
 
-If we ever want true bootstrap (e.g., for non-normal PnL distributions), it goes in a periodic edge function that materializes results into a table — not in a view.
+### 4. Overview really is oversaturated
 
-### What just shipped (Phase 3 sub-tasks)
+Current Overview renders: hero strip with embedded BTC price, gate-reason banner, 6-card metric grid, doctrine proposal banner, daily brief panel, AI insight panel ("Bobby's read"), full market intelligence panel, desk roster, open position card, kill-switches, quick actions, drilldowns. That's 10+ sections — far from a snapshot.
 
-- **CI gate in `evaluate-candidate`**: a candidate may pass the point-estimate margins (expectancy / win-rate / DD / Sharpe) and STILL be held back if its `edge_verdict` from `strategy_performance_ci_v` isn't `positive_edge` (paper) or `positive_edge` + `evidence_status='sufficient'` (live). The promotion alert now includes the lower-bound expectancy so the operator sees the honest number, not the headline.
-- **CI context in `propose-experiment`**: the copilot now sees the baseline strategy's `edge_verdict`, evidence count, and 95% CIs before proposing a knob change. New `statisticalGuidance` field instructs it to be conservative when the baseline has a proven edge, aggressive when it has a proven negative edge, and exploratory when unproven.
-- **`replay-strategy` edge function**: walk-forward replay over realized closed trades. Splits the trade stream into N folds (default 5), computes in-sample vs out-of-sample stats per split, and returns a rolling-window edge curve. Outputs a `stability_score` (fraction of folds where OOS expectancy stays within 1 SE of in-sample) and a verdict: `stable_edge` / `moderate_drift` / `unstable_or_overfit`. Surfaced as a "Replay" button per row on `/edge` (disabled until 30+ closed trades exist).
+---
 
-## Phase 4 — Edge depth (SHIPPED)
+## The plan
 
-Goal: more shots on goal in regimes the baseline can't trade, with cross-symbol awareness so we don't take 3 correlated longs at once.
+### Phase A — Unblock trading (priority 1)
 
-### What shipped
+**A1. Fix Mafee so momentum actually refreshes**
+- Read `market-intelligence/index.ts` Mafee path and verify why `recent_momentum_1h`/`4h` come back empty (likely AI response parsing or schema mismatch). Add a strict `safeParse`-style validator so a malformed Mafee response logs the raw payload to `system_events` instead of silently dropping the values.
+- If Mafee fails, **fall back to a deterministic momentum read** computed directly from the 1h candles already fetched (simple slope over last 4 / 16 candles → up/down/flat/mixed). That way `recent_momentum_at` always advances when fresh candles arrive, and the gate doesn't trip from a single AI hiccup.
+- Add a "Mafee health" entry to `agent_health` so the brain-trust freshness reason is debuggable from the UI rather than buried in logs.
 
-- **`vwap-revert v1.0`** (candidate, all users): mean-reversion playbook for `range`/`chop` regimes, both directions. Tight stops (1.0× ATR), modest TP (1.2R), risk_weight 0.7. Activates exactly where `trend-rev` sits out.
-- **`momentum-burst v1.0`** (candidate, all users): long-only breakout chaser for `breakout`/`trending_up`. Wider stop (2.0× ATR), longer runner (2.8R), risk_weight 0.8.
-- **`handle_new_user`** trigger updated so every new account ships with all three playbooks.
-- **Backfill** ran for existing users; idempotent so re-runs are safe.
+**A2. Make the Coinbase probe non-fatal in paper mode**
+- Bobby currently sits on `coinbase_unreachable` even when `mode = paper` and `live_trading_enabled = false`. In paper mode the probe should be informational only; the engine should still tick using cached candles + intelligence. Gate it: probe-fail blocks **only** when `live_trading_enabled = true`.
+- When the probe does fail, write the underlying error (HTTP code, body snippet) to the heartbeat so we can see *why* — currently we get a generic "probe failed".
 
-### Engine integration
+**A3. Surface the real blocker on the Overview**
+- The single most useful thing on the Overview right now is "why aren't we trading?". Promote the gate-reason banner to be the first thing under the metric grid, with one-line plain-English causes ("Brain Trust momentum is 12h old — last refresh failed at Mafee step").
 
-- **Playbook menu** added to the AI prompt: lists every strategy eligible at the current symbol's regime with a one-line personality so the AI reasons in a style the router can honor. If no playbook fits, the AI is told the signal will be dropped — pushing it to skip rather than propose unroutable trades.
-- **Cross-symbol context**: when scanning ETH/SOL, the prompt now includes BTC's current regime + setup score. AI is instructed that crypto beta means "long alt vs trending_down BTC" needs alt-specific edge.
-- **Correlation note**: if user already holds an open BTC long, prompts demand confidence ≥ 0.80 + a clear alt-specific reason for any new ETH/SOL long. Soft gate (doesn't override doctrine; raises the bar in reasoning).
+### Phase B — Slim the Overview to a real snapshot
 
-### What's intentionally NOT in Phase 4
+Goal: open Overview and in 5 seconds know **system health, equity, and what's stopping trading**. Everything else is one tab away.
 
-- Hard correlation cap (separate from doctrine's `max_correlated_positions`). The current soft gate is enough; a hard cap belongs to live-mode hardening (Phase 5/6).
-- New regime detector (`vwap-revert` reuses existing range/chop classification). If it underperforms because the classification is too coarse, that becomes a follow-up.
+**B1. Keep on Overview (the snapshot)**
+- Hero strip (mode · regime · risk posture) — but **drop the BTC-USD price block** from the hero (moves to Market Intel)
+- 6-card metric grid (this is the snapshot)
+- Pending-signal banner (when there is one)
+- "Why the engine is sitting on hands" gate-reason banner (promoted)
+- Open position one-liner (when there is one)
+- Kill-switches mini-card + quick actions
 
-## Phase 5 — Live execution plumbing (SHIPPED)
+**B2. Move off Overview**
+- `MarketIntelligencePanel` (full version) → already lives on Market Intel; remove from Overview
+- `AIInsightPanel` ("Bobby's read", on-demand `market-brief`) → fold the call-to-action into the DailyBriefPanel as a small "Get tactical update" button. The panel itself moves to the Copilot page where tactical commentary belongs.
+- `DailyBriefPanel` → keep on Overview but collapsed to a 3-line summary with "Open full brief" → Copilot
+- `DeskRosterStrip` → move to the Edge / Strategy Lab page, where strategy lifecycle already lives
+- `DoctrineProposalBanner` → keep, but only render when there's actually a pending proposal (it's already conditional, just verify)
 
-Goal: stop pretending fees and slippage don't exist. Make every real-money round-trip honestly costed and idempotent under retry.
+**B3. Replace the BTC-only price block with a 3-symbol mini-strip**
+- A compact one-row strip showing BTC / ETH / SOL last price + % change + freshness dot. This is the right "snapshot" view for a 3-symbol desk and doesn't pretend BTC is special.
 
-### What shipped
+### Phase C — Honesty fixes
 
-**Database (`broker_fills` + augmented `trades`):**
+**C1. Fix the misleading "Bobby is waiting for your approval"**
+- Audit the `daily-brief` and copilot prompts. The brief was probably generating that line from a stale signal count or hallucinating. Constrain the prompt: "Only mention pending approvals if `pendingSignalsCount > 0`."
 
-- `broker_fills` table: one row per Coinbase fill with `fill_price`, `base_size`, `quote_size`, `fees_usd`, `slippage_pct`, `fill_kind` (entry/tp1/tp2/stop/manual_close). Unique on `(user_id, client_order_id, fill_kind)` so a retry can't double-insert.
-- `trades.entry_fees_usd`, `exit_fees_usd`, `entry_slippage_pct`, `effective_pnl`, `partial_fill`, `requested_size` — the cost ledger lives on the trade row so reports/views don't have to JOIN.
-- `live_execution_stats_v` view: 30-day rolling avg fee% and slippage% per user, fed back into the cost-aware edge gate.
-- `doctrine_settings.prefer_maker_orders` (opt-in, default false) — small accounts stay on market IOC because maker orders won't fill at $1.
+**C2. Account-size sanity note**
+- Equity is $9.97, max_order_pct is 0.1%, so max position is ~$0.01. Even if everything else is fixed, fills will be sub-cent and "progress" will look invisible. Add a one-line callout on the Overview metric grid when equity < $50: *"Account too small for meaningful position sizing. Consider topping up the paper balance in Settings to see strategy behavior."* No behavior change — just honesty.
 
-**Broker layer (`_shared/broker.ts` + new `_shared/fills.ts`):**
+---
 
-- `BrokerFill` now carries `feesUsd` (`total_fees` from Coinbase) and the raw order payload for the audit table.
-- New `recordFill()` helper: writes the audit row, computes signed `slippage_pct` (positive = bad on either side), idempotent via upsert with ignoreDuplicates.
-- `effectivePnl()` helper: gross PnL minus both legs of fees. The honest number that goes to the user.
-- 6 unit tests covering slippage signs, BUY/SELL asymmetry, null inputs, fee netting.
-
-**Engine call sites:**
-
-- **Entry (`signal-engine`)**: deterministic `clientOrderId = signalRow.id` already existed; now also captures fees, computes entry slippage, detects partial fills (`filledBaseSize < expected × 0.99`), and writes everything into the trade row in the same UPDATE that flips status to `open`.
-- **Manual close (`trade-close`)**: switched from `crypto.randomUUID()` to deterministic `${trade.id}-close`. Records the fill, accumulates exit fees, writes `effective_pnl`.
-- **TP1/TP2/stop (`mark-to-market`)**: deterministic clientOrderIds (`${trade.id}-tp1`, `-tp2`, `-stop`). Each leg records its fill and accumulates `exit_fees_usd` so the final close knows the round-trip cost.
-
-**Cost-aware edge gate (`signal-engine`):**
-
-- Once a user has ≥10 fills in the rolling 30-day window, the gate replaces its hardcoded 0.6%/0.10% assumption with the user's actual observed cost. Floored at 0.3% fee / 0.05% slip and capped at 1.2% fee / 0.5% slip so one weird fill doesn't freeze trading.
-- Gate journal entries now tag `costSource: default | observed` so we can see when the engine starts using real numbers.
-
-### Why this matters
-
-Before Phase 5, a "winning" $0.30 trade on a $1 position was actually a $0.10 loser after Coinbase took its $0.40 in round-trip fees. We were promoting strategies based on a number that didn't exist. Now `pnl` is the gross headline and `effective_pnl` is the truth — and `evaluate-candidate` will pick up the truth automatically because Phase 3's CI views read from `trades.pnl` (the column we should retarget to `effective_pnl` once we have a few real fills to validate the math).
-
-### What's intentionally NOT in Phase 5
-
-- **Maker-only execution path**: doctrine flag landed but the post-only limit code isn't wired yet. On $1 orders maker fills are unreliable; we'll wire the actual post-only path in Phase 6 when the canary cap is also in place.
-- **Re-targeting CI views to `effective_pnl`**: deliberate. We let real fills accumulate first so we can sanity-check the bookkeeping against Coinbase reports before swapping the source of truth on the Edge dashboard.
-
-### Roadmap reminder
+## Technical notes (for the build phase)
 
 ```text
-Phase 3 (honesty) ✓ ──▶
-   Phase 4 (vwap-revert, momentum-burst, cross-symbol) ✓ ──▶
-      Phase 5 (live plumbing: idempotency, partial fills, fee-aware sizing, fill audit) ✓ ──▶
-         ├─▶ Phase 6 (live-readiness ceremony: scorecard, two-step arming, $5 canary, maker-only path, auto-revert tripwires)
-         ├─▶ Phase 7 (operator polish: health page, weekly digest, snapshot/restore)
-         └─▶ Phase 8 (decay detection + champion/challenger)
+Files I'll touch:
+  supabase/functions/market-intelligence/index.ts  (Mafee fallback + validation)
+  supabase/functions/jessica/index.ts               (probe gating + better error)
+  supabase/functions/daily-brief/index.ts           (prompt constraint)
+  src/pages/Overview.tsx                            (slim down + 3-symbol strip)
+  src/pages/Edge.tsx                                (receive DeskRosterStrip)
+  src/pages/Copilot.tsx                             (receive AIInsightPanel)
+  src/components/trader/DailyBriefPanel.tsx         (collapsed mode + CTA)
+  src/components/trader/SymbolPriceStrip.tsx        (new — 3-symbol mini-strip)
 ```
+
+```text
+Order of operations:
+  1. Mafee fallback + validation       → unblocks trading immediately
+  2. Coinbase probe paper-mode bypass  → unblocks Bobby loop
+  3. Overview slim-down                → cleaner UX, easier to read
+  4. 3-symbol price strip + section moves
+  5. Daily-brief prompt fix + small-account callout
+```
+
+I will **not** change doctrine limits or the kill-switch logic in this pass — that's a separate conversation about whether the guardrails themselves are too strict for a $10 paper account.
+
+---
+
+## What you'll see after this lands
+
+- Brain Trust strip will show "1m ago" within one cron tick (or the next "Run full pipeline").
+- Bobby will start ticking again in paper mode even when Coinbase is flaky.
+- The engine will start producing `proposed` / `skipped` ticks with real reasons rather than the same `MOMENTUM_STALE` block on every symbol.
+- Overview will be ~half its current height, with the snapshot up top and "why we're idle" front-and-center.
+- The 3-symbol price strip replaces the BTC-only block, matching the multi-symbol reality.
+
+Approve this and I'll execute it in the order above, surfacing checkpoints after Phase A so you can verify trading is unblocked before I touch the UI.
