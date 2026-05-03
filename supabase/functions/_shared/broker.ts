@@ -38,9 +38,19 @@ export interface BrokerFill {
   fillPrice: number;
   /** Filled size in base asset (e.g. BTC) */
   filledBaseSize: number;
-  /** Total quote spent/received in USD */
+  /**
+   * Total quote spent/received in USD, NET of fees on the buy side
+   * (this is `total_value_after_fees` from Coinbase). On the sell side
+   * it's the gross filled value before subtracting fees — Coinbase's
+   * field naming is asymmetric, so callers should use `feesUsd` for
+   * the authoritative cost number.
+   */
   filledQuoteSize: number;
+  /** Total fees paid in USD for this order (Coinbase `total_fees`). */
+  feesUsd: number;
   status: string;
+  /** Raw Coinbase order payload — kept for the broker_fills audit row. */
+  raw: Record<string, unknown>;
 }
 
 // ── Credential retrieval ──────────────────────────────────────
