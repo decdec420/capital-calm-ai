@@ -377,10 +377,13 @@ async function runMarkToMarket(
           current_price: px,
           unrealized_pnl: runnerUpnl,
           unrealized_pnl_pct: runnerUpnlPct,
+          // Phase 5: accumulate partial-close fees so the final
+          // effective_pnl at exit reflects every fee paid on the round-trip.
+          exit_fees_usd: Number(t.exit_fees_usd ?? 0) + tp1FeesUsd,
           lifecycle_phase: "tp1_hit",
           lifecycle_transitions: nextTransitions,
           notes:
-            `${t.notes ?? ""}${tp1BrokerOrderId ? "\nLIVE " : "\n"}TP1 @ $${fillPx.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked, runner active, stop→BE.${tp1BrokerOrderId ? ` Coinbase orderId: ${tp1BrokerOrderId}.` : ""}`
+            `${t.notes ?? ""}${tp1BrokerOrderId ? "\nLIVE " : "\n"}TP1 @ $${fillPx.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked${tp1FeesUsd > 0 ? ` (fees $${tp1FeesUsd.toFixed(4)})` : ""}, runner active, stop→BE.${tp1BrokerOrderId ? ` Coinbase orderId: ${tp1BrokerOrderId}.` : ""}`
               .trim(),
           ...(tp1BrokerOrderId ? { broker_order_id: tp1BrokerOrderId } : {}),
         })
