@@ -2505,10 +2505,11 @@ async function runTickForUser(
         strategy_id: strategyId,
         strategy_version: strategyVersion,
         direction_basis: directionBasis,
+        synthetic_short: isSyntheticShort,
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
-        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""} · awaiting broker confirmation`,
+        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}${isSyntheticShort ? " · SYNTHETIC SHORT (paper)" : ""} · awaiting broker confirmation`,
         broker_order_id: clientOrderId, // pre-set for reconciliation; replaced with fill orderId on success
         status: "broker_pending",
         outcome: "open",
