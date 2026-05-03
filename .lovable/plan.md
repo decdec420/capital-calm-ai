@@ -35,13 +35,35 @@ If we ever want true bootstrap (e.g., for non-normal PnL distributions), it goes
 - **CI context in `propose-experiment`**: the copilot now sees the baseline strategy's `edge_verdict`, evidence count, and 95% CIs before proposing a knob change. New `statisticalGuidance` field instructs it to be conservative when the baseline has a proven edge, aggressive when it has a proven negative edge, and exploratory when unproven.
 - **`replay-strategy` edge function**: walk-forward replay over realized closed trades. Splits the trade stream into N folds (default 5), computes in-sample vs out-of-sample stats per split, and returns a rolling-window edge curve. Outputs a `stability_score` (fraction of folds where OOS expectancy stays within 1 SE of in-sample) and a verdict: `stable_edge` / `moderate_drift` / `unstable_or_overfit`. Surfaced as a "Replay" button per row on `/edge` (disabled until 30+ closed trades exist).
 
+## Phase 4 — Edge depth (SHIPPED)
+
+Goal: more shots on goal in regimes the baseline can't trade, with cross-symbol awareness so we don't take 3 correlated longs at once.
+
+### What shipped
+
+- **`vwap-revert v1.0`** (candidate, all users): mean-reversion playbook for `range`/`chop` regimes, both directions. Tight stops (1.0× ATR), modest TP (1.2R), risk_weight 0.7. Activates exactly where `trend-rev` sits out.
+- **`momentum-burst v1.0`** (candidate, all users): long-only breakout chaser for `breakout`/`trending_up`. Wider stop (2.0× ATR), longer runner (2.8R), risk_weight 0.8.
+- **`handle_new_user`** trigger updated so every new account ships with all three playbooks.
+- **Backfill** ran for existing users; idempotent so re-runs are safe.
+
+### Engine integration
+
+- **Playbook menu** added to the AI prompt: lists every strategy eligible at the current symbol's regime with a one-line personality so the AI reasons in a style the router can honor. If no playbook fits, the AI is told the signal will be dropped — pushing it to skip rather than propose unroutable trades.
+- **Cross-symbol context**: when scanning ETH/SOL, the prompt now includes BTC's current regime + setup score. AI is instructed that crypto beta means "long alt vs trending_down BTC" needs alt-specific edge.
+- **Correlation note**: if user already holds an open BTC long, prompts demand confidence ≥ 0.80 + a clear alt-specific reason for any new ETH/SOL long. Soft gate (doesn't override doctrine; raises the bar in reasoning).
+
+### What's intentionally NOT in Phase 4
+
+- Hard correlation cap (separate from doctrine's `max_correlated_positions`). The current soft gate is enough; a hard cap belongs to live-mode hardening (Phase 5/6).
+- New regime detector (`vwap-revert` reuses existing range/chop classification). If it underperforms because the classification is too coarse, that becomes a follow-up.
+
 ### Roadmap reminder
 
 ```text
 Phase 3 (honesty) ✓ ──▶
-   ├─▶ Phase 4 (more edge: vwap-revert, momentum-burst, cross-symbol features, correlation gate)
-   ├─▶ Phase 5 (live plumbing: maker-only, idempotency, partial fills, fee-aware sizing)
-   ├─▶ Phase 6 (live-readiness ceremony: scorecard, two-step arming, $5 canary cap, auto-revert tripwires)
-   ├─▶ Phase 7 (operator polish: health page, weekly digest, snapshot/restore)
-   └─▶ Phase 8 (decay detection + champion/challenger)
+   Phase 4 (vwap-revert, momentum-burst, cross-symbol, correlation) ✓ ──▶
+      ├─▶ Phase 5 (live plumbing: maker-only, idempotency, partial fills, fee-aware sizing)
+      ├─▶ Phase 6 (live-readiness ceremony: scorecard, two-step arming, $5 canary cap, auto-revert tripwires)
+      ├─▶ Phase 7 (operator polish: health page, weekly digest, snapshot/restore)
+      └─▶ Phase 8 (decay detection + champion/challenger)
 ```
