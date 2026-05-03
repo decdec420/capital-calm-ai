@@ -59,9 +59,28 @@ async function proposeForSymbol(
     onCooldownUntil: m.retry_after?.slice(0, 10) ?? null,
   }));
 
+  const baselineEdge = ci ? {
+    closedTrades: ci.closed_trades,
+    evidenceStatus: ci.evidence_status,
+    edgeVerdict: ci.edge_verdict,
+    expectancyCi95: ci.avg_pnl_lo != null ? [Number(ci.avg_pnl_lo).toFixed(3), Number(ci.avg_pnl_hi).toFixed(3)] : null,
+    winRateCi95: ci.win_rate_lo != null ? [Number(ci.win_rate_lo).toFixed(3), Number(ci.win_rate_hi).toFixed(3)] : null,
+    sharpe: ci.sharpe != null ? Number(ci.sharpe).toFixed(2) : null,
+    sharpeCi95: ci.sharpe_lo != null ? [Number(ci.sharpe_lo).toFixed(2), Number(ci.sharpe_hi).toFixed(2)] : null,
+  } : null;
+
+  const ciGuidance = !ci || ci.edge_verdict === "unproven"
+    ? "Baseline edge is UNPROVEN (n<30). Bias toward exploration: try parameter changes that could surface signal, not micro-tweaks."
+    : ci.edge_verdict === "positive_edge"
+    ? "Baseline has STATISTICALLY POSITIVE edge. Be conservative: propose small refinements (≤15%) that are unlikely to break what's working. Do not flip parameter directions wildly."
+    : ci.edge_verdict === "negative_edge"
+    ? "Baseline has STATISTICALLY NEGATIVE edge. Be aggressive: propose larger structural changes (20-30%) or even direction flips on a parameter."
+    : "Baseline edge is INCONCLUSIVE. Moderate exploration: 15-25% changes are reasonable.";
+
   const contextPacket = {
     symbol,
     strategy: { name: strategy.name, version: strategy.version, currentParams: tweakable },
+    baselineEdge,
     recentTrades: {
       total: symbolTrades.length, wins, losses,
       lastFew: symbolTrades.slice(0, 8).map((t: any) => ({
@@ -79,7 +98,8 @@ async function proposeForSymbol(
         "Actively diversify: rotate parameters instead of grinding the same knob.",
       ].join(" "),
     },
-    proposalInstructions: `Pick exactly ONE parameter from currentParams that is NOT on cooldown for ${symbol}. Propose a meaningful adjustment (10-30% change). Hypothesis must reference ${symbol}'s recent behavior or gate reasons.`,
+    statisticalGuidance: ciGuidance,
+    proposalInstructions: `Pick exactly ONE parameter from currentParams that is NOT on cooldown for ${symbol}. Adjust per statisticalGuidance. Hypothesis must reference ${symbol}'s recent behavior, gate reasons, or baselineEdge.`,
   };
 
   const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
