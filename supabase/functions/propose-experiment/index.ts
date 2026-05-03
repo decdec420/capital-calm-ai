@@ -25,6 +25,7 @@ async function proposeForSymbol(
   trades: any[],
   sys: any,
   allMemory: any[],
+  ci: any,
   LOVABLE_API_KEY: string,
 ) {
   const params: Array<{ key: string; value: number | string | boolean }> = (strategy.params ?? []) as any;
