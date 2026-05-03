@@ -196,8 +196,11 @@ export function computeRegime(
   );
 
   const noTradeReasons: string[] = [];
-  if (setupScore < 0.65) {
-    noTradeReasons.push(`Setup score ${setupScore.toFixed(2)} below 0.65`);
+  // Threshold aligned with signal-engine's MIN_SETUP_SCORE (0.55 live, 0.45 paper).
+  // Previously 0.65 here vs 0.55 in the engine — the AI was reading the higher
+  // advisory and skipping trades the code gate would have passed.
+  if (setupScore < 0.55) {
+    noTradeReasons.push(`Setup score ${setupScore.toFixed(2)} below 0.55`);
   }
   if (volatility === "extreme") noTradeReasons.push("Volatility extreme");
   if (regime === "chop" || regime === "range") {

@@ -479,9 +479,9 @@ DECISION HIERARCHY (work through all of these before deciding):
 2. ENVIRONMENT FILTER:
    - highly_favorable: Can trade at standard confidence thresholds
    - favorable: Standard thresholds apply
-   - neutral: Raise confidence threshold by 0.1
-   - unfavorable: Raise confidence threshold by 0.2. Reduce size.
-   - highly_unfavorable: Do NOT trade unless the setup is exceptional (confidence > 0.85)
+   - neutral: Apply standard thresholds. Neutral is not a reason to hesitate — it means nothing exceptional is happening, trade your setup.
+   - unfavorable: Raise confidence threshold by 0.1. Reduce size by 20%.
+   - highly_unfavorable: Do NOT trade unless confidence > 0.80. Size down significantly.
 
 3. MULTI-TIMEFRAME CONFIRMATION (4h structure → 1h setup → 15m timing):
    You receive 15m, 1h, and 4h candle data. Use them like a senior trader:
@@ -545,9 +545,9 @@ Require real regime alignment, clear structure, and a defined edge — every tim
 Reject chop, broken structure, and setups with no identifiable edge regardless of mode.
 Quality > quantity. Noise now degrades live performance later.
 ` : `
-A SKIP IS NOT FAILURE. Most ticks should be skips.
-The edge is in the quality of trades taken, not the quantity.
-"The money is made in the waiting." — Jesse Livermore
+Capital protection and trade quality must coexist. Protect against bad setups — do not protect against good ones.
+A missed A+ setup is a real cost, not a neutral outcome. If the regime is trending, the structure is clean,
+and the signals align — take the trade. Hesitation on clear setups is its own form of failure.
 `}
 ${strategyMenu ? `
 PLAYBOOK MENU FOR THIS REGIME:
@@ -685,7 +685,7 @@ async function runRiskManager(opts: {
   // deno-lint-ignore no-explicit-any
   intel: any;
   LOVABLE_API_KEY: string;
-}): Promise<{ verdict: "approve" | "reduce_size" | "veto"; sizeMultiplier?: number; reason: string }> {
+}): Promise<{ verdict: "approve" | "reduce_size" | "veto" | "skip_tick"; sizeMultiplier?: number; reason: string }> {
   const { symbol, side, entry, stop, target, sizeUsd, confidence, equity, openTrades, intel, LOVABLE_API_KEY } = opts;
   const riskR = Math.abs(entry - stop);
   const rewardR = Math.abs(target - entry);
@@ -814,13 +814,13 @@ What is your verdict?
     if (!resp.ok) {
       log("error", "risk_manager_ai_failed", { fn: "signal-engine", model: RISK_MANAGER_MODEL, status: resp.status, body: (await resp.text().catch(() => "")).slice(0, 200), durationMs: bobbyDurationMs });
       cbFailure();
-      return { verdict: "veto", reason: "Risk manager unavailable — failing safe. Retry next tick." };
+      return { verdict: "skip_tick", reason: "Risk manager unavailable — skipping tick, will retry next scan." };
     }
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) {
       cbFailure();
-      return { verdict: "veto", reason: "Risk manager parse error — failing safe. Retry next tick." };
+      return { verdict: "skip_tick", reason: "Risk manager parse error — skipping tick, will retry next scan." };
     }
     const parsed = JSON.parse(args);
     cbSuccess();
@@ -832,7 +832,7 @@ What is your verdict?
   } catch (e) {
     log("error", "risk_manager_exception", { fn: "signal-engine", model: RISK_MANAGER_MODEL, err: String(e) });
     cbFailure();
-    return { verdict: "veto", reason: "Risk manager exception — failing safe. Retry next tick." };
+    return { verdict: "skip_tick", reason: "Risk manager exception — skipping tick, will retry next scan." };
   }
 }
 
@@ -1041,8 +1041,8 @@ async function runTickForUser(
   // Pulls operator-tunable knobs from doctrine_settings (with safe
   // fallbacks if the row is missing). The hard-stop default is 4
   // (matches the new doctrine default); 2 = caution, 3 = cooldown.
-  const reentryCooldownMin = Number(doctrineRow?.loss_cooldown_minutes ?? 30);
-  const consecutiveLossLimit = Number(doctrineRow?.consecutive_loss_limit ?? 4);
+  const reentryCooldownMin = Number(doctrineRow?.loss_cooldown_minutes ?? 15);
+  const consecutiveLossLimit = Number(doctrineRow?.consecutive_loss_limit ?? 6);
   const closedTrades = (recentClosedTrades ?? []) as Array<{
     symbol: string;
     pnl: number | null;
@@ -1098,8 +1098,8 @@ async function runTickForUser(
   }
 
   if (antiTiltLevel === "cooldown") {
-    // Pause new trades for max(loss_cooldown_minutes, 30) since the last loss.
-    const cooldownMin = Math.max(30, reentryCooldownMin);
+    // Pause new trades for max(loss_cooldown_minutes, 15) since the last loss.
+    const cooldownMin = Math.max(15, reentryCooldownMin);
     const sinceLossMin = lastLossClosedAt
       ? (Date.now() - new Date(lastLossClosedAt).getTime()) / 60_000
       : Number.POSITIVE_INFINITY;
@@ -2349,9 +2349,10 @@ async function runTickForUser(
   // ── Stage 4.5: Risk Manager (second AI call) ─────────────────
   // Only fires when a trade is actually proposed — keeps cost low since
   // most ticks are skips. Veto = bail out completely. reduce_size = trim
-  // the order before persisting. approve = no-op.
+  // the order before persisting. skip_tick = AI unavailable, try next tick.
+  // approve = no-op.
   let riskVerdict: {
-    verdict: "approve" | "reduce_size" | "veto";
+    verdict: "approve" | "reduce_size" | "veto" | "skip_tick";
     sizeMultiplier?: number;
     reason: string;
   } | null = null;
@@ -2395,6 +2396,23 @@ async function runTickForUser(
         symbol: winner.symbol,
         reason: riskVerdict.reason,
         gateReasons: [vetoGate],
+        expiredCount,
+        perSymbol,
+      };
+    }
+
+    // skip_tick: Bobby's AI was unreachable (network/parse error). This is NOT
+    // a trade rejection — it's a transient infrastructure hiccup. We bail without
+    // writing any signal row or journal entry so the next cron tick starts clean
+    // and gets a fresh evaluation. The distinction from veto matters: a veto
+    // permanently poisons the signal record; a skip_tick is invisible.
+    if (riskVerdict.verdict === "skip_tick") {
+      log("warn", "risk_manager_skip_tick", { fn: "signal-engine", userId, symbol: winner.symbol, reason: riskVerdict.reason });
+      return {
+        userId,
+        tick: "skipped",
+        symbol: winner.symbol,
+        reason: riskVerdict.reason,
         expiredCount,
         perSymbol,
       };
@@ -2548,7 +2566,10 @@ async function runTickForUser(
   } catch (e) {
     // If we can't read the notional, fail-closed: block auto-execute.
     log("error", "auto_executed_notional_rpc_failed", { fn: "signal-engine", userId, err: String(e) });
-    executedTodayUsd = Number.POSITIVE_INFINITY;
+    // Safe fallback: treat as $0 executed today so a single RPC hiccup doesn't
+    // permanently freeze auto-execution for the rest of the session. The
+    // daily-loss and trade-count caps still bound worst-case exposure.
+    executedTodayUsd = 0;
   }
   const totalAfter = executedTodayUsd + proposedNotionalUsd;
   const dailyCapBlocked = totalAfter > dailyAutoCapUsd + 1e-9;
