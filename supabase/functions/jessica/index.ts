@@ -497,6 +497,61 @@ async function runJessicaForUser(
     }
   }
 
+  // Auto-recovery: if Signal Engine is failed (no tick >15m), force a recovery
+  // tick NOW — hard-coded, not left to Bobby's AI reasoning. Stale engine means
+  // no new signals; Bobby may not even notice if he skips for another cycle.
+  const signalEngineHealth = agentHealth.find((h) => h.agent === "signal_engine");
+  if (signalEngineHealth && signalEngineHealth.status === "failed") {
+    log("warn", "signal_engine_stuck_recovery", {
+      fn: "jessica",
+      userId,
+      lastSuccessMinutesAgo: signalEngineHealth.lastSuccessMinutesAgo,
+      action: "firing_recovery_tick",
+    });
+    // Audit record for operator visibility.
+    admin.from("system_events").insert({
+      user_id: userId,
+      event_type: "signal_engine_stuck",
+      actor: "jessica_autonomous",
+      payload: {
+        lastSuccessMinutesAgo: signalEngineHealth.lastSuccessMinutesAgo,
+        action: "auto_recovery_tick_fired",
+        note: "No engine tick in >15m — Bobby triggered recovery tick before reasoning.",
+      },
+    }).then(({ error: evtErr }: { error: { message: string } | null }) => {
+      if (evtErr) console.error("[jessica] system_event insert failed:", evtErr.message);
+    });
+    // Journal alert — visible in UI immediately.
+    admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "alert",
+      title: `⚠️ Signal engine stuck — recovery tick fired`,
+      summary:
+        `No engine tick in ${signalEngineHealth.lastSuccessMinutesAgo ?? "unknown"}m. ` +
+        `Bobby auto-fired a recovery engine tick. If the engine continues to fail, ` +
+        `check the signal-engine cron schedule and Coinbase connectivity.`,
+      tags: ["engine-health", "alert", "self-healing"],
+    }).then(({ error: jErr }: { error: { message: string } | null }) => {
+      if (jErr) console.error("[jessica] journal insert failed:", jErr.message);
+    });
+    try {
+      await executeTool(
+        "run_engine_tick",
+        { reason: `Auto-recovery: signal engine stuck (no tick in ${signalEngineHealth.lastSuccessMinutesAgo}m)` },
+        {
+          userId,
+          token: userToken,
+          supabaseUrl,
+          supabaseAnonKey: Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+          serviceRoleKey,
+          actor: "jessica_autonomous",
+        },
+      );
+    } catch (e) {
+      console.error("[jessica] signal engine recovery tick failed:", e);
+    }
+  }
+
   const contextBlock = JSON.stringify(context, null, 2);
   const messages: Array<Record<string, unknown>> = [
     {
@@ -598,7 +653,7 @@ async function runJessicaForUser(
   const decisionSummary = {
     ran_at: new Date().toISOString(),
     actions: actionsLog.length,
-    decision: finalDecision.slice(0, 500),
+    decision: finalDecision.slice(0, 2000),
     action_log: actionsLog.map((a) => ({
       tool: a.tool,
       success: (a.result as Record<string, unknown>)?.success,

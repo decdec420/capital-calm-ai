@@ -2370,7 +2370,7 @@ async function runTickForUser(
         brokerOrderId = fill.orderId;
         log("info", "live_buy_executed", { fn: "signal-engine", userId, symbol: winner.symbol, entryPrice: liveEntry, size: liveSize, orderId: brokerOrderId });
         // Promote pending → open with actual fill data
-        await admin
+        const { error: openUpdateErr } = await admin
           .from("trades")
           .update({
             status: "open",
@@ -2381,6 +2381,62 @@ async function runTickForUser(
             notes: `LIVE Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""} · Coinbase orderId: ${brokerOrderId}`,
           })
           .eq("id", pendingTradeRow.id);
+
+        if (openUpdateErr) {
+          // CRITICAL: broker fill confirmed on Coinbase but DB update failed.
+          // The position EXISTS on Coinbase; the trade row stays 'broker_pending'.
+          // position-reconcile will surface this as an orphan on the next hourly
+          // run, but we also alert immediately here so the operator can act now.
+          log("error", "fill_db_sync_failed", {
+            fn: "signal-engine",
+            userId,
+            symbol: winner.symbol,
+            tradeId: pendingTradeRow.id,
+            brokerOrderId,
+            fillPrice: liveEntry,
+            fillSize: liveSize,
+            err: openUpdateErr.message,
+            action: "trade row stays broker_pending — position-reconcile will flag as orphan on next hourly run",
+          });
+          // Audit record — picked up by position-reconcile and any alerting pipelines.
+          admin.from("system_events").insert({
+            user_id: userId,
+            event_type: "fill_db_sync_failed",
+            actor: "system",
+            payload: {
+              symbol: winner.symbol,
+              tradeId: pendingTradeRow.id,
+              brokerOrderId,
+              fillPrice: liveEntry,
+              fillSize: liveSize,
+              err: openUpdateErr.message,
+              note: "Broker fill confirmed on Coinbase; DB record stuck at broker_pending. Manual reconciliation required.",
+            },
+          }).then(({ error: evtErr }: { error: { message: string } | null }) => {
+            if (evtErr) log("warn", "system_event_insert_failed", { fn: "signal-engine", err: evtErr.message });
+          });
+          // Journal alert — visible in the UI immediately.
+          admin.from("journal_entries").insert({
+            user_id: userId,
+            kind: "alert",
+            title: `⚠️ Fill sync failure: ${winner.symbol} opened on Coinbase but DB not updated`,
+            summary:
+              `Broker fill confirmed (${brokerOrderId}) for ${liveSize} ${winner.symbol.replace("-USD", "")} ` +
+              `@ $${liveEntry.toFixed(2)}, but the DB update to "open" failed: ${openUpdateErr.message}. ` +
+              `Trade row ${pendingTradeRow.id} remains broker_pending. ` +
+              `Position-reconcile will flag this within ~1 hour. Manual reconciliation required.`,
+            tags: ["fill-sync-failure", "alert", winner.symbol.toLowerCase()],
+            raw: {
+              source: "signal-engine",
+              tradeId: pendingTradeRow.id,
+              brokerOrderId,
+              fillPrice: liveEntry,
+              fillSize: liveSize,
+            },
+          }).then(({ error: jErr }: { error: { message: string } | null }) => {
+            if (jErr) log("warn", "journal_insert_failed", { fn: "signal-engine", err: jErr.message });
+          });
+        }
       } catch (brokerErr) {
         log("error", "live_auto_execute_broker_failed", { fn: "signal-engine", userId, symbol: winner.symbol, tradeId: pendingTradeRow.id, err: String(brokerErr) });
         // Mark pre-inserted row as failed so operator can reconcile against Coinbase.
