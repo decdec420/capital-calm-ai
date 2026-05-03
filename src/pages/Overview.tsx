@@ -257,6 +257,21 @@ export default function Overview() {
         </div>
       )}
 
+      {/* Small-account warning — surface why orders look like rounding errors. */}
+      {account && account.equity > 0 && account.equity < 50 && (
+        <div className="panel p-3 flex items-start gap-2.5 border-status-caution/40 bg-status-caution/5">
+          <ShieldAlert className="h-4 w-4 text-status-caution shrink-0 mt-0.5" />
+          <div className="text-xs leading-snug">
+            <span className="font-medium text-foreground">Small account mode.</span>{" "}
+            <span className="text-muted-foreground">
+              Equity is ${fmtMoney(account.equity, true)} — every order will be a tiny
+              fraction of a coin. The engine will still gate trades the same way; expected
+              edge just has to clear round-trip fees, which is harder at this size.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Metric grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <MetricCard
