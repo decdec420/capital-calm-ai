@@ -1028,7 +1028,21 @@ export type Database = {
             foreignKeyName: "strategies_parent_strategy_id_fkey"
             columns: ["parent_strategy_id"]
             isOneToOne: false
+            referencedRelation: "strategy_performance_ci_v"
+            referencedColumns: ["strategy_id"]
+          },
+          {
+            foreignKeyName: "strategies_parent_strategy_id_fkey"
+            columns: ["parent_strategy_id"]
+            isOneToOne: false
             referencedRelation: "strategy_performance_v"
+            referencedColumns: ["strategy_id"]
+          },
+          {
+            foreignKeyName: "strategies_parent_strategy_id_fkey"
+            columns: ["parent_strategy_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_regime_perf_v"
             referencedColumns: ["strategy_id"]
           },
         ]
@@ -1542,6 +1556,33 @@ export type Database = {
       }
     }
     Views: {
+      strategy_performance_ci_v: {
+        Row: {
+          avg_pnl: number | null
+          avg_pnl_hi: number | null
+          avg_pnl_lo: number | null
+          avg_pnl_pct: number | null
+          closed_trades: number | null
+          edge_verdict: string | null
+          evidence_status: string | null
+          losses: number | null
+          risk_weight: number | null
+          sharpe: number | null
+          sharpe_hi: number | null
+          sharpe_lo: number | null
+          status: string | null
+          strategy_id: string | null
+          strategy_name: string | null
+          strategy_version: string | null
+          total_pnl: number | null
+          user_id: string | null
+          win_rate: number | null
+          win_rate_hi: number | null
+          win_rate_lo: number | null
+          wins: number | null
+        }
+        Relationships: []
+      }
       strategy_performance_v: {
         Row: {
           avg_pnl: number | null
@@ -1560,6 +1601,28 @@ export type Database = {
           total_trades: number | null
           user_id: string | null
           win_rate: number | null
+          wins: number | null
+        }
+        Relationships: []
+      }
+      strategy_regime_perf_v: {
+        Row: {
+          avg_pnl: number | null
+          avg_pnl_hi: number | null
+          avg_pnl_lo: number | null
+          closed_trades: number | null
+          evidence_status: string | null
+          losses: number | null
+          regime: string | null
+          sd_pnl: number | null
+          strategy_id: string | null
+          strategy_name: string | null
+          strategy_version: string | null
+          total_pnl: number | null
+          user_id: string | null
+          win_rate: number | null
+          win_rate_hi: number | null
+          win_rate_lo: number | null
           wins: number | null
         }
         Relationships: []

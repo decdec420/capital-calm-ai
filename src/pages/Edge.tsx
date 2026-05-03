@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight, Layers, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
+import { ArrowUpRight, BarChart3, Layers, ShieldCheck, TrendingDown, TrendingUp } from "lucide-react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,27 @@ interface StrategyMeta {
   consecutive_losses: number;
   auto_paused_at: string | null;
   auto_pause_reason: string | null;
+}
+
+// Phase 3: bootstrap-ish CI + evidence verdict per strategy.
+interface StrategyCIRow {
+  strategy_id: string;
+  strategy_name: string;
+  strategy_version: string;
+  closed_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  win_rate_lo: number | null;
+  win_rate_hi: number | null;
+  avg_pnl: number | null;
+  avg_pnl_lo: number | null;
+  avg_pnl_hi: number | null;
+  sharpe: number | null;
+  sharpe_lo: number | null;
+  sharpe_hi: number | null;
+  evidence_status: "no_data" | "insufficient_evidence" | "developing" | "sufficient";
+  edge_verdict: "unproven" | "positive_edge" | "negative_edge" | "inconclusive";
 }
 
 interface RouterDecisionRow {
@@ -96,12 +117,13 @@ function fmtAgo(iso: string | null): string {
 export default function Edge() {
   const [rows, setRows] = useState<StrategyRow[] | null>(null);
   const [metaById, setMetaById] = useState<Record<string, StrategyMeta>>({});
+  const [ciById, setCiById] = useState<Record<string, StrategyCIRow>>({});
   const [recentRouter, setRecentRouter] = useState<RouterDecisionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = async () => {
-    const [perfRes, metaRes, sigRes] = await Promise.all([
+    const [perfRes, metaRes, ciRes, sigRes] = await Promise.all([
       supabase
         .from("strategy_performance_v" as never)
         .select("*")
@@ -110,6 +132,9 @@ export default function Edge() {
       supabase
         .from("strategies")
         .select("id, consecutive_losses, auto_paused_at, auto_pause_reason"),
+      supabase
+        .from("strategy_performance_ci_v" as never)
+        .select("*"),
       supabase
         .from("trade_signals")
         .select("id, symbol, side, regime, created_at, context_snapshot")
@@ -127,6 +152,11 @@ export default function Edge() {
       metaMap[m.id] = m;
     }
     setMetaById(metaMap);
+    const ciMap: Record<string, StrategyCIRow> = {};
+    for (const c of ((ciRes.data ?? []) as unknown as StrategyCIRow[])) {
+      ciMap[c.strategy_id] = c;
+    }
+    setCiById(ciMap);
     setRecentRouter((sigRes.data ?? []) as unknown as RouterDecisionRow[]);
   };
 
@@ -165,9 +195,9 @@ export default function Edge() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="Phase 2"
+        eyebrow="Phase 3"
         title="Edge"
-        description="Per-strategy performance, regime router decisions, and circuit-breaker status. The portfolio that actually generates the money."
+        description="Per-strategy performance with confidence intervals, regime router decisions, and circuit-breaker status. Honest metrics or no metrics."
       />
 
       {/* Portfolio summary strip */}
@@ -217,6 +247,102 @@ export default function Edge() {
           <div className="mt-1 text-xs text-muted-foreground">
             Across all strategies
           </div>
+        </div>
+      </div>
+
+      {/* Phase 3 — Statistical honesty panel.
+          Every strategy reported with 95% CIs (Wilson on win-rate,
+          t-based on expectancy) and an evidence_status flag. The point:
+          before risking real money, distinguish proven edge from a hot streak. */}
+      <div className="rounded-lg border border-border bg-card">
+        <div className="border-b border-border px-4 py-3 flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-primary" />
+          <div>
+            <div className="text-sm font-medium">Statistical honesty</div>
+            <div className="text-xs text-muted-foreground">
+              95% confidence intervals on every metric. Anything with fewer than 30 closed trades is "unproven" — point estimates lie.
+            </div>
+          </div>
+        </div>
+        {(rows ?? []).length === 0 ? (
+          <div className="px-4 py-6 text-sm text-muted-foreground">
+            No strategies to evaluate yet.
+          </div>
+        ) : (
+          <div className="overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium">Strategy</th>
+                  <th className="px-4 py-2 text-left font-medium">Evidence</th>
+                  <th className="px-4 py-2 text-right font-medium">Win rate (95% CI)</th>
+                  <th className="px-4 py-2 text-right font-medium">Expectancy $ (95% CI)</th>
+                  <th className="px-4 py-2 text-right font-medium">Sharpe (per trade)</th>
+                  <th className="px-4 py-2 text-left font-medium">Verdict</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {(rows ?? []).map((r) => {
+                  const ci = ciById[r.strategy_id];
+                  const ev = ci?.evidence_status ?? "no_data";
+                  const verdict = ci?.edge_verdict ?? "unproven";
+                  const evTone =
+                    ev === "sufficient" ? "text-success border-success/30"
+                    : ev === "developing" ? "text-warning border-warning/30"
+                    : "text-muted-foreground border-border";
+                  const verdictTone =
+                    verdict === "positive_edge" ? "bg-success/10 text-success border-success/30"
+                    : verdict === "negative_edge" ? "bg-destructive/10 text-destructive border-destructive/30"
+                    : verdict === "inconclusive" ? "bg-warning/10 text-warning border-warning/30"
+                    : "bg-muted text-muted-foreground border-border";
+                  const fmtCi = (lo: number | null | undefined, hi: number | null | undefined, fmt: (n: number) => string) =>
+                    lo == null || hi == null ? "—" : `[${fmt(lo)}, ${fmt(hi)}]`;
+                  return (
+                    <tr key={`ci-${r.strategy_id}`} className="hover:bg-muted/20">
+                      <td className="px-4 py-3">
+                        <span className="font-medium">{r.strategy_name}</span>{" "}
+                        <span className="text-xs text-muted-foreground">{r.strategy_version}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className={cn("text-[10px]", evTone)}>
+                          {ev.replace(/_/g, " ")}
+                        </Badge>
+                        <span className="ml-2 text-xs text-muted-foreground tabular-nums">
+                          n={ci?.closed_trades ?? 0}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        <div>{fmtPct(ci?.win_rate, 0)}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {fmtCi(ci?.win_rate_lo, ci?.win_rate_hi, (n) => `${(n * 100).toFixed(0)}%`)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        <div>{fmtUsd(ci?.avg_pnl)}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {fmtCi(ci?.avg_pnl_lo, ci?.avg_pnl_hi, (n) => fmtUsd(n))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        <div>{ci?.sharpe == null ? "—" : ci.sharpe.toFixed(2)}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {fmtCi(ci?.sharpe_lo, ci?.sharpe_hi, (n) => n.toFixed(2))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wide", verdictTone)}>
+                          {verdict.replace(/_/g, " ")}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="border-t border-border bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
+          Methodology: Wilson score interval on win-rate, t-based 95% CI on expectancy, Lo (2002) standard error on per-trade Sharpe. "Positive edge" requires the lower bound of expectancy to be above $0.
         </div>
       </div>
 
