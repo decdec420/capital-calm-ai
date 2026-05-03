@@ -956,6 +956,9 @@ export type Database = {
           params: Json
           parent_strategy_id: string | null
           promotion_notes: string | null
+          regime_affinity: string[]
+          risk_weight: number
+          side_capability: string[]
           status: string
           symbol: string | null
           updated_at: string
@@ -974,6 +977,9 @@ export type Database = {
           params?: Json
           parent_strategy_id?: string | null
           promotion_notes?: string | null
+          regime_affinity?: string[]
+          risk_weight?: number
+          side_capability?: string[]
           status?: string
           symbol?: string | null
           updated_at?: string
@@ -992,6 +998,9 @@ export type Database = {
           params?: Json
           parent_strategy_id?: string | null
           promotion_notes?: string | null
+          regime_affinity?: string[]
+          risk_weight?: number
+          side_capability?: string[]
           status?: string
           symbol?: string | null
           updated_at?: string
@@ -1005,6 +1014,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "strategies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "strategies_parent_strategy_id_fkey"
+            columns: ["parent_strategy_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_performance_v"
+            referencedColumns: ["strategy_id"]
           },
         ]
       }
@@ -1514,6 +1530,28 @@ export type Database = {
       }
     }
     Views: {
+      strategy_performance_v: {
+        Row: {
+          avg_pnl: number | null
+          avg_pnl_pct: number | null
+          closed_trades: number | null
+          last_closed_at: string | null
+          losses: number | null
+          regime_affinity: string[] | null
+          risk_weight: number | null
+          side_capability: string[] | null
+          status: string | null
+          strategy_id: string | null
+          strategy_name: string | null
+          strategy_version: string | null
+          total_pnl: number | null
+          total_trades: number | null
+          user_id: string | null
+          win_rate: number | null
+          wins: number | null
+        }
+        Relationships: []
+      }
       trade_coach_grades: {
         Row: {
           avg_grade_numeric: number | null
