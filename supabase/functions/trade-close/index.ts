@@ -21,6 +21,7 @@ import {
   getBrokerCredentials,
   placeMarketSell,
 } from "../_shared/broker.ts";
+import { effectivePnl, recordFill } from "../_shared/fills.ts";
 import {
   appendTransition,
   transitionTrade,
@@ -131,22 +132,30 @@ if (req.method === "OPTIONS") {
     // write nothing to DB. The position stays open in both the broker and DB.
     let fillPx: number;
     let brokerOrderId: string | null = null;
+    let exitFeesUsd = 0;
+    // deno-lint-ignore no-explicit-any
+    let liveFill: any = null;
 
     if (liveEnabled) {
       try {
         const creds = await getBrokerCredentials(admin);
         const remainingForSell = Number(trade.size);
+        // Deterministic close clientOrderId — retries hit Coinbase's idempotency
+        // and never double-sell a position.
+        const closeClientOrderId = `${trade.id}-close`;
         const fill = await placeMarketSell(
           creds,
           trade.symbol,
           remainingForSell.toFixed(8),
-          crypto.randomUUID(),
+          closeClientOrderId,
         );
         fillPx = fill.fillPrice;
         brokerOrderId = fill.orderId;
+        exitFeesUsd = Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0;
+        liveFill = fill;
         console.log(
           `[trade-close] LIVE SELL filled: ${trade.symbol} @ $${fillPx} ` +
-            `size=${remainingForSell} orderId=${brokerOrderId}`,
+            `size=${remainingForSell} orderId=${brokerOrderId} fees=$${exitFeesUsd.toFixed(4)}`,
         );
       } catch (brokerErr) {
         const msg = brokerErr instanceof Error ? brokerErr.message : String(brokerErr);
@@ -176,6 +185,19 @@ if (req.method === "OPTIONS") {
           },
         );
       }
+    }
+
+    // Persist the fill before touching the trade row so the cost ledger
+    // is correct even if the trade UPDATE later fails.
+    if (liveFill) {
+      await recordFill(admin, {
+        userId,
+        tradeId: trade.id,
+        symbol: trade.symbol,
+        fillKind: "manual_close",
+        proposedPrice: fillPx, // no specific target on a manual close
+        fill: liveFill,
+      });
     }
 
     const sideMult = trade.side === "long" ? 1 : -1;
@@ -212,6 +234,13 @@ if (req.method === "OPTIONS") {
 
     const nowIso = new Date().toISOString();
 
+    // Cumulative exit fees: any prior partial-close fees on this trade
+    // already live in trades.exit_fees_usd (set by mark-to-market TP1/TP2/stop).
+    // Add the fees from this final close on top.
+    const cumulativeExitFees = Number(trade.exit_fees_usd ?? 0) + exitFeesUsd;
+    const entryFees = Number(trade.entry_fees_usd ?? 0);
+    const netPnl = effectivePnl(cumulativePnl, entryFees, cumulativeExitFees);
+
     await admin
       .from("trades")
       .update({
@@ -223,11 +252,13 @@ if (req.method === "OPTIONS") {
         exit_price: fillPx,
         pnl: cumulativePnl,
         pnl_pct: pnlPct,
+        exit_fees_usd: cumulativeExitFees,
+        effective_pnl: netPnl,
         closed_at: nowIso,
         outcome,
         lifecycle_phase: "exited",
         lifecycle_transitions: nextTransitions,
-        notes: `${trade.notes ?? ""}\n${liveEnabled ? "LIVE " : ""}Closed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)}${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`
+        notes: `${trade.notes ?? ""}\n${liveEnabled ? "LIVE " : ""}Closed @ $${fillPx.toFixed(2)} · ${reason} · realized $${realizedRemainder.toFixed(2)} · total $${cumulativePnl.toFixed(2)} · net $${netPnl.toFixed(2)} (fees $${(entryFees + cumulativeExitFees).toFixed(4)})${brokerOrderId ? ` · Coinbase orderId: ${brokerOrderId}` : ""}`
           .trim(),
         ...(brokerOrderId ? { broker_close_order_id: brokerOrderId } : {}),
       })

@@ -57,13 +57,53 @@ Goal: more shots on goal in regimes the baseline can't trade, with cross-symbol 
 - Hard correlation cap (separate from doctrine's `max_correlated_positions`). The current soft gate is enough; a hard cap belongs to live-mode hardening (Phase 5/6).
 - New regime detector (`vwap-revert` reuses existing range/chop classification). If it underperforms because the classification is too coarse, that becomes a follow-up.
 
+## Phase 5 — Live execution plumbing (SHIPPED)
+
+Goal: stop pretending fees and slippage don't exist. Make every real-money round-trip honestly costed and idempotent under retry.
+
+### What shipped
+
+**Database (`broker_fills` + augmented `trades`):**
+
+- `broker_fills` table: one row per Coinbase fill with `fill_price`, `base_size`, `quote_size`, `fees_usd`, `slippage_pct`, `fill_kind` (entry/tp1/tp2/stop/manual_close). Unique on `(user_id, client_order_id, fill_kind)` so a retry can't double-insert.
+- `trades.entry_fees_usd`, `exit_fees_usd`, `entry_slippage_pct`, `effective_pnl`, `partial_fill`, `requested_size` — the cost ledger lives on the trade row so reports/views don't have to JOIN.
+- `live_execution_stats_v` view: 30-day rolling avg fee% and slippage% per user, fed back into the cost-aware edge gate.
+- `doctrine_settings.prefer_maker_orders` (opt-in, default false) — small accounts stay on market IOC because maker orders won't fill at $1.
+
+**Broker layer (`_shared/broker.ts` + new `_shared/fills.ts`):**
+
+- `BrokerFill` now carries `feesUsd` (`total_fees` from Coinbase) and the raw order payload for the audit table.
+- New `recordFill()` helper: writes the audit row, computes signed `slippage_pct` (positive = bad on either side), idempotent via upsert with ignoreDuplicates.
+- `effectivePnl()` helper: gross PnL minus both legs of fees. The honest number that goes to the user.
+- 6 unit tests covering slippage signs, BUY/SELL asymmetry, null inputs, fee netting.
+
+**Engine call sites:**
+
+- **Entry (`signal-engine`)**: deterministic `clientOrderId = signalRow.id` already existed; now also captures fees, computes entry slippage, detects partial fills (`filledBaseSize < expected × 0.99`), and writes everything into the trade row in the same UPDATE that flips status to `open`.
+- **Manual close (`trade-close`)**: switched from `crypto.randomUUID()` to deterministic `${trade.id}-close`. Records the fill, accumulates exit fees, writes `effective_pnl`.
+- **TP1/TP2/stop (`mark-to-market`)**: deterministic clientOrderIds (`${trade.id}-tp1`, `-tp2`, `-stop`). Each leg records its fill and accumulates `exit_fees_usd` so the final close knows the round-trip cost.
+
+**Cost-aware edge gate (`signal-engine`):**
+
+- Once a user has ≥10 fills in the rolling 30-day window, the gate replaces its hardcoded 0.6%/0.10% assumption with the user's actual observed cost. Floored at 0.3% fee / 0.05% slip and capped at 1.2% fee / 0.5% slip so one weird fill doesn't freeze trading.
+- Gate journal entries now tag `costSource: default | observed` so we can see when the engine starts using real numbers.
+
+### Why this matters
+
+Before Phase 5, a "winning" $0.30 trade on a $1 position was actually a $0.10 loser after Coinbase took its $0.40 in round-trip fees. We were promoting strategies based on a number that didn't exist. Now `pnl` is the gross headline and `effective_pnl` is the truth — and `evaluate-candidate` will pick up the truth automatically because Phase 3's CI views read from `trades.pnl` (the column we should retarget to `effective_pnl` once we have a few real fills to validate the math).
+
+### What's intentionally NOT in Phase 5
+
+- **Maker-only execution path**: doctrine flag landed but the post-only limit code isn't wired yet. On $1 orders maker fills are unreliable; we'll wire the actual post-only path in Phase 6 when the canary cap is also in place.
+- **Re-targeting CI views to `effective_pnl`**: deliberate. We let real fills accumulate first so we can sanity-check the bookkeeping against Coinbase reports before swapping the source of truth on the Edge dashboard.
+
 ### Roadmap reminder
 
 ```text
 Phase 3 (honesty) ✓ ──▶
-   Phase 4 (vwap-revert, momentum-burst, cross-symbol, correlation) ✓ ──▶
-      ├─▶ Phase 5 (live plumbing: maker-only, idempotency, partial fills, fee-aware sizing)
-      ├─▶ Phase 6 (live-readiness ceremony: scorecard, two-step arming, $5 canary cap, auto-revert tripwires)
-      ├─▶ Phase 7 (operator polish: health page, weekly digest, snapshot/restore)
-      └─▶ Phase 8 (decay detection + champion/challenger)
+   Phase 4 (vwap-revert, momentum-burst, cross-symbol) ✓ ──▶
+      Phase 5 (live plumbing: idempotency, partial fills, fee-aware sizing, fill audit) ✓ ──▶
+         ├─▶ Phase 6 (live-readiness ceremony: scorecard, two-step arming, $5 canary, maker-only path, auto-revert tripwires)
+         ├─▶ Phase 7 (operator polish: health page, weekly digest, snapshot/restore)
+         └─▶ Phase 8 (decay detection + champion/challenger)
 ```

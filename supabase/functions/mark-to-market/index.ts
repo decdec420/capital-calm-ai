@@ -44,6 +44,7 @@ import {
   placeMarketSell,
   type BrokerCredentials,
 } from "../_shared/broker.ts";
+import { effectivePnl, recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 validateDoctrineInvariants();
@@ -280,6 +281,9 @@ async function runMarkToMarket(
       const closedQty = action.closedQty;
       let fillPx = action.fillPrice; // may be updated by broker fill in live mode
       let tp1BrokerOrderId: string | null = null;
+      let tp1FeesUsd = 0;
+      // deno-lint-ignore no-explicit-any
+      let tp1Fill: any = null;
 
       // LIVE MODE: sell the TP1 half via broker before updating DB.
       // Optimistic lock (status='closing') prevents a concurrent cron run from
@@ -297,17 +301,22 @@ async function runMarkToMarket(
           continue;
         }
         try {
+          // Phase 5: deterministic clientOrderId per (trade, leg) means a
+          // retried mark-to-market run cannot double-sell TP1.
+          const tp1ClientOrderId = `${t.id}-tp1`;
           const fill = await placeMarketSell(
             brokerCreds,
             t.symbol,
             closedQty.toFixed(8),
-            crypto.randomUUID(),
+            tp1ClientOrderId,
           );
           fillPx = fill.fillPrice;
           tp1BrokerOrderId = fill.orderId;
+          tp1FeesUsd = Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0;
+          tp1Fill = fill;
           console.log(
             `[MTM] LIVE TP1 SELL filled ${t.symbol} qty=${closedQty} @ $${fillPx} ` +
-              `orderId=${tp1BrokerOrderId}`,
+              `orderId=${tp1BrokerOrderId} fees=$${tp1FeesUsd.toFixed(4)}`,
           );
         } catch (brokerErr) {
           // Revert lock — leave trade open so the next tick can retry.
@@ -317,6 +326,17 @@ async function runMarkToMarket(
           perUserChanges.set(t.user_id, bucket);
           continue;
         }
+      }
+
+      if (tp1Fill) {
+        await recordFill(admin, {
+          userId: t.user_id,
+          tradeId: t.id,
+          symbol: t.symbol,
+          fillKind: "tp1",
+          proposedPrice: Number(t.tp1_price ?? action.fillPrice),
+          fill: tp1Fill,
+        });
       }
 
       const realizedHalf =
@@ -357,10 +377,13 @@ async function runMarkToMarket(
           current_price: px,
           unrealized_pnl: runnerUpnl,
           unrealized_pnl_pct: runnerUpnlPct,
+          // Phase 5: accumulate partial-close fees so the final
+          // effective_pnl at exit reflects every fee paid on the round-trip.
+          exit_fees_usd: Number(t.exit_fees_usd ?? 0) + tp1FeesUsd,
           lifecycle_phase: "tp1_hit",
           lifecycle_transitions: nextTransitions,
           notes:
-            `${t.notes ?? ""}${tp1BrokerOrderId ? "\nLIVE " : "\n"}TP1 @ $${fillPx.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked, runner active, stop→BE.${tp1BrokerOrderId ? ` Coinbase orderId: ${tp1BrokerOrderId}.` : ""}`
+            `${t.notes ?? ""}${tp1BrokerOrderId ? "\nLIVE " : "\n"}TP1 @ $${fillPx.toFixed(2)} → +$${realizedHalf.toFixed(2)} booked${tp1FeesUsd > 0 ? ` (fees $${tp1FeesUsd.toFixed(4)})` : ""}, runner active, stop→BE.${tp1BrokerOrderId ? ` Coinbase orderId: ${tp1BrokerOrderId}.` : ""}`
               .trim(),
           ...(tp1BrokerOrderId ? { broker_order_id: tp1BrokerOrderId } : {}),
         })
@@ -391,6 +414,10 @@ async function runMarkToMarket(
       const closedQty = action.closedQty;
       let fillPx = action.fillPrice; // may be updated by broker fill in live mode
       let closeBrokerOrderId: string | null = null;
+      let closeFeesUsd = 0;
+      // deno-lint-ignore no-explicit-any
+      let closeFill: any = null;
+      const closeKind: "stop" | "tp2" = action.type === "stop_hit" ? "stop" : "tp2";
 
       // LIVE MODE: sell remaining position via broker before closing DB record.
       // Optimistic lock (status='closing') prevents double-close on concurrent runs.
@@ -408,17 +435,22 @@ async function runMarkToMarket(
           continue;
         }
         try {
+          // Phase 5: deterministic clientOrderId per (trade, leg) — retries
+          // can't double-sell the runner.
+          const closeClientOrderId = `${t.id}-${closeKind}`;
           const fill = await placeMarketSell(
             brokerCreds,
             t.symbol,
             closedQty.toFixed(8),
-            crypto.randomUUID(),
+            closeClientOrderId,
           );
           fillPx = fill.fillPrice;
           closeBrokerOrderId = fill.orderId;
+          closeFeesUsd = Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0;
+          closeFill = fill;
           console.log(
             `[MTM] LIVE ${action.type.toUpperCase()} SELL filled ${t.symbol} ` +
-              `qty=${closedQty} @ $${fillPx} orderId=${closeBrokerOrderId}`,
+              `qty=${closedQty} @ $${fillPx} orderId=${closeBrokerOrderId} fees=$${closeFeesUsd.toFixed(4)}`,
           );
         } catch (brokerErr) {
           // Revert lock — trade stays open so the next tick can retry.
@@ -431,6 +463,19 @@ async function runMarkToMarket(
           perUserChanges.set(t.user_id, bucket);
           continue;
         }
+      }
+
+      if (closeFill) {
+        await recordFill(admin, {
+          userId: t.user_id,
+          tradeId: t.id,
+          symbol: t.symbol,
+          fillKind: closeKind,
+          proposedPrice: closeKind === "stop"
+            ? Number(t.stop_loss ?? action.fillPrice)
+            : Number(t.tp2_price ?? t.take_profit ?? action.fillPrice),
+          fill: closeFill,
+        });
       }
 
       const realizedClose =
@@ -459,6 +504,12 @@ async function runMarkToMarket(
         transition,
       );
 
+      // Phase 5: roll all exit fees together (any TP1 partial fees already
+      // landed in trades.exit_fees_usd); compute the honest net PnL.
+      const cumulativeExitFees = Number(t.exit_fees_usd ?? 0) + closeFeesUsd;
+      const entryFees = Number(t.entry_fees_usd ?? 0);
+      const netPnl = effectivePnl(cumulativePnl, entryFees, cumulativeExitFees);
+
       await admin
         .from("trades")
         .update({
@@ -470,11 +521,13 @@ async function runMarkToMarket(
           exit_price: fillPx,
           pnl: cumulativePnl,
           pnl_pct: pnlPct,
+          exit_fees_usd: cumulativeExitFees,
+          effective_pnl: netPnl,
           closed_at: nowIso,
           outcome,
           lifecycle_phase: "exited",
           lifecycle_transitions: nextTransitions,
-          notes: `${t.notes ?? ""}\n${reason} · realized $${realizedClose.toFixed(2)} · total $${cumulativePnl.toFixed(2)}${closeBrokerOrderId ? ` · Coinbase orderId: ${closeBrokerOrderId}` : ""}`
+          notes: `${t.notes ?? ""}\n${reason} · realized $${realizedClose.toFixed(2)} · total $${cumulativePnl.toFixed(2)} · net $${netPnl.toFixed(2)} (fees $${(entryFees + cumulativeExitFees).toFixed(4)})${closeBrokerOrderId ? ` · Coinbase orderId: ${closeBrokerOrderId}` : ""}`
             .trim(),
           ...(closeBrokerOrderId ? { broker_close_order_id: closeBrokerOrderId } : {}),
         })
