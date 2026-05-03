@@ -33,7 +33,7 @@ import { useGuardrails } from "@/hooks/useGuardrails";
 import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
-import { supabase } from "@/integrations/supabase/client";
+
 import { toast } from "sonner";
 import { Brain } from "lucide-react";
 import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
@@ -81,7 +81,7 @@ export default function Overview() {
       }
     : { regime: localRegime.regime, confidence: localRegime.confidence, setupScore: localRegime.setupScore };
   const lastGateReasons = snapshot?.gateReasons ?? [];
-  const lastPrice = btcSnap?.lastPrice ?? candles[candles.length - 1]?.c ?? 0;
+  
   // (Per-symbol prices are now rendered by SymbolStrip from the snapshot.)
 
   const openPosition = open[0];
