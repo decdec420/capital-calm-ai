@@ -64,9 +64,14 @@ async function buildKatrinaContext(
     coachEntriesRes,
     lastReviewRes,
   ] = await Promise.all([
+    // Only feed Katrina LIVE experiments. Already-rejected/accepted rows are
+    // closed business — including them produced noisy kill_ids that just
+    // echoed back experiments the system had already terminated, which Wags
+    // then surfaced as "needs your decision". See audit 2026-05-03.
     admin.from("experiments")
       .select("id, title, status, hypothesis, parameter, before_value, after_value, delta, notes, created_at, auto_resolved, needs_review, priority, symbol")
       .eq("user_id", userId)
+      .in("status", ["queued", "running", "needs_review"])
       .order("created_at", { ascending: false })
       .limit(20),
 
