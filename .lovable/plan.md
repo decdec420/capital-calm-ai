@@ -1,129 +1,101 @@
-## Phase 2 — Multi-Strategy Edge (Live Paper)
+## Roadmap to "ready for live money" (paper now, live later)
 
-Mode stays `paper`. Bot stays `paused` unless you flip it. Nothing in this plan touches `live_trading_enabled`, broker order routing, or the live/paper switch.
+The destination is real money. Everything between here and there falls into three groups: **prove the edge is real**, **harden the plumbing so live orders don't blow up**, and **build the human controls so flipping the switch is a non-event, not a leap of faith**.
 
-### What changes for the user
-
-- The bot stops being a one-trick pony. Today: `trend-rev` only, refuses to trade `range` regimes (which is why all 3 symbols have been silent).
-- After Phase 2: 4 approved strategies, each with a regime it's good at. The engine picks the right tool for the current market on each symbol every tick.
-- Shorts unlock in paper. Currently every trade is forced long — half the market is invisible to us.
-
-### The 4 strategies after Phase 2
-
-| Strategy | Regime affinity | Sides | Risk weight | What it does |
-|---|---|---|---|---|
-| `trend-rev v1.3` (existing) | trending_up, trending_down | long | 1.0 | Unchanged. Keeps current behaviour as the baseline. |
-| `trend-pullback v2` | trending_up, trending_down | long, short | 0.5 → 1.0 after 30d | Enters on RSI pullbacks within an established trend. Tighter stops, better R:R than v1.3. |
-| `range-fade v1` | range | long, short | 0.5 | Fades the edges of a confirmed range. Sells near resistance, buys near support. Hard time-stop if range breaks. |
-| `breakout-confirm v1` | breakout | long, short | 0.5 | Enters on confirmed range breaks with volume expansion. Skips the first candle (no chasing). |
-
-All 3 new strategies start at `risk_weight = 0.5` so their position sizes are half of trend-rev's until they earn capital. After 30 paper days with positive expectancy, the auto-promotion path (already in `evaluate-candidate`) can promote them to 1.0.
-
-### The regime router (the brain that picks)
-
-New module `_shared/strategy-router.ts`. Per symbol, per tick:
-
-```text
-candidates = strategies
-  .filter(s => s.status == 'approved')
-  .filter(s => s.regime_affinity.includes(current_regime))
-  .filter(s => s.side_capability.includes(desired_side))
-
-if (candidates.empty) → no trade, log reason
-if (candidates.length == 1) → use it
-else → pick highest recent_sharpe (from strategy_performance_v),
-       falling back to highest risk_weight, then alphabetical
-```
-
-The signal-engine currently treats every symbol the same and only refuses non-tradeable regimes. After this change `range` becomes tradeable *if* a range strategy exists for it. `TRADEABLE_REGIMES` becomes a union of all approved strategies' `regime_affinity` arrays, computed once per tick.
-
-### Short side unlock (synthetic, paper only)
-
-True shorting on Coinbase spot isn't possible. We do **synthetic shorting**: when a short signal fires and there's an existing long position in that symbol, we sell down (partial or full) and treat the avoided-loss as the short's PnL. When there's no spot to sell, we just log the signal and skip — no fake borrowed selling.
-
-In Phase 2 paper, synthetic shorts simulate as if shorts were real: paper PnL accounts for them. We mark every short trade with `direction_basis = 'engine_chose_short'` and a new `synthetic_short = true` flag in `notes` so we can audit later.
-
-### Rollout — live paper from day one (your choice)
-
-All 3 new strategies fire real paper signals on first deploy with `risk_weight = 0.5`. The cost-aware gate from Phase 1 still applies, so weak signals get filtered. The Kelly-lite sizing means worst case a new strategy uses half the risk budget per trade vs trend-rev.
-
-A safety brake: in the first 14 days, if any new strategy hits 4 consecutive losses, it auto-flips to `status = 'paused'` and posts an alert. You can re-arm or kill from `/edge`.
-
-### `/edge` page additions
-
-- Per-strategy: live status, recent trades, win rate, Sharpe, current risk_weight
-- "Pause" / "Resume" / "Kill" buttons (writes to `strategies.status`)
-- Regime router transparency: per symbol, "current regime → selected strategy → why"
+Phase 1 (risk infra) and Phase 2 (multi-strategy edge) are done. Here's what stands between us and arming live.
 
 ---
 
-## Technical details
+### Phase 3 — Statistical honesty (do this next, no exceptions)
 
-### DB migration
+You cannot go live on point-estimate metrics. A strategy with "58% win-rate over 47 trades" could honestly be a 40% strategy on a hot streak. We need to know which is which **before** real money is at risk.
 
-```sql
--- Per-strategy circuit breaker
-alter table public.strategies
-  add column if not exists consecutive_losses int not null default 0,
-  add column if not exists auto_paused_at timestamptz,
-  add column if not exists auto_pause_reason text;
+- **Bootstrap confidence intervals on every strategy verdict.** Win-rate, expectancy, Sharpe — all reported as `point [low, high]` 95% CIs. UI flags anything where the CI crosses zero as "not yet proven".
+- **Minimum-evidence gate.** Below 30 trades per (strategy × regime), status is "insufficient evidence". No promotion, no live-eligibility, no copilot proposals based on it.
+- **Walk-forward replay.** New `replay-strategy` edge function: re-run strategy logic against historical candles for any date range, produce out-of-sample equity curve. This is the single biggest defense against overfitting.
+- **Regime-stratified scorecards.** Break every metric down by `(strategy × regime × symbol)`. Catches the "looks great overall, secretly only works in trending_up BTC" trap.
+- **Copilot uses CI verdicts.** Doctrine proposals cite `[low, high]`, not the point estimate.
 
--- Status values used: 'candidate', 'approved', 'paused', 'archived'
--- (no enum change needed, they're already text)
+### Phase 4 — Edge depth
 
--- Synthetic short audit flag on trades
-alter table public.trades
-  add column if not exists synthetic_short boolean not null default false;
+Once we can tell signal from noise, safe to add more inputs.
 
--- Seed the 3 new strategies for the user (status='approved', risk_weight=0.5)
--- Insert via insert tool, not migration.
+- 2 more strategies: `vwap-revert v1`, `momentum-burst v1`
+- Cross-symbol features (BTC dominance, BTC-ETH correlation, total-3 momentum) fed into the AI side-decision
+- Real correlation gate enforcing `max_correlated_positions` from a 30d return correlation matrix
+- Time-of-day affinity per strategy (soft-pause in known-bad UTC hours)
+- Regret tracking — simulate signals NOT taken, surface over-tight gates
+
+### Phase 5 — Live-execution hardening (the bridge)
+
+This is the work the original `LIVE_EXECUTION_SPRINT.md` was pointing at. None of it matters in paper, all of it matters the second we flip live.
+
+- **Maker-only limit orders** with re-quote logic. Eats less spread than market orders → meaningfully better real-world PnL.
+- **Idempotent order submission.** Every order gets a deterministic `client_order_id`; retries can't double-fill.
+- **Partial-fill reconciliation.** Real fills come in pieces. Position tracking, stop placement, and PnL accounting all need to handle multi-fill orders cleanly.
+- **Real fill telemetry.** Track `expected_fill_price` vs `actual_fill_price` per order. After 50 live fills, recalibrate the paper slippage model from the empirical distribution. Without this our paper PnL is a guess.
+- **Order-state machine + reconciliation loop.** Periodically pull broker open orders + positions and compare to our DB. Auto-flag drift, auto-cancel orphans.
+- **Broker error taxonomy.** Categorize Coinbase errors (rate-limit, insufficient-funds, invalid-product, transient) and route each to the right handler (retry / abort / alert).
+- **Fee-aware sizing.** Real Coinbase taker/maker fees baked into expectancy calcs and the cost-aware gate.
+
+### Phase 6 — Live-readiness ceremony (gate to flipping the switch)
+
+Before `live_trading_enabled` flips to true, the system itself enforces a checklist:
+
+- **Live-readiness scorecard** (new page or `/edge` panel). Green/red on:
+  - At least one strategy with 95% CI lower bound > 0 on expectancy
+  - 60+ paper trading days with no critical incidents
+  - Broker connection healthy 99%+ over trailing 14d
+  - All agent_health green for 14d
+  - Slippage model calibrated against ≥50 real test orders
+  - Manual dry-run of kill-switch + reconnect flow within last 7d
+- **Two-step arming** (already partially built). Acknowledgment dialog + 24h cooldown + re-confirmation. Don't simplify this.
+- **Tiny-size canary period.** First 14 days live, hard cap order size at $5 regardless of doctrine. System literally cannot place a bigger order. Confidence-building, not edge-seeking.
+- **Auto-revert tripwires.** Live mode auto-flips back to paper if: 3 consecutive losing days, single-day loss > 2× daily_loss_pct, broker error rate > 5%, or any agent_health failure lasting > 30 min.
+
+### Phase 7 — Operator polish (parallel, low blocking)
+
+- Single "is this thing working?" health page (consolidates /edge + /performance + /risk)
+- Weekly digest via Telegram (already have the connector)
+- Strategy "what changed" version log with auto/manual/copilot trigger
+- Backfill mode for new strategies (90d historical replay before going live-paper)
+- Snapshot/restore for doctrine + strategies + risk weights
+
+### Phase 8 — Knowing when to pause (must exist before live)
+
+- **Decay detector.** 30d Sharpe vs lifetime Sharpe per strategy. Drop below 50% for 2 weeks → auto-pause (in live this means real capital is protected the moment edge fades).
+- **Regime-shift detector.** Realized vol / trend-strength distribution shift > 2σ from 90d baseline → market-state alert.
+- **Champion/challenger.** When a strategy auto-pauses, system spins a re-tuned challenger in shadow for 14d, proposes promotion if it beats the paused version.
+
+---
+
+### Suggested order
+
+```text
+Phase 3 (honesty)        ──▶ blocks everything else
+   │
+   ├─▶ Phase 4 (more edge)         ─┐
+   ├─▶ Phase 5 (live plumbing)     ─┼─▶ Phase 6 (readiness ceremony) ──▶ FLIP LIVE (canary)
+   └─▶ Phase 8 (decay detection)   ─┘
+   
+Phase 7 (operator polish) — anytime, parallel
 ```
 
-### Files to create
+**Phase 3 is the real gate.** If we add Phases 4/5/6/7/8 without it, we'll be making decisions with real money based on metrics that look meaningful but aren't.
 
-- `supabase/functions/_shared/strategy-router.ts` — pure function: `selectStrategy(regime, side, strategies, performance)` returns `{strategy, reason}` or `{strategy: null, reason}`
-- `supabase/functions/_shared/strategy-router.test.ts` — Deno tests covering: no candidates, single candidate, multi-candidate Sharpe tie-break, side mismatch, all-paused
-- `supabase/functions/_shared/strategies/trend-pullback-v2.ts` — params + signal-shape helpers
-- `supabase/functions/_shared/strategies/range-fade-v1.ts` — params, range-detection helpers (Bollinger-style bounds from regime data), time-stop logic
-- `supabase/functions/_shared/strategies/breakout-confirm-v1.ts` — params, volume-confirm helper, anti-chase delay
-- `src/pages/Edge.tsx` — extend with per-strategy controls and router transparency panel
-- `src/components/edge/StrategyCard.tsx` — pause/resume/kill UI
-- `src/components/edge/RouterPanel.tsx` — per-symbol routing decision viewer
+### Sizing
 
-### Files to edit
+- Phase 3: 1 build pass (CI view + replay function + UI surfacing)
+- Phase 4: 2 build passes
+- Phase 5: 3 build passes (this is the heaviest — real broker integration is fiddly)
+- Phase 6: 1 build pass (mostly checks + tripwires on top of existing infra)
+- Phase 7: 2 build passes
+- Phase 8: 1 build pass
 
-- `supabase/functions/signal-engine/index.ts`:
-  - Replace `.eq('status','approved').limit(1)` strategy load with a full approved-strategy fetch
-  - After computing regime per symbol, call `selectStrategy()` to pick the strategy for that candidate
-  - Replace the static `TRADEABLE_REGIMES` filter with: "tradeable if any approved strategy has affinity"
-  - Pass the selected strategy's params (stop_atr_mult, ema, rsi) to `computeRegime` and the AI prompt for that symbol — different strategies see different regime computations
-  - Add short-signal handling: if AI returns `side: 'short'`, mark `synthetic_short = true` and proceed via the same paper-fill path
-  - On signal/trade close, increment `strategies.consecutive_losses` on loss, reset on win; auto-pause at 4
-- `supabase/functions/_shared/reasons.ts` — add `NO_STRATEGY_FOR_REGIME`, `STRATEGY_AUTO_PAUSED`, `SHORT_NO_SPOT_TO_SELL`
-- `supabase/functions/_shared/regime.ts` — `TRADEABLE_REGIMES` becomes a function `tradeableRegimesFor(strategies)` instead of a static set
-- `supabase/functions/post-trade-learn/index.ts` — update consecutive_losses counter on close; trigger auto-pause + alert at threshold
+Realistic timeline to "armed live with $5 canary cap" at one Phase per session: ~8 build passes. Then 14 days of canary. Then full live.
 
-### Sequencing (single deploy)
+### What I'd ship next
 
-1. Migration: add columns to `strategies` and `trades`
-2. Insert the 3 new strategy rows for the user with `status='approved'`, `risk_weight=0.5`
-3. Ship router + strategy modules + tests
-4. Wire signal-engine to use router
-5. Extend `/edge` UI
-6. Deploy signal-engine and post-trade-learn
+**Phase 3.** It's the foundation everything else stands on, and it's the one thing that takes "are we actually making money?" from a hopeful guess to an answer with error bars.
 
-### Risks & mitigations I want you aware of
-
-- **More signals = more paper trades.** Expect signal frequency to ~2-3x. Doctrine guardrails (max_trades_per_day=5, daily_loss_pct=0.3%) still cap downside.
-- **range-fade is the most dangerous.** Fading extremes works until a range breaks, at which point you're catching a knife. The time-stop (close if range invalidates within N candles) is the seatbelt.
-- **Short signals depend on existing spot.** First few weeks, expect most shorts to be `SHORT_NO_SPOT_TO_SELL` — that's correct behaviour, not a bug.
-- **Strategy interaction.** Two strategies could fire on the same symbol same tick if regime is ambiguous. Router enforces one-strategy-per-symbol-per-tick by Sharpe ranking.
-
-### What's still NOT included (Phase 3+)
-
-- Real broker shorting (requires margin account, out of scope)
-- Bootstrap-CI verdicts in copilot_memory (Phase 3)
-- Maker-only limit orders (Phase 3)
-- Going live (separate explicit user decision later)
-
-After approval I'll run this in one build pass: migration → seed strategies → router + tests → engine wiring → UI. I'll show you the `/edge` page when it's done.
+Want me to spec Phase 3 in detail and start building, or zoom in on any other phase first?
