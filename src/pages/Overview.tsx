@@ -24,7 +24,6 @@ import {
   Sparkles,
   TrendingDown,
   TrendingUp,
-  Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAccountState } from "@/hooks/useAccountState";
@@ -60,7 +59,6 @@ function FreshnessDot({ timestamp }: { timestamp: number | null }) {
 export default function Overview() {
   const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
-  const { approved: approvedStrategy, candidates: candidateStrategies } = useStrategies();
   const { open, closed } = useTrades();
   
   const { guardrails } = useGuardrails();
