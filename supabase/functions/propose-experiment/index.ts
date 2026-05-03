@@ -176,6 +176,16 @@ async function proposeForUser(admin: any, userId: string, LOVABLE_API_KEY: strin
   ]);
   if (!strategy) return { userId, skipped: "no_approved_strategy" };
 
+  // Phase 3: pull statistical-honesty snapshot for the approved strategy
+  // so the copilot knows whether we already have a proven edge (avoid
+  // breaking what works) or are still scrambling for one.
+  const { data: ciRow } = await admin
+    .from("strategy_performance_ci_v")
+    .select("edge_verdict, evidence_status, closed_trades, avg_pnl_lo, avg_pnl_hi, win_rate_lo, win_rate_hi, sharpe, sharpe_lo, sharpe_hi")
+    .eq("strategy_id", (strategy as { id: string }).id)
+    .maybeSingle();
+
+
   // 3. Pick the next symbol to propose for: round-robin by least-recent
   // memory activity, so every symbol eventually gets attention.
   const lastTriedBySymbol: Record<string, number> = {};
