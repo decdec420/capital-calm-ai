@@ -47,6 +47,27 @@ interface StrategyMeta {
   auto_pause_reason: string | null;
 }
 
+// Phase 3: bootstrap-ish CI + evidence verdict per strategy.
+interface StrategyCIRow {
+  strategy_id: string;
+  strategy_name: string;
+  strategy_version: string;
+  closed_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  win_rate_lo: number | null;
+  win_rate_hi: number | null;
+  avg_pnl: number | null;
+  avg_pnl_lo: number | null;
+  avg_pnl_hi: number | null;
+  sharpe: number | null;
+  sharpe_lo: number | null;
+  sharpe_hi: number | null;
+  evidence_status: "no_data" | "insufficient_evidence" | "developing" | "sufficient";
+  edge_verdict: "unproven" | "positive_edge" | "negative_edge" | "inconclusive";
+}
+
 interface RouterDecisionRow {
   id: string;
   symbol: string;
