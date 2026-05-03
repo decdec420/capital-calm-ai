@@ -224,48 +224,40 @@ export default function Overview() {
 
       {/* Trading pause — shown inline in DailyBriefPanel above */}
 
-      {/* Hero strip */}
-      <div className="panel p-5 flex flex-wrap items-center gap-4 bg-gradient-surface">
+      {/* Compact status row */}
+      <div className="panel p-4 flex flex-wrap items-center gap-x-6 gap-y-3 bg-gradient-surface">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-md bg-primary/15 text-primary flex items-center justify-center">
-            <Activity className="h-5 w-5" />
+          <div className="h-9 w-9 rounded-md bg-primary/15 text-primary flex items-center justify-center">
+            <Activity className="h-4 w-4" />
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">System mode</div>
-            <div className="text-base font-semibold text-foreground capitalize">{system?.mode ?? "—"}</div>
+            <div className="text-sm font-semibold text-foreground capitalize">{system?.mode ?? "—"}</div>
           </div>
         </div>
-        <div className="h-10 w-px bg-border hidden md:block" />
+        <div className="h-9 w-px bg-border hidden md:block" />
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Market regime</div>
-          <div className="mt-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC regime</div>
+          <div className="mt-0.5">
             <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
           </div>
         </div>
-        <div className="h-10 w-px bg-border hidden md:block" />
+        <div className="h-9 w-px bg-border hidden md:block" />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk posture</div>
-          <div className="mt-1">
+          <div className="mt-0.5">
             <StatusBadge tone={floorDistance > 2 ? "safe" : "caution"} dot>
               {floorDistance > 2 ? "capital protected" : "near floor"}
             </StatusBadge>
           </div>
         </div>
-        <div className="flex-1" />
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC-USD live</div>
-          <div className="flex items-center justify-end gap-2">
-            <span className="text-sm font-medium text-foreground tabular">
-              ${lastPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </span>
-            <FreshnessDot timestamp={lastCandleTime} />
-          </div>
-          <div className={`text-[11px] tabular ${pctChange >= 0 ? "text-status-safe" : "text-status-blocked"}`}>
-            {pctChange >= 0 ? "+" : ""}
-            {pctChange.toFixed(2)}% window
-          </div>
-        </div>
       </div>
+
+      {/* Per-symbol price + regime strip */}
+      <SymbolStrip
+        perSymbol={snapshot?.perSymbol ?? []}
+        ranAt={snapshot?.ranAt ?? null}
+      />
 
       {/* Pending signal banner */}
       {activeSignal && (
