@@ -12,11 +12,12 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 
-import { AlertTriangle, Compass, Plug, Wallet } from "lucide-react";
+import { AlertTriangle, Compass, Plug, Wallet, Zap } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
 import { BrokerConnectionCard } from "@/components/trader/BrokerConnectionCard";
+import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { supabase } from "@/integrations/supabase/client";
 
 import { toast } from "sonner";
@@ -27,7 +28,25 @@ export default function Settings() {
   const [killOpen, setKillOpen] = useState(false);
   const [ackOpen, setAckOpen] = useState(false);
   const [armConfirmOpen, setArmConfirmOpen] = useState(false);
+  const [capUsd, setCapUsd] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  // Lazily initialise capUsd from the live account data on first render.
+  // We keep it as a local string so the input stays editable before save.
+  const displayCap = capUsd ?? String(account?.dailyAutoExecuteCapUsd ?? 50);
+  const capDirty = account != null && Number(displayCap) !== account.dailyAutoExecuteCapUsd;
+
+  const saveCap = async () => {
+    const v = Number(displayCap);
+    if (!Number.isFinite(v) || v < 0) { toast.error("Enter a valid amount ≥ $0."); return; }
+    try {
+      await updateAccount({ dailyAutoExecuteCapUsd: v });
+      setCapUsd(null); // reset local state — hook now holds the truth
+      toast.success(`Daily auto-execute cap set to $${v.toFixed(2)}.`);
+    } catch {
+      toast.error("Couldn't save cap.");
+    }
+  };
 
   const replayTour = () => {
     localStorage.removeItem(WELCOME_KEY);
@@ -87,6 +106,43 @@ export default function Settings() {
 
       {system && (
         <Section title="Bot controls">
+          {/* Autonomy level — who approves trades */}
+          <div className="mb-4">
+            <AutonomyToggle />
+          </div>
+
+          {/* Daily auto-execute cap */}
+          {account && (
+            <div className="mb-4 rounded-md border border-border/60 bg-muted/20 p-3 space-y-2.5">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Zap className="h-3.5 w-3.5 text-primary" />
+                Daily auto-execute cap
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Hard ceiling on how much USD the engine can auto-execute in a single UTC day.
+                Resets at midnight UTC. Set to <span className="font-medium text-foreground">$0</span> to pause
+                auto-execution without changing your autonomy level.
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">$</span>
+                <NumberStepper
+                  value={displayCap}
+                  onChange={setCapUsd}
+                  step={5}
+                  shiftMultiplier={10}
+                  precision={2}
+                />
+                <Button size="sm" disabled={!capDirty} onClick={saveCap}>
+                  Save
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground italic">
+                Current: <span className="tabular text-foreground">${account.dailyAutoExecuteCapUsd.toFixed(2)}</span>
+                {" "}· engine default was $2 (bumped to $50 by migration).
+              </p>
+            </div>
+          )}
+
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
