@@ -139,13 +139,23 @@ Strategy performance and Katrina (Taylor) recommendations:
 - Taylor is the desk's strategy analyst (runs as the 'katrina' function). If 'katrinaLatestReview'
   is in context and the operator asks about strategy/experiment performance, lead with
   Taylor's latest brief — cite the date and trend. Don't reinvent the analysis; reference it.
-  If she flagged promotions or kills, mention the counts.
-- PROACTIVE ACTION: If katrinaLatestReview.needs_action === true, surface this at the START
-  of your FIRST response in the conversation (before answering whatever the user asked):
-  Example: "Taylor flagged 2 experiments to promote and 1 to kill — needs your decision.
-  Check the Learnings tab or say 'show Taylor's review' and I'll pull it up. Anyway —"
-  Keep it to one sentence. Don't repeat it in subsequent turns unless asked.
-  After the operator reviews/acts, the needs_action flag clears automatically.
+- COUNTS — read carefully, do NOT conflate them:
+  * promote_count / kill_count: Taylor's raw recommendations from the last review.
+    These are advisory and may include experiments the system has ALREADY closed.
+  * actionable_kill_count: kill recommendations that intersect with currently OPEN
+    experiments. THIS is what the operator can still act on.
+  * live_needs_review_count: experiments whose needs_review flag is true. THIS is the
+    only count that genuinely "needs your decision".
+- PROACTIVE ACTION RULES (apply in order, surface AT MOST ONE at the start of your
+  FIRST response in the conversation, then drop it):
+  1. If live_needs_review_count > 0: "X experiment(s) flagged for your call in
+     Learnings — say 'show pending experiments' to triage. Anyway —"
+  2. Else if promote_count > 0 OR actionable_kill_count > 0: "Taylor recommends P
+     promote / K close in her latest brief — advisory, not blocking. Anyway —"
+  3. Else: say nothing about Taylor unless asked.
+- NEVER say "needs your decision" for kill_count alone — that number includes
+  already-rejected experiments and is not actionable.
+- After the operator reviews/acts, the relevant counts drop and the banner clears.
 
 ${eventModeInstruction ? `Event mode instruction:
 ${eventModeInstruction}
@@ -296,6 +306,8 @@ Deno.serve(async (req: Request) => {
     // Server-authoritative Katrina context so Wags can reference latest review
     // even when the client omits or stales this section.
     let latestReview: Record<string, unknown> | null = null;
+    let actionableKillCount = 0;
+    let liveNeedsReviewCount = 0;
     try {
       const { data } = await supabase
         .from("strategy_reviews")
@@ -305,6 +317,29 @@ Deno.serve(async (req: Request) => {
         .limit(1)
         .maybeSingle();
       latestReview = (data as Record<string, unknown> | null) ?? null;
+
+      // Cross-check Katrina's kill_ids against currently-OPEN experiments.
+      // Anything already accepted/rejected is closed business — surfacing it
+      // as "needs your decision" is misleading. Audit 2026-05-03.
+      const killIds = Array.isArray(latestReview?.kill_ids)
+        ? (latestReview!.kill_ids as unknown[]).filter((x): x is string => typeof x === "string")
+        : [];
+      if (killIds.length > 0) {
+        const { data: openKill } = await supabase
+          .from("experiments")
+          .select("id")
+          .eq("user_id", userId)
+          .in("status", ["queued", "running", "needs_review"])
+          .in("id", killIds);
+        actionableKillCount = openKill?.length ?? 0;
+      }
+
+      const { count: nrCount } = await supabase
+        .from("experiments")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("needs_review", true);
+      liveNeedsReviewCount = nrCount ?? 0;
     } catch (e) {
       console.error("[copilot-chat] strategy_reviews load failed", e);
     }
@@ -392,6 +427,14 @@ Deno.serve(async (req: Request) => {
             kill_count: Array.isArray(latestReview.kill_ids)
               ? latestReview.kill_ids.length
               : 0,
+            // Of the kill_ids, how many are still OPEN experiments (queued/
+            // running/needs_review). The rest are already closed and not
+            // operator-actionable.
+            actionable_kill_count: actionableKillCount,
+            // Distinct count: experiments with needs_review=true the operator
+            // must actually decide on. The ONLY signal that warrants
+            // "needs your decision" framing.
+            live_needs_review_count: liveNeedsReviewCount,
             needs_action: latestReview.needs_action === true,
           }
         : ((safeContext as Record<string, unknown> | undefined)?.katrinaLatestReview ?? null),
