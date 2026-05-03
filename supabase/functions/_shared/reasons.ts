@@ -82,6 +82,11 @@ export const GATE_CODES = {
 
   // Phase 1 — execution quality / cost-aware edge
   EDGE_BELOW_COSTS: "EDGE_BELOW_COSTS",
+
+  // Phase 2 — multi-strategy router
+  NO_STRATEGY_FOR_REGIME: "NO_STRATEGY_FOR_REGIME",
+  STRATEGY_AUTO_PAUSED: "STRATEGY_AUTO_PAUSED",
+  SHORT_NO_SPOT_TO_SELL: "SHORT_NO_SPOT_TO_SELL",
 } as const;
 
 export type GateCode = (typeof GATE_CODES)[keyof typeof GATE_CODES];

@@ -35,9 +35,15 @@ import {
 } from "../_shared/market.ts";
 import {
   computeRegime,
-  TRADEABLE_REGIMES,
+  TRADEABLE_REGIMES as STATIC_TRADEABLE_REGIMES,
   type RegimeResult,
 } from "../_shared/regime.ts";
+import {
+  selectStrategy,
+  tradeableRegimesFor,
+  type RouterPerformance,
+  type RouterStrategy,
+} from "../_shared/strategy-router.ts";
 import {
   anyRefusal,
   evaluateRiskGates,
@@ -1138,46 +1144,89 @@ async function runTickForUser(
     }
   }
 
-  // Persisted approved strategy (if any) so signals & trades carry identity.
-  // CRITICAL: we now load `params` too so the live engine actually uses
-  // ema_fast / ema_slow / rsi_period / stop_atr_mult / tp_r_mult from the
-  // approved strategy. Previously the engine only loaded id/version, which
-  // meant the entire learning loop was tuning a backtest model that had
-  // zero effect on real trades.
-  const { data: approvedStrategy } = await admin
+  // Phase 2: load ALL approved (non-auto-paused) strategies for the regime
+  // router. The router picks per-symbol after we know the regime + side.
+  // We keep `approvedStrategy` as the highest-priority default for regime
+  // computation (EMA/RSI knobs are uniform across our seeded strategies,
+  // so this matters mainly when only one strategy is approved).
+  const { data: allApprovedStrategies } = await admin
     .from("strategies")
-    .select("id,version,params,risk_weight")
+    .select("id,name,version,status,params,risk_weight,regime_affinity,side_capability,auto_paused_at")
     .eq("user_id", userId)
     .eq("status", "approved")
-    .order("updated_at", { ascending: false })
-    .maybeSingle();
-  const strategyId: string | null = approvedStrategy?.id ?? null;
-  const strategyVersion: string =
+    .is("auto_paused_at", null)
+    .order("updated_at", { ascending: false });
+  const routerStrategies: RouterStrategy[] = (allApprovedStrategies ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    version: s.version,
+    status: s.status,
+    risk_weight: Number(s.risk_weight ?? 1.0),
+    regime_affinity: Array.isArray(s.regime_affinity) ? s.regime_affinity : [],
+    side_capability: Array.isArray(s.side_capability) ? s.side_capability : ["long"],
+    auto_paused_at: s.auto_paused_at ?? null,
+    params: Array.isArray(s.params) ? s.params as Array<{ key: string; value: number | string | boolean }> : [],
+  }));
+  const approvedStrategy = routerStrategies[0] ?? null;
+  // Pull rolling perf for tie-breaking (best-effort).
+  const { data: perfRows } = await admin
+    .from("strategy_performance_v")
+    .select("strategy_id,closed_trades,wins,losses,total_pnl,avg_pnl_pct,win_rate")
+    .eq("user_id", userId);
+  const routerPerformance: RouterPerformance[] = (perfRows ?? []).map((p) => ({
+    strategy_id: p.strategy_id,
+    closed_trades: Number(p.closed_trades ?? 0),
+    wins: Number(p.wins ?? 0),
+    losses: Number(p.losses ?? 0),
+    total_pnl: Number(p.total_pnl ?? 0),
+    avg_pnl_pct: Number(p.avg_pnl_pct ?? 0),
+    win_rate: Number(p.win_rate ?? 0),
+  }));
+  // Tradeable regimes = union across all approved strategies. If we have
+  // any approved strategies, that union supersedes the static set so range
+  // becomes tradeable when range-fade is approved, etc. Fallback to the
+  // static set if no strategies are approved (defensive — keeps engine alive).
+  const dynamicTradeable = tradeableRegimesFor(routerStrategies);
+  const TRADEABLE_REGIMES = dynamicTradeable.size > 0
+    ? dynamicTradeable
+    : STATIC_TRADEABLE_REGIMES;
+
+  // These start as the *default* (top approved). After the router picks
+  // a per-signal strategy below (once we know symbol+side), we override.
+  let strategyId: string | null = approvedStrategy?.id ?? null;
+  let strategyVersion: string =
     approvedStrategy?.version ?? "signal-engine v2 (ladder)";
   // Phase 1 (Kelly-lite): per-strategy risk weight scales the doctrine
   // RISK_PER_TRADE_PCT. Bounded [0.25, 2.0] so a misconfigured weight
   // can't blow past doctrine; the clamp/floor still has the final word.
-  const strategyRiskWeight: number = Math.max(
+  let strategyRiskWeight: number = Math.max(
     0.25,
     Math.min(2.0, Number(approvedStrategy?.risk_weight ?? 1.0)),
   );
 
   // Pull the live-tunable knobs out of the strategy params.
   type StratParam = { key: string; value: number | string | boolean };
-  const stratParams: StratParam[] = Array.isArray(approvedStrategy?.params)
-    ? (approvedStrategy!.params as StratParam[])
-    : [];
-  const paramNum = (key: string, fallback: number): number => {
-    const p = stratParams.find((p) => p.key === key);
+  const paramNumOf = (
+    params: StratParam[] | undefined,
+    key: string,
+    fallback: number,
+  ): number => {
+    const p = (params ?? []).find((p) => p.key === key);
     if (!p) return fallback;
     const n = typeof p.value === "number" ? p.value : Number(p.value);
     return Number.isFinite(n) ? n : fallback;
   };
-  const stratEmaFast = paramNum("ema_fast", 9);
-  const stratEmaSlow = paramNum("ema_slow", 21);
-  const stratRsiPeriod = paramNum("rsi_period", 14);
-  const stratStopAtrMult = paramNum("stop_atr_mult", 1.5);
-  const stratTpRMult = paramNum("tp_r_mult", 2);
+  const stratParams: StratParam[] = Array.isArray(approvedStrategy?.params)
+    ? (approvedStrategy!.params as StratParam[])
+    : [];
+  // Defaults from the top approved strategy. Used for regime computation
+  // (which runs per-symbol BEFORE we know which strategy will be picked).
+  const stratEmaFast = paramNumOf(stratParams, "ema_fast", 9);
+  const stratEmaSlow = paramNumOf(stratParams, "ema_slow", 21);
+  const stratRsiPeriod = paramNumOf(stratParams, "rsi_period", 14);
+  // These two are RE-DERIVED after router pick; initial value is just default.
+  let stratStopAtrMult = paramNumOf(stratParams, "stop_atr_mult", 1.5);
+  let stratTpRMult = paramNumOf(stratParams, "tp_r_mult", 2);
   const liveParams = {
     emaFast: stratEmaFast,
     emaSlow: stratEmaSlow,
@@ -1917,6 +1966,83 @@ async function runTickForUser(
     };
   }
 
+  // ── Phase 2: Regime router — pick the strategy that fits this signal ──
+  // Now that we know symbol + regime + side, choose the best-fit strategy
+  // from the approved portfolio. If no strategy supports this combination
+  // we drop the signal (e.g. short signal but no strategy with short
+  // capability for this regime).
+  const routerDecision = selectStrategy(
+    winner.regime.regime,
+    side,
+    routerStrategies,
+    routerPerformance,
+  );
+
+  if (decision.decision === "propose_trade" && !routerDecision.strategy) {
+    const noStratGate = gate(
+      GATE_CODES.NO_STRATEGY_FOR_REGIME,
+      "skip",
+      `${winner.symbol}: no approved strategy supports regime=${winner.regime.regime} side=${side}.`,
+      {
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        side,
+        candidates: routerDecision.candidates,
+      },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [noStratGate],
+      perSymbol,
+      chosenSymbol: winner.symbol,
+    });
+    await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "skip",
+      title: `No strategy for ${winner.symbol} ${side.toUpperCase()} in ${winner.regime.regime}`,
+      summary: `Engine had a signal but no approved strategy declares affinity for regime=${winner.regime.regime} with side=${side}. Add or unpause a matching strategy.`,
+      tags: [winner.symbol, "no-strategy", winner.regime.regime, side],
+    });
+    return {
+      userId,
+      tick: "no_strategy_for_regime",
+      symbol: winner.symbol,
+      gateReasons: [noStratGate],
+      expiredCount,
+      perSymbol,
+    };
+  }
+
+  // Override defaults with the router-picked strategy for this signal.
+  if (routerDecision.strategy) {
+    const picked = routerDecision.strategy;
+    strategyId = picked.id;
+    strategyVersion = picked.version;
+    strategyRiskWeight = Math.max(
+      0.25,
+      Math.min(2.0, Number(picked.risk_weight ?? 1.0)),
+    );
+    stratStopAtrMult = paramNumOf(picked.params, "stop_atr_mult", stratStopAtrMult);
+    stratTpRMult = paramNumOf(picked.params, "tp_r_mult", stratTpRMult);
+    log("info", "router_picked_strategy", {
+      fn: "signal-engine",
+      userId,
+      symbol: winner.symbol,
+      regime: winner.regime.regime,
+      side,
+      strategyId: picked.id,
+      strategyName: picked.name,
+      strategyVersion: picked.version,
+      reason: routerDecision.reason,
+      candidateCount: routerDecision.candidates.length,
+    });
+  }
+
+  // Phase 2: Synthetic short audit flag. Real spot shorting isn't possible
+  // on Coinbase; in paper mode we simulate as if it were. Mark the trade
+  // so we can audit later. Live mode would need a separate enforcement
+  // path — currently every short in paper is "synthetic".
+  const isSyntheticShort = side === "short";
+
   const entry = Number(decision.proposed_entry ?? winner.lastPrice);
 
   // ── Coach: penalize confidence if recent (symbol, side) has bled ──
@@ -2232,6 +2358,17 @@ async function runTickForUser(
         riskManagerVerdict: riskVerdict ?? null,
         coachVerdict: coachVerdict ?? null,
         rawConfidence: rawConf,
+        // Phase 2 router transparency
+        routerDecision: {
+          regime: winner.regime.regime,
+          side,
+          chosenStrategyId: routerDecision.strategy?.id ?? null,
+          chosenStrategyName: routerDecision.strategy?.name ?? null,
+          chosenStrategyVersion: routerDecision.strategy?.version ?? null,
+          reason: routerDecision.reason,
+          candidates: routerDecision.candidates,
+        },
+        syntheticShort: isSyntheticShort,
         activeNewsFlags: summarizeNewsFlags(intel?.news_flags).active,
         // Brain Trust snapshot at signal-creation time — used by post-trade-learn
         // to evaluate the trade in the context that was CURRENT when the signal
@@ -2379,10 +2516,11 @@ async function runTickForUser(
         strategy_id: strategyId,
         strategy_version: strategyVersion,
         direction_basis: directionBasis,
+        synthetic_short: isSyntheticShort,
         lifecycle_phase: "entered",
         lifecycle_transitions: [tradeEnteredTransition],
         reason_tags: tags,
-        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""} · awaiting broker confirmation`,
+        notes: `${liveEnabled ? "LIVE " : ""}Auto-approved (${autonomy}) @ confidence ${(conf * 100).toFixed(0)}%${winner.regime.pullback ? " · pullback entry" : ""}${isSyntheticShort ? " · SYNTHETIC SHORT (paper)" : ""} · awaiting broker confirmation`,
         broker_order_id: clientOrderId, // pre-set for reconciliation; replaced with fill orderId on success
         status: "broker_pending",
         outcome: "open",

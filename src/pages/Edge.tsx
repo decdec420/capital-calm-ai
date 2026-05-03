@@ -40,9 +40,34 @@ interface StrategyRow {
   last_closed_at: string | null;
 }
 
+interface StrategyMeta {
+  id: string;
+  consecutive_losses: number;
+  auto_paused_at: string | null;
+  auto_pause_reason: string | null;
+}
+
+interface RouterDecisionRow {
+  id: string;
+  symbol: string;
+  side: string;
+  regime: string;
+  created_at: string;
+  context_snapshot: {
+    routerDecision?: {
+      chosenStrategyName: string | null;
+      chosenStrategyVersion: string | null;
+      reason: string;
+      candidates: Array<{ id: string; name: string; version: string; score: number }>;
+    };
+    syntheticShort?: boolean;
+  } | null;
+}
+
 const STATUS_TONE: Record<string, string> = {
   approved: "bg-success/10 text-success border-success/20",
   candidate: "bg-warning/10 text-warning border-warning/20",
+  paused: "bg-destructive/10 text-destructive border-destructive/20",
   archived: "bg-muted text-muted-foreground border-border",
 };
 
@@ -70,28 +95,66 @@ function fmtAgo(iso: string | null): string {
 
 export default function Edge() {
   const [rows, setRows] = useState<StrategyRow[] | null>(null);
+  const [metaById, setMetaById] = useState<Record<string, StrategyMeta>>({});
+  const [recentRouter, setRecentRouter] = useState<RouterDecisionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = async () => {
+    const [perfRes, metaRes, sigRes] = await Promise.all([
+      supabase
+        .from("strategy_performance_v" as never)
+        .select("*")
+        .order("status", { ascending: true })
+        .order("total_pnl", { ascending: false }),
+      supabase
+        .from("strategies")
+        .select("id, consecutive_losses, auto_paused_at, auto_pause_reason"),
+      supabase
+        .from("trade_signals")
+        .select("id, symbol, side, regime, created_at, context_snapshot")
+        .order("created_at", { ascending: false })
+        .limit(10),
+    ]);
+    if (perfRes.error) {
+      setError(perfRes.error.message);
+      setRows([]);
+      return;
+    }
+    setRows((perfRes.data ?? []) as unknown as StrategyRow[]);
+    const metaMap: Record<string, StrategyMeta> = {};
+    for (const m of (metaRes.data ?? []) as StrategyMeta[]) {
+      metaMap[m.id] = m;
+    }
+    setMetaById(metaMap);
+    setRecentRouter((sigRes.data ?? []) as unknown as RouterDecisionRow[]);
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("strategy_performance_v" as never)
-        .select("*")
-        .order("status", { ascending: true })
-        .order("total_pnl", { ascending: false });
-      if (cancelled) return;
-      if (error) {
-        setError(error.message);
-        setRows([]);
-        return;
-      }
-      setRows((data ?? []) as unknown as StrategyRow[]);
+      await load();
     })();
     return () => {
       cancelled = true;
+      void cancelled;
     };
   }, []);
+
+  const rearmStrategy = async (strategyId: string) => {
+    setBusyId(strategyId);
+    const { error: updErr } = await supabase
+      .from("strategies")
+      .update({
+        status: "approved",
+        consecutive_losses: 0,
+        auto_paused_at: null,
+        auto_pause_reason: null,
+      })
+      .eq("id", strategyId);
+    setBusyId(null);
+    if (!updErr) await load();
+  };
 
   // Portfolio rollup
   const approved = (rows ?? []).filter((r) => r.status === "approved");
@@ -102,9 +165,9 @@ export default function Edge() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="Phase 1"
+        eyebrow="Phase 2"
         title="Edge"
-        description="Per-strategy performance, regime affinity, and risk budget. The portfolio that actually generates the money."
+        description="Per-strategy performance, regime router decisions, and circuit-breaker status. The portfolio that actually generates the money."
       />
 
       {/* Portfolio summary strip */}
@@ -195,7 +258,7 @@ export default function Edge() {
                   <tr key={r.strategy_id} className="hover:bg-muted/20">
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium">{r.strategy_name}</span>
                           <Badge
                             variant="outline"
@@ -206,9 +269,29 @@ export default function Edge() {
                           >
                             {r.status}
                           </Badge>
+                          {metaById[r.strategy_id]?.auto_paused_at && (
+                            <button
+                              type="button"
+                              disabled={busyId === r.strategy_id}
+                              onClick={() => rearmStrategy(r.strategy_id)}
+                              className="text-[10px] font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                            >
+                              {busyId === r.strategy_id ? "re-arming…" : "re-arm"}
+                            </button>
+                          )}
                         </div>
                         <span className="text-xs text-muted-foreground">
                           {r.strategy_version}
+                          {(metaById[r.strategy_id]?.consecutive_losses ?? 0) > 0 && (
+                            <span className="ml-2 text-warning">
+                              · {metaById[r.strategy_id].consecutive_losses} loss streak
+                            </span>
+                          )}
+                          {metaById[r.strategy_id]?.auto_pause_reason && (
+                            <span className="ml-2 text-destructive">
+                              · {metaById[r.strategy_id].auto_pause_reason}
+                            </span>
+                          )}
                         </span>
                       </div>
                     </td>
@@ -289,25 +372,67 @@ export default function Edge() {
         </div>
       )}
 
-      {/* What's coming next */}
-      <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-sm">
-        <div className="font-medium">Coming in Phase 2</div>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-          <li>
-            Two more strategies — <code>range-fade v1</code> and{" "}
-            <code>breakout-confirm v1</code> — so the engine has an edge in every
-            regime, not just trends.
-          </li>
-          <li>
-            Regime router that picks the right strategy per symbol per tick.
-          </li>
-          <li>
-            Per-strategy equity curve and rolling 30-trade Sharpe sparkline.
-          </li>
-        </ul>
+      {/* Recent router decisions — Phase 2 transparency */}
+      <div className="rounded-lg border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <div className="text-sm font-medium">Recent router decisions</div>
+          <div className="text-xs text-muted-foreground">
+            Last 10 signals · which strategy fired and why
+          </div>
+        </div>
+        {recentRouter.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-muted-foreground">
+            No signals yet. The router will log its picks here as they fire.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border text-sm">
+            {recentRouter.map((s) => {
+              const rd = s.context_snapshot?.routerDecision;
+              const synth = s.context_snapshot?.syntheticShort;
+              return (
+                <li key={s.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{s.symbol}</span>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px] uppercase",
+                          s.side === "long" && "text-success border-success/30",
+                          s.side === "short" && "text-destructive border-destructive/30",
+                        )}
+                      >
+                        {s.side}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {s.regime}
+                      </Badge>
+                      {synth && (
+                        <Badge variant="outline" className="text-[10px] text-warning border-warning/30">
+                          synthetic short
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      {rd?.chosenStrategyName
+                        ? `→ ${rd.chosenStrategyName} v${rd.chosenStrategyVersion}: ${rd.reason}`
+                        : "no router decision recorded"}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {fmtAgo(s.created_at)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end">
         <Link
           to="/strategy"
-          className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           Open Strategy Lab
           <ArrowUpRight className="h-3 w-3" />

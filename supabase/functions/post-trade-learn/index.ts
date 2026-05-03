@@ -731,6 +731,61 @@ if (req.method === "OPTIONS") {
       } catch (e) {
         log("error", "metric_refresh_failed", { fn: "post-trade-learn", strategyId: t.strategy_id, err: String(e) });
       }
+
+      // Phase 2: per-strategy consecutive-loss circuit breaker.
+      // Increment on loss, reset on win. At 4 consecutive losses, auto-pause
+      // the strategy and post a critical alert. Operator can re-arm from /edge.
+      try {
+        const { data: stratRow } = await admin
+          .from("strategies")
+          .select("id, name, version, status, consecutive_losses, auto_paused_at")
+          .eq("id", t.strategy_id)
+          .maybeSingle();
+        if (stratRow && stratRow.status === "approved" && !stratRow.auto_paused_at) {
+          if (outcome === "loss") {
+            const newCount = Number(stratRow.consecutive_losses ?? 0) + 1;
+            const PAUSE_THRESHOLD = 4;
+            if (newCount >= PAUSE_THRESHOLD) {
+              const reason = `Auto-paused after ${PAUSE_THRESHOLD} consecutive losses`;
+              await admin
+                .from("strategies")
+                .update({
+                  consecutive_losses: newCount,
+                  status: "paused",
+                  auto_paused_at: new Date().toISOString(),
+                  auto_pause_reason: reason,
+                })
+                .eq("id", t.strategy_id);
+              await admin.from("alerts").insert({
+                user_id: t.user_id,
+                severity: "critical",
+                title: `Strategy auto-paused: ${stratRow.name} v${stratRow.version}`,
+                message: `${reason}. The regime router will skip this strategy until you re-arm it from /edge.`,
+              });
+              log("warn", "strategy_auto_paused", {
+                fn: "post-trade-learn",
+                strategyId: t.strategy_id,
+                consecutiveLosses: newCount,
+              });
+            } else {
+              await admin
+                .from("strategies")
+                .update({ consecutive_losses: newCount })
+                .eq("id", t.strategy_id);
+            }
+          } else if (outcome === "win") {
+            // Reset on win.
+            if (Number(stratRow.consecutive_losses ?? 0) > 0) {
+              await admin
+                .from("strategies")
+                .update({ consecutive_losses: 0 })
+                .eq("id", t.strategy_id);
+            }
+          }
+        }
+      } catch (e) {
+        log("error", "circuit_breaker_failed", { fn: "post-trade-learn", strategyId: t.strategy_id, err: String(e) });
+      }
     }
 
     // Trade Coach — additive AI-powered post-trade lesson + experiment hypothesis.
