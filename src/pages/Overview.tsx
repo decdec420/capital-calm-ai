@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { MetricCard } from "@/components/trader/MetricCard";
 import { StatusBadge } from "@/components/trader/StatusBadge";
@@ -21,7 +21,6 @@ import {
   Pause,
   Play,
   ShieldAlert,
-  Sparkles,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
@@ -83,8 +82,7 @@ export default function Overview() {
     : { regime: localRegime.regime, confidence: localRegime.confidence, setupScore: localRegime.setupScore };
   const lastGateReasons = snapshot?.gateReasons ?? [];
   const lastPrice = btcSnap?.lastPrice ?? candles[candles.length - 1]?.c ?? 0;
-  const firstPrice = candles[0]?.c ?? lastPrice;
-  const pctChange = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
+  // (Per-symbol prices are now rendered by SymbolStrip from the snapshot.)
 
   const openPosition = open[0];
   const closedToday = closed.filter((t) => t.closedAt && new Date(t.closedAt).toDateString() === new Date().toDateString());
@@ -93,7 +91,7 @@ export default function Overview() {
   const lossToday = Math.min(0, realizedToday);
 
 
-  const lastCandleTime = candles[candles.length - 1]?.t != null ? candles[candles.length - 1].t * 1000 : null;
+  
 
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
