@@ -281,6 +281,9 @@ async function runMarkToMarket(
       const closedQty = action.closedQty;
       let fillPx = action.fillPrice; // may be updated by broker fill in live mode
       let tp1BrokerOrderId: string | null = null;
+      let tp1FeesUsd = 0;
+      // deno-lint-ignore no-explicit-any
+      let tp1Fill: any = null;
 
       // LIVE MODE: sell the TP1 half via broker before updating DB.
       // Optimistic lock (status='closing') prevents a concurrent cron run from
@@ -298,17 +301,22 @@ async function runMarkToMarket(
           continue;
         }
         try {
+          // Phase 5: deterministic clientOrderId per (trade, leg) means a
+          // retried mark-to-market run cannot double-sell TP1.
+          const tp1ClientOrderId = `${t.id}-tp1`;
           const fill = await placeMarketSell(
             brokerCreds,
             t.symbol,
             closedQty.toFixed(8),
-            crypto.randomUUID(),
+            tp1ClientOrderId,
           );
           fillPx = fill.fillPrice;
           tp1BrokerOrderId = fill.orderId;
+          tp1FeesUsd = Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0;
+          tp1Fill = fill;
           console.log(
             `[MTM] LIVE TP1 SELL filled ${t.symbol} qty=${closedQty} @ $${fillPx} ` +
-              `orderId=${tp1BrokerOrderId}`,
+              `orderId=${tp1BrokerOrderId} fees=$${tp1FeesUsd.toFixed(4)}`,
           );
         } catch (brokerErr) {
           // Revert lock — leave trade open so the next tick can retry.
@@ -318,6 +326,17 @@ async function runMarkToMarket(
           perUserChanges.set(t.user_id, bucket);
           continue;
         }
+      }
+
+      if (tp1Fill) {
+        await recordFill(admin, {
+          userId: t.user_id,
+          tradeId: t.id,
+          symbol: t.symbol,
+          fillKind: "tp1",
+          proposedPrice: Number(t.tp1_price ?? action.fillPrice),
+          fill: tp1Fill,
+        });
       }
 
       const realizedHalf =
