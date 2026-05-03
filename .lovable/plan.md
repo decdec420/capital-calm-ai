@@ -29,11 +29,11 @@ True bootstrap requires resampling N×B times (B≈1000 reps). Implementable in 
 
 If we ever want true bootstrap (e.g., for non-normal PnL distributions), it goes in a periodic edge function that materializes results into a table — not in a view.
 
-### What's deferred to later Phase 3 sub-tasks
+### What just shipped (Phase 3 sub-tasks)
 
-- **Walk-forward replay function**: `replay-strategy` edge function to re-run engine logic against historical candles for arbitrary date ranges. Largest blast-radius defense against overfitting. Not blocking — strategies are still on real paper data.
-- **Copilot CI verdicts**: gate doctrine proposals on `evidence_status='sufficient'` or `developing` and surface the CI in proposal text. Will land when next-doctrine-proposal flow runs.
-- **Auto-promotion gate using CI**: `evaluate-candidate` should refuse to promote a strategy unless its `edge_verdict='positive_edge'`. Deferred to next pass.
+- **CI gate in `evaluate-candidate`**: a candidate may pass the point-estimate margins (expectancy / win-rate / DD / Sharpe) and STILL be held back if its `edge_verdict` from `strategy_performance_ci_v` isn't `positive_edge` (paper) or `positive_edge` + `evidence_status='sufficient'` (live). The promotion alert now includes the lower-bound expectancy so the operator sees the honest number, not the headline.
+- **CI context in `propose-experiment`**: the copilot now sees the baseline strategy's `edge_verdict`, evidence count, and 95% CIs before proposing a knob change. New `statisticalGuidance` field instructs it to be conservative when the baseline has a proven edge, aggressive when it has a proven negative edge, and exploratory when unproven.
+- **`replay-strategy` edge function**: walk-forward replay over realized closed trades. Splits the trade stream into N folds (default 5), computes in-sample vs out-of-sample stats per split, and returns a rolling-window edge curve. Outputs a `stability_score` (fraction of folds where OOS expectancy stays within 1 SE of in-sample) and a verdict: `stable_edge` / `moderate_drift` / `unstable_or_overfit`. Surfaced as a "Replay" button per row on `/edge` (disabled until 30+ closed trades exist).
 
 ### Roadmap reminder
 
