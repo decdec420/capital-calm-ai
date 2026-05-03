@@ -18,6 +18,7 @@ import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
 import { BrokerConnectionCard } from "@/components/trader/BrokerConnectionCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
+import { ProfilePicker } from "@/components/trader/ProfilePicker";
 import { supabase } from "@/integrations/supabase/client";
 
 import { toast } from "sonner";
@@ -106,6 +107,11 @@ export default function Settings() {
 
       {system && (
         <Section title="Bot controls">
+            {/* Trading profile — order size, daily trade cap, scan cadence */}
+          <div className="mb-4">
+            <ProfilePicker />
+          </div>
+
           {/* Autonomy level — who approves trades */}
           <div className="mb-4">
             <AutonomyToggle />

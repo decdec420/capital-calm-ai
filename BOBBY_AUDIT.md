@@ -3,6 +3,39 @@
 
 ---
 
+## Implementation Status · May 3, 2026
+
+All Act I–III items completed. System is live and unblocked.
+
+**Confirmed live in Supabase:**
+- `active_profile = active` — 5× order size, 3× daily trades vs. Sentinel
+- `autonomy_level = autonomous` — no manual approval needed
+- `daily_auto_execute_cap_usd = $50` — previously $2 (column was never created; applied manually)
+- Cron jobs 16, 17, 18 — hardcoded tokens replaced with `get_signal_engine_cron_token()`
+- Cron job 22 (position-reconcile) — placeholder URL fixed, now running as job 23
+- Cron job 15 (daily-brief) — hardcoded token fixed, `fanout: true` added to body (migration `20260503100000`)
+
+**Deployed code changes (pushed to repo):**
+- signal-engine: "skips are success" prompt removed; posture rebalanced
+- signal-engine: environment neutral no longer escalates confidence threshold
+- signal-engine: Bobby fail-safe returns `skip_tick` instead of `veto` on AI error
+- signal-engine: anti-tilt defaults loosened (consecutive_loss 4→6, cooldown 30→15 min)
+- regime.ts: advisory threshold aligned to 0.55 (matches signal-engine gate)
+- Settings.tsx: ProfilePicker, AutonomyToggle, and daily cap control all in one place
+
+**Current engine status (observed May 3):**
+- Ticking every 2 minutes, writing to `journal_entries` ✓
+- Skipping legitimately: BTC RSI 76 overbought, range-bound $78,234–$79,523
+- Last auto-executed trades: April 22 (BTC, ETH, SOL at conf 80–85%, setup 0.87–0.94)
+- Pipeline functional end-to-end — waiting for a clean setup
+
+**Remaining (Act IV):**
+- IV-A: Range regime / mean-reversion playbook — not started
+- IV-B: Limit order execution — not started
+- IV-C: ✅ Done (ProfilePicker on Settings + RiskCenter, DoctrineEditSheet has all anti-tilt params)
+
+---
+
 ## The Short Answer
 
 Bobby is not broken. He is doing exactly what he was built to do — and that is the problem.
@@ -363,20 +396,20 @@ Currently, `autonomy_level`, `daily_auto_execute_cap_usd`, `consecutive_loss_lim
 
 ## Priority Summary
 
-| # | Change | Type | Impact | Risk | Effort |
+| # | Change | Type | Impact | Risk | Status |
 |---|---|---|---|---|---|
-| I-A | Switch to `active` or `aggressive` profile | Config | ★★★★★ | Low | Minutes |
-| I-B | Set `autonomy_level = autonomous` | Config | ★★★★★ | Low | Minutes |
-| I-C | Raise `daily_auto_execute_cap_usd` to $50+ | Config | ★★★★☆ | Low | Minutes |
-| II-A | Remove "skips are success" prompt language | Prompt | ★★★★☆ | Low | 30 min |
-| II-B | Fix environment neutral threshold escalation | Prompt | ★★★☆☆ | Low | 30 min |
-| II-C | Bobby fail-safe: veto → skip_tick | Code | ★★★☆☆ | Low | 1 hour |
-| III-A | Align regime.ts advisory to 0.55 | Code | ★★★☆☆ | Low | 30 min |
-| III-B | Anti-tilt limit: 4 → 6 | Code | ★★☆☆☆ | Medium | 30 min |
-| III-C | Cooldown: 30 min → 15 min | Code | ★★☆☆☆ | Low | 30 min |
-| IV-A | Range regime / mean-reversion playbook | Feature | ★★★★☆ | Medium | 1–2 weeks |
-| IV-B | Limit order execution | Feature | ★★★★☆ | High | 2–3 weeks |
-| IV-C | UI settings panel for execution params | Feature | ★★★☆☆ | Low | 1 week |
+| I-A | Switch to `active` or `aggressive` profile | Config | ★★★★★ | Low | ✅ Done |
+| I-B | Set `autonomy_level = autonomous` | Config | ★★★★★ | Low | ✅ Done |
+| I-C | Raise `daily_auto_execute_cap_usd` to $50+ | Config | ★★★★☆ | Low | ✅ Done |
+| II-A | Remove "skips are success" prompt language | Prompt | ★★★★☆ | Low | ✅ Done |
+| II-B | Fix environment neutral threshold escalation | Prompt | ★★★☆☆ | Low | ✅ Done |
+| II-C | Bobby fail-safe: veto → skip_tick | Code | ★★★☆☆ | Low | ✅ Done |
+| III-A | Align regime.ts advisory to 0.55 | Code | ★★★☆☆ | Low | ✅ Done |
+| III-B | Anti-tilt limit: 4 → 6 | Code | ★★☆☆☆ | Medium | ✅ Done |
+| III-C | Cooldown: 30 min → 15 min | Code | ★★☆☆☆ | Low | ✅ Done |
+| IV-A | Range regime / mean-reversion playbook | Feature | ★★★★☆ | Medium | ⏳ Backlog |
+| IV-B | Limit order execution | Feature | ★★★★☆ | High | ⏳ Backlog |
+| IV-C | UI settings panel for execution params | Feature | ★★★☆☆ | Low | ✅ Done |
 
 ---
 
