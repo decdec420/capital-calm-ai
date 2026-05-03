@@ -44,6 +44,7 @@ import {
   placeMarketSell,
   type BrokerCredentials,
 } from "../_shared/broker.ts";
+import { effectivePnl, recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 validateDoctrineInvariants();
