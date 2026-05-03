@@ -79,6 +79,9 @@ export const GATE_CODES = {
 
   // Live broker execution
   BROKER_ORDER_FAILED: "BROKER_ORDER_FAILED",
+
+  // Phase 1 — execution quality / cost-aware edge
+  EDGE_BELOW_COSTS: "EDGE_BELOW_COSTS",
 } as const;
 
 export type GateCode = (typeof GATE_CODES)[keyof typeof GATE_CODES];
