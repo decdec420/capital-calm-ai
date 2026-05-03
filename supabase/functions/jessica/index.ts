@@ -432,32 +432,51 @@ async function runJessicaForUser(
   }
 
   // ── MED-13: Coinbase API health probe ────────────────────────────────────────
-  // If Coinbase is unreachable, Jessica must not auto-approve signals or fire
-  // engine ticks that would produce un-executable proposals. A lightweight
-  // best_bid_ask probe confirms connectivity before any trading logic runs.
+  // The probe matters most when we're about to send REAL orders. In paper mode
+  // we'd rather keep the engine ticking on cached candles + intelligence than
+  // sit idle every time Coinbase has a 5-second hiccup. So:
+  //   • live_trading_enabled = true  → probe failure HALTS Bobby (current behavior)
+  //   • live_trading_enabled = false → probe failure is a WARNING; we tick anyway
+  // Either way we capture the underlying error (HTTP code + body snippet) in
+  // the heartbeat so the operator can debug without grepping function logs.
+  // (Phase A2 — May 2026.)
+  const liveArmed = !!sys.live_trading_enabled;
+  let coinbaseProbeNote: string | null = null;
   try {
     const coinbaseProbe = await fetch(
       "https://api.coinbase.com/api/v3/brokerage/best_bid_ask?product_ids=BTC-USD",
       { signal: AbortSignal.timeout(4_000) },
     );
     if (!coinbaseProbe.ok) {
-      console.error(`[jessica] Coinbase health probe failed: HTTP ${coinbaseProbe.status}`);
-      try {
-        await admin.rpc("notify_telegram", {
-          p_severity: "high",
-          p_title: "Coinbase API unreachable",
-          p_message: `Jessica health probe returned HTTP ${coinbaseProbe.status}. Engine ticks blocked.`,
-          p_user_id: userId,
-        });
-      } catch { /* telegram is best-effort */ }
-      await writeHeartbeat(true, "coinbase_unreachable", 0, "Coinbase probe failed — sitting.");
-      return { skipped: true, reason: "coinbase_unreachable" };
+      const bodySnippet = (await coinbaseProbe.text().catch(() => "")).slice(0, 200);
+      const detail = `HTTP ${coinbaseProbe.status}${bodySnippet ? ` — ${bodySnippet}` : ""}`;
+      console.error(`[jessica] Coinbase health probe failed: ${detail} (liveArmed=${liveArmed})`);
+      if (liveArmed) {
+        try {
+          await admin.rpc("notify_telegram", {
+            p_severity: "high",
+            p_title: "Coinbase API unreachable",
+            p_message: `Jessica health probe returned ${detail}. Live trading blocked.`,
+            p_user_id: userId,
+          });
+        } catch { /* telegram is best-effort */ }
+        await writeHeartbeat(true, "coinbase_unreachable", 0, `Coinbase probe failed (live armed) — sitting. ${detail}`);
+        return { skipped: true, reason: "coinbase_unreachable" };
+      }
+      // Paper mode: degrade gracefully — keep going.
+      coinbaseProbeNote = `Coinbase probe degraded (${detail}); continuing in paper mode.`;
     }
   } catch (probeErr) {
     const msg = probeErr instanceof Error ? probeErr.message : String(probeErr);
-    console.error("[jessica] Coinbase health probe threw:", msg);
-    await writeHeartbeat(true, "coinbase_probe_error", 0, `Coinbase probe error: ${msg}`);
-    return { skipped: true, reason: "coinbase_probe_error" };
+    console.error(`[jessica] Coinbase health probe threw: ${msg} (liveArmed=${liveArmed})`);
+    if (liveArmed) {
+      await writeHeartbeat(true, "coinbase_probe_error", 0, `Coinbase probe error (live armed): ${msg}`);
+      return { skipped: true, reason: "coinbase_probe_error" };
+    }
+    coinbaseProbeNote = `Coinbase probe threw (${msg}); continuing in paper mode.`;
+  }
+  if (coinbaseProbeNote) {
+    (context as Record<string, unknown>).coinbase_probe_note = coinbaseProbeNote;
   }
 
   // ── Health check pass — inspect each agent and write to agent_health ──
