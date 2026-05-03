@@ -1,5 +1,5 @@
 // Tests for fills.ts — slippage math + effective PnL.
-import { assertEquals, assert } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { assertEquals, assert, assertAlmostEquals } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { computeSlippagePct, effectivePnl } from "./fills.ts";
 
 Deno.test("computeSlippagePct — BUY paying more is positive (bad)", () => {
