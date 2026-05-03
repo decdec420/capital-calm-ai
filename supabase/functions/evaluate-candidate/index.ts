@@ -299,13 +299,19 @@ async function evaluateForUser(
       .update({ last_auto_promoted_at: new Date().toISOString() })
       .eq("user_id", userId);
 
+    const winnerCi = ciByStrategy.get(winner.row.id);
+    const ciNote = winnerCi && typeof winnerCi.avg_pnl_lo === "number"
+      ? ` · 95% CI on expectancy lower-bound = ${Number(winnerCi.avg_pnl_lo).toFixed(2)}R (${winnerCi.evidence_status})`
+      : "";
+
     await createAlert(
       admin,
       userId,
       "info",
       `🚀 Strategy auto-promoted to ${winner.row.version}`,
-      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades. Auto-promotions paused for ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`,
+      `Expectancy ${aExp.toFixed(2)}R → ${cExp.toFixed(2)}R · Win rate ${(aWin * 100).toFixed(0)}% → ${(cWin * 100).toFixed(0)}% · Sharpe ${aSharpe.toFixed(2)} → ${cSharpe.toFixed(2)} after ${winner.trades} paper trades${ciNote}. Auto-promotions paused for ${cooldownDays} day${cooldownDays === 1 ? "" : "s"}.`,
     );
+
 
     // Mark the winner's "ready" entry as "promoted"; remaining "ready"
     // entries become "skipped" (they'll get re-evaluated after cooldown).
