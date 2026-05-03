@@ -2358,6 +2358,17 @@ async function runTickForUser(
         riskManagerVerdict: riskVerdict ?? null,
         coachVerdict: coachVerdict ?? null,
         rawConfidence: rawConf,
+        // Phase 2 router transparency
+        routerDecision: {
+          regime: winner.regime.regime,
+          side,
+          chosenStrategyId: routerDecision.strategy?.id ?? null,
+          chosenStrategyName: routerDecision.strategy?.name ?? null,
+          chosenStrategyVersion: routerDecision.strategy?.version ?? null,
+          reason: routerDecision.reason,
+          candidates: routerDecision.candidates,
+        },
+        syntheticShort: isSyntheticShort,
         activeNewsFlags: summarizeNewsFlags(intel?.news_flags).active,
         // Brain Trust snapshot at signal-creation time — used by post-trade-learn
         // to evaluate the trade in the context that was CURRENT when the signal
