@@ -245,19 +245,8 @@ async function upsertBrief(
 }
 
 Deno.serve(async (req) => {
-    const cors = makeCorsHeaders(req);
-  const json = await aiResp.json();
-    const briefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
-  
-    return {
-      briefText,
-      sessionBias,
-      keyLevels,
-      watchSymbols,
-      cautionFlags: Array.from(cautionSet),
-      aiModel: BRIEF_MODEL,
-    };
-if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+  const cors = makeCorsHeaders(req);
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
