@@ -21,6 +21,7 @@ import {
   getBrokerCredentials,
   placeMarketSell,
 } from "../_shared/broker.ts";
+import { effectivePnl, recordFill } from "../_shared/fills.ts";
 import {
   appendTransition,
   transitionTrade,
