@@ -8,6 +8,8 @@ import { runSharedBacktest, type SharedCandle, type SharedParam } from "./backte
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
+async function fetchCandles(symbol = "BTC-USD"): Promise<SharedCandle[]> {
+  const url = `https://api.exchange.coinbase.com/products/${symbol}/candles?granularity=3600`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Coinbase ${res.status}`);
   const raw = (await res.json()) as number[][];
