@@ -11,6 +11,7 @@ import type {
   EngineSnapshot,
 } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseSnapshot(raw: any): EngineSnapshot | null {
   if (!raw || typeof raw !== "object" || !raw.ranAt) return null;
   return {
@@ -21,6 +22,7 @@ function parseSnapshot(raw: any): EngineSnapshot | null {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): SystemState {
   const profile = r.active_profile;
   return {
@@ -85,7 +87,7 @@ export function useSystemState() {
 
   const update = async (patch: Partial<SystemState>) => {
     if (!user) return;
-    const dbPatch: any = {};
+    const dbPatch: Record<string, unknown> = {};
     if (patch.mode) dbPatch.mode = patch.mode;
     if (patch.bot) dbPatch.bot = patch.bot;
     if (patch.killSwitchEngaged !== undefined) dbPatch.kill_switch_engaged = patch.killSwitchEngaged;
@@ -95,7 +97,7 @@ export function useSystemState() {
     if (patch.pauseReason !== undefined) dbPatch.pause_reason = patch.pauseReason;
     if (patch.paperAccountBalance !== undefined) dbPatch.paper_account_balance = patch.paperAccountBalance;
     if (patch.activeProfile) dbPatch.active_profile = patch.activeProfile;
-    const { error } = await supabase.from("system_state").update(dbPatch).eq("user_id", user.id);
+    const { error } = await supabase.from("system_state").update(dbPatch as never).eq("user_id", user.id);
     if (error) throw error;
 
     // MED-6: Append to system_events audit trail for risk-posture changes.
@@ -109,6 +111,7 @@ export function useSystemState() {
       if ((k as string) in dbPatch) auditPayload[k as string] = (dbPatch as Record<string, unknown>)[k as string];
     }
     if (Object.keys(auditPayload).length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any)
         .from("system_events")
         .insert({ user_id: user.id, event_type: "state_changed", actor: "operator", payload: auditPayload })
@@ -127,6 +130,7 @@ export function useSystemState() {
    * the cast. */
   const acknowledgeLiveMoney = async () => {
     if (!user) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (supabase.rpc as any)("acknowledge_live_money");
     if (error) throw error;
     await refetch();

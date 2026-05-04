@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { AccountState } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): AccountState {
   return {
     id: r.id,

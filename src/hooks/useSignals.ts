@@ -11,6 +11,7 @@ import type {
   LifecycleTransition,
 } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): TradeSignal {
   return {
     id: r.id,

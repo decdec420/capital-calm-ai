@@ -10,6 +10,7 @@ import {
   DOCTRINE_FALLBACK,
 } from "@/lib/doctrine-resolver";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): DoctrineSettingsRow {
   return {
     starting_equity_usd: r.starting_equity_usd === null ? null : Number(r.starting_equity_usd),

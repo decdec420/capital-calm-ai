@@ -14,6 +14,7 @@ export interface PendingDoctrineChange {
   reason: string | null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): PendingDoctrineChange {
   return {
     id: r.id,

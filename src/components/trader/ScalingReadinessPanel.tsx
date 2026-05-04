@@ -46,6 +46,7 @@ export function ScalingReadinessPanel() {
       const broker = brokerRes.data;
 
       // 1. Positive expectancy over ≥50 paper trades
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const pnls = trades.map((t: any) => Number(t.pnl ?? 0));
       const tradeCount = trades.length;
       const expR = tradeCount > 0 ? pnls.reduce((a, b) => a + b, 0) / tradeCount : 0;
@@ -53,10 +54,12 @@ export function ScalingReadinessPanel() {
 
       // 2. Drawdown under 25% — peak-to-trough on equity curve from cumulative pnl
       let peak = 0, equity = 0, maxDD = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sorted = [...trades].sort((a: any, b: any) =>
         new Date(a.closed_at ?? 0).getTime() - new Date(b.closed_at ?? 0).getTime()
       );
       for (const t of sorted) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         equity += Number((t as any).pnl ?? 0);
         if (equity > peak) peak = equity;
         if (peak > 0) {
@@ -68,7 +71,9 @@ export function ScalingReadinessPanel() {
       const ddPass = tradeCount === 0 ? false : ddPct < 25;
 
       // 3. Net profitable last 30 days
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const recent = trades.filter((t: any) => t.closed_at && t.closed_at >= since30d);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const netRecent = recent.reduce((s: number, t: any) => s + Number(t.pnl ?? 0), 0);
       const netPass = netRecent > 0;
 
@@ -76,6 +81,7 @@ export function ScalingReadinessPanel() {
       // descended from a parent and is currently approved/archived means
       // a cycle completed.
       const cycleDone = strategies.some(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (s: any) => s.parent_strategy_id && (s.status === "approved" || s.status === "archived")
       );
 

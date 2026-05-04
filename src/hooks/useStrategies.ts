@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { StrategyVersion, StrategyStatus, StrategyParam, StrategyMetrics } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): StrategyVersion {
   return {
     id: r.id,
@@ -79,8 +80,11 @@ export function useStrategies() {
       friendly_summary: input.friendlySummary ?? null,
       status: input.status ?? "candidate",
       description: input.description ?? "",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: (input.params ?? []) as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       metrics: (input.metrics ?? {}) as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     if (error) throw error;
     await refetch();
@@ -88,7 +92,7 @@ export function useStrategies() {
 
   const update = async (id: string, patch: Partial<NewStrategyInput>) => {
     if (!user) return;
-    const dbPatch: any = {};
+    const dbPatch: Record<string, unknown> = {};
     if (patch.name) dbPatch.name = patch.name;
     if (patch.version) dbPatch.version = patch.version;
     if (patch.displayName !== undefined) dbPatch.display_name = patch.displayName;
@@ -97,7 +101,7 @@ export function useStrategies() {
     if (patch.description !== undefined) dbPatch.description = patch.description;
     if (patch.params) dbPatch.params = patch.params;
     if (patch.metrics) dbPatch.metrics = patch.metrics;
-    const { error } = await supabase.from("strategies").update(dbPatch).eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("strategies").update(dbPatch as never).eq("id", id).eq("user_id", user.id);
     if (error) throw error;
     await refetch();
   };

@@ -9,6 +9,7 @@ import type {
   CopilotMemoryRow,
 } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): Experiment {
   return {
     id: r.id,
@@ -29,6 +30,7 @@ function mapRow(r: any): Experiment {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapMemory(r: any): CopilotMemoryRow {
   return {
     id: r.id,
@@ -75,6 +77,7 @@ export function useExperiments() {
         .order("created_at", { ascending: false }),
       // copilot_memory rows live alongside experiments and drive the "what
       // have we already learned" panel + the AI proposer's cooldown logic.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase
         .from("copilot_memory" as any)
         .select("*")
@@ -82,6 +85,7 @@ export function useExperiments() {
         .order("last_tried_at", { ascending: false }),
     ]);
     setExperiments((expData ?? []).map(mapRow));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setMemory(((memData ?? []) as any[]).map(mapMemory));
     setLoading(false);
   };
@@ -116,9 +120,9 @@ export function useExperiments() {
 
   const setStatus = async (id: string, status: ExperimentStatus) => {
     if (!user) return;
-    const patch: any = { status };
+    const patch: Record<string, unknown> = { status };
     if (status === "accepted" || status === "rejected") patch.needs_review = false;
-    const { error } = await supabase.from("experiments").update(patch).eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("experiments").update(patch as never).eq("id", id).eq("user_id", user.id);
     if (error) throw error;
     await refetch();
   };
@@ -134,6 +138,7 @@ export function useExperiments() {
    * what we "learned" about ema_fast no longer applies. */
   const clearMemory = async (parameter: string) => {
     if (!user) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await supabase
       .from("copilot_memory" as any)
       .delete()
@@ -160,6 +165,7 @@ export function useExperiments() {
       .limit(1)
       .maybeSingle();
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const baseParams: Array<{ key: string; value: any; unit?: string }> = (base?.params as any) ?? [];
     const afterNum = Number(exp.after);
     const newValue = Number.isFinite(afterNum) ? afterNum : exp.after;
@@ -182,7 +188,9 @@ export function useExperiments() {
         version: nextVersion,
         status: "candidate",
         description: `Promoted from experiment: ${exp.title}. ${exp.hypothesis ?? ""}`.trim(),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         params: nextParams as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         metrics: (exp.backtestResult?.after?.metrics ?? {}) as any,
       })
       .select("id")

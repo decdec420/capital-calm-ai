@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { JournalEntry, JournalKind } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): JournalEntry {
   return {
     id: r.id,
@@ -63,13 +64,13 @@ export function useJournals() {
 
   const update = async (id: string, patch: Partial<NewJournalInput> & { llmExplanation?: string | null }) => {
     if (!user) return;
-    const dbPatch: any = {};
+    const dbPatch: Record<string, unknown> = {};
     if (patch.kind) dbPatch.kind = patch.kind;
     if (patch.title) dbPatch.title = patch.title;
     if (patch.summary !== undefined) dbPatch.summary = patch.summary;
     if (patch.tags) dbPatch.tags = patch.tags;
     if (patch.llmExplanation !== undefined) dbPatch.llm_explanation = patch.llmExplanation;
-    const { error } = await supabase.from("journal_entries").update(dbPatch).eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("journal_entries").update(dbPatch as never).eq("id", id).eq("user_id", user.id);
     if (error) throw error;
     await refetch();
   };

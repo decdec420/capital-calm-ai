@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { RiskGuardrail, RiskLevel, GuardrailType } from "@/lib/domain-types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRow(r: any): RiskGuardrail {
   return {
     id: r.id,
@@ -70,14 +71,14 @@ export function useGuardrails() {
 
   const update = async (id: string, patch: NewGuardrailInput) => {
     if (!user) return;
-    const dbPatch: any = {};
+    const dbPatch: Record<string, unknown> = {};
     if (patch.label) dbPatch.label = patch.label;
     if (patch.description !== undefined) dbPatch.description = patch.description;
     if (patch.current !== undefined) dbPatch.current_value = patch.current;
     if (patch.limit !== undefined) dbPatch.limit_value = patch.limit;
     if (patch.level) dbPatch.level = patch.level;
     if (patch.utilization !== undefined) dbPatch.utilization = patch.utilization;
-    const { error } = await supabase.from("guardrails").update(dbPatch).eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("guardrails").update(dbPatch as never).eq("id", id).eq("user_id", user.id);
     if (error) throw error;
     await refetch();
   };
