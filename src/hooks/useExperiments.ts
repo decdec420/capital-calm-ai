@@ -78,8 +78,7 @@ export function useExperiments() {
       // copilot_memory rows live alongside experiments and drive the "what
       // have we already learned" panel + the AI proposer's cooldown logic.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      supabase
-        .from("copilot_memory" as any)
+      supabase.from("copilot_memory" as any)
         .select("*")
         .eq("user_id", user.id)
         .order("last_tried_at", { ascending: false }),
@@ -139,8 +138,7 @@ export function useExperiments() {
   const clearMemory = async (parameter: string) => {
     if (!user) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await supabase
-      .from("copilot_memory" as any)
+    const { error } = await supabase.from("copilot_memory" as any)
       .delete()
       .eq("user_id", user.id)
       .eq("parameter", parameter);

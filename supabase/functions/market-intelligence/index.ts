@@ -192,8 +192,9 @@ async function fetchCryptoNews(symbol: Symbol): Promise<NewsItem[]> {
         // prompt-injection patterns before injecting into the AI context.
         title: (it.title ?? "")
           .replace(/[ --]/g, " ") // control chars
-          .replace(/[​-‍﻿]/g, "")          // zero-width chars
-          .replace(/[^\x20-\x7E -퟿]/g, " ")     // non-printable
+          // eslint-disable-next-line no-irregular-whitespace
+          .replace(/[​-‍﻿]/g, "") // zero-width chars
+          .replace(/[^\x20-\x7E -퟿]/g, " ") // non-printable
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 140),                                   // hard cap at 140 chars

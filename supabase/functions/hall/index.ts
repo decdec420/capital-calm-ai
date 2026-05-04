@@ -343,7 +343,7 @@ async function runHallForUser(
 
     let recoveryResult = "";
     let status: IncidentStatus = "open";
-    let actsTaken: string[] = [`Classified pause as: ${classification.kind}`];
+    const actsTaken: string[] = [`Classified pause as: ${classification.kind}`];
     let userAttentionRequired = false;
 
     if (classification.standDown) {

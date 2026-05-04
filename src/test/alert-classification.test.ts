@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { classifyAlert } from "@/lib/alert-classification";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mkAlert = (title: string, message = "") => ({ title, message }) as any;
 
 describe("classifyAlert copy", () => {
