@@ -67,7 +67,7 @@ export const DESK_TOOLS = [
     function: {
       name: "approve_signal",
       description:
-        "Approve a pending trade signal. The signal still flows through Chuck's doctrine gates (risk manager veto in signal-engine) — this is NOT a bypass.",
+        "Approve a pending trade signal in MANUAL or ASSISTED mode. After approval, run_engine_tick is triggered automatically so the desk picks it up immediately. NOTE: In AUTONOMOUS mode you do NOT need this — signals execute automatically. If autonomy_level is 'manual', call set_autonomy first to unlock auto-execution, then run_engine_tick.",
       parameters: {
         type: "object",
         properties: {
@@ -376,6 +376,24 @@ export const DESK_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "run_spyros",
+      description:
+        "Summon Spyros (Chief Risk Officer) on demand to run a strategy review right now — don't wait for the weekly cron. Use when Wendy's grades are deteriorating, a strategy has been running long enough to have statistical signal, or conditions changed and the current strategy mix needs review.",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: {
+            type: "string",
+            description: "Why you need Spyros to run now. He will see this.",
+          },
+        },
+        required: ["reason"],
+      },
+    },
+  },
 ];
 
 // ─── Tool Executor ────────────────────────────────────────────────
@@ -533,6 +551,18 @@ export async function executeTool(
             signal_id: signalId,
             reasoning: args.reasoning ?? null,
           });
+          // Fire signal-engine immediately so the desk picks up the approval
+          // on the next tick rather than waiting for the cron.
+          // Fire-and-forget — don't block the approve_signal response on this.
+          fetch(`${supabaseUrl}/functions/v1/signal-engine`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              apikey: supabaseAnonKey,
+            },
+            body: JSON.stringify({ trigger: "bobby_approved_signal", signal_id: signalId }),
+          }).catch(() => {}); // intentionally fire-and-forget
         }
         return result;
       }
@@ -927,6 +957,31 @@ export async function executeTool(
           error: errors.length > 0 ? errors.join("; ") : undefined,
         };
         await adminClient.from("tool_calls").insert({ ...logEntry, result, success: result.success });
+        return result;
+      }
+
+      case "run_spyros": {
+        // Bobby calls Spyros directly — no cron wait.
+        // Uses service-role token so the invocation is server-side (no user JWT needed).
+        const res = await fetch(`${supabaseUrl}/functions/v1/katrina`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+            apikey: supabaseAnonKey,
+          },
+          body: JSON.stringify({ user_id: userId, triggered_by: "bobby", trigger_reason: reason }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const result: ToolCallResult = res.ok
+          ? { success: true, data: { status: "Spyros running review", triggered_by: "bobby" } }
+          : { success: false, error: data.error ?? `Spyros invocation failed (${res.status})` };
+        await adminClient
+          .from("tool_calls")
+          .insert({ ...logEntry, result, success: result.success });
+        if (result.success) {
+          await appendSystemEvent("spyros_summoned", { trigger_reason: reason, triggered_by: "bobby" });
+        }
         return result;
       }
 

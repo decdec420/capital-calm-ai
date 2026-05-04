@@ -423,6 +423,9 @@ async function decideForSymbol(opts: {
   crossSymbolContext?: string;
   /** Phase 4 — correlation note when user already holds a correlated position. */
   correlationNote?: string;
+  /** Standing orders Bobby has issued to Taylor. Injected verbatim into the
+   * system prompt so Taylor knows the boss's current directives. */
+  bobbydirectives?: Array<{ directive: string; priority: string; issued_at: string }>;
 }): Promise<
   | { decision: {
       decision: "propose_trade" | "skip";
@@ -438,7 +441,7 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride, isPaper, strategyMenu, crossSymbolContext, correlationNote } = opts;
+  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride, isPaper, strategyMenu, crossSymbolContext, correlationNote, bobbydirectives } = opts;
   const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
   // Circuit breaker: skip AI entirely if the gateway has been failing.
@@ -609,6 +612,12 @@ ${crossSymbolContext}
 ${correlationNote ? `
 CORRELATION CHECK:
 ${correlationNote}
+` : ""}
+${bobbydirectives && bobbydirectives.length > 0 ? `
+STANDING ORDERS FROM BOBBY (Desk Commander):
+These are active directives from Bobby that override your defaults.
+Follow them precisely — they are not suggestions.
+${bobbydirectives.map((d, i) => `${i + 1}. [${d.priority.toUpperCase()}] ${d.directive}`).join("\n")}
 ` : ""}
 You MUST call submit_decision. No plain text responses.
 `.trim();
@@ -904,6 +913,7 @@ async function runTickForUser(
     { data: doctrineRow },
     { data: recentClosedTrades },
     patternMemory,
+    { data: bobbyDirectives },
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("account_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -947,6 +957,15 @@ async function runTickForUser(
       .order("closed_at", { ascending: false })
       .limit(10),
     buildPatternMemory(admin, userId),
+    admin
+      .from("bobby_directives")
+      .select("id,target_agent,directive,priority,issued_at")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
+      .in("target_agent", ["taylor", "all"])
+      .order("priority", { ascending: false })
+      .limit(5),
   ]);
 
   // Index Brain Trust briefs by symbol; flag stale entries (>6h old).
@@ -1985,6 +2004,7 @@ async function runTickForUser(
     strategyMenu,
     crossSymbolContext,
     correlationNote,
+    bobbydirectives: (bobbyDirectives ?? []) as Array<{ directive: string; priority: string; issued_at: string }>,
   });
 
   if ("error" in aiResult) {
