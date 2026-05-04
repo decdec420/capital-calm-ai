@@ -422,9 +422,11 @@ export async function executeTool(
 ): Promise<ToolCallResult> {
   const { userId, token, supabaseUrl, supabaseAnonKey, serviceRoleKey, actor } = context;
 
-  // Trade authority gate: only Bobby (jessica_autonomous) and Wags (harvey_chat)
+  // Trade authority gate: only Bobby (jessica_autonomous) and Wags (wags_chat / harvey_chat)
   // may execute desk tools. Any other actor is rejected before touching state.
-  const AUTHORISED_ACTORS: readonly string[] = ["harvey_chat", "jessica_autonomous"];
+  // Note: actor was renamed harvey_chat → wags_chat in the Billions persona migration.
+  // Both strings are accepted for backward compatibility.
+  const AUTHORISED_ACTORS: readonly string[] = ["harvey_chat", "wags_chat", "jessica_autonomous"];
   if (!AUTHORISED_ACTORS.includes(actor)) {
     return {
       success: false,
