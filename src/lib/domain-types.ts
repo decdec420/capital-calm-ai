@@ -234,6 +234,17 @@ export interface MarketRegime {
   setupScore: number; // 0..1
   noTradeReasons: string[];
   summary: string;
+  // Extended fields — synced with _shared/regime.ts
+  rsiNow: number;
+  rsiPrev: number;
+  emaFast: number;
+  emaSlow: number;
+  slowRising: boolean;
+  pullback: boolean;
+  annualizedVolPct: number;
+  pctChange: number;
+  rsiOverbought: boolean;  // RSI ≥ 70
+  rsiOversold: boolean;    // RSI ≤ 30
 }
 
 export interface Trade {

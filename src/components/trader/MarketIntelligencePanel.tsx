@@ -271,8 +271,8 @@ export function MarketIntelligencePanel({ symbol, className }: MarketIntelligenc
           <div>
             <h3 className="text-sm font-semibold">Market Intelligence</h3>
             <p className="text-[11px] text-muted-foreground">
-              Three AI experts · momentum refreshes continuously, macro every few hours
-              {newest && <> · macro {formatRelative(newest.generatedAt)}</>}
+              Hall · Dollar Bill · Mafee · refreshes every ~2 min
+              {newest && <> · last run {formatRelative(newest.generatedAt)}</>}
             </p>
           </div>
         </div>
@@ -294,7 +294,7 @@ export function MarketIntelligencePanel({ symbol, className }: MarketIntelligenc
         <div className="text-xs text-muted-foreground py-4 text-center space-y-2">
           <p>No brief generated yet.</p>
           <p className="text-[11px]">
-            The Brain Trust will run automatically every 4 hours, or hit Refresh to generate one now.
+            The Brain Trust runs automatically every ~2 minutes, or hit Refresh to generate one now.
           </p>
         </div>
       ) : symbol ? (

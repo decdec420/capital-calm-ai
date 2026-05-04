@@ -92,7 +92,7 @@ function mapRow(r: Record<string, unknown>): MarketIntelligence {
 
 /**
  * Pulls the cached market_intelligence rows for the signed-in user.
- * Cron refreshes them every 4 hours; UI can also trigger an on-demand refresh.
+ * Cron refreshes every ~2 minutes (pg_cron job 34); UI can trigger on-demand refresh.
  */
 export function useMarketIntelligence() {
   const { user } = useAuth();
