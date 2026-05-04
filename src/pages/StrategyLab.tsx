@@ -899,7 +899,7 @@ function ArchiveRow({
 // ────────────────────────────────────────────────────────────────────────
 
 /** Plain-English metric tile. */
-const FriendlyMetric = React.forwardRef<HTMLDivElement, {
+const FriendlyMetric = React.forwardRef<HTMLButtonElement, {
   label: string;
   sub: string;
   value: string;
@@ -909,11 +909,15 @@ const FriendlyMetric = React.forwardRef<HTMLDivElement, {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div ref={ref} className="cursor-help">
+          <button
+            type="button"
+            ref={ref}
+            className="cursor-help text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+          >
             <div className="text-xs text-muted-foreground leading-tight">{label}</div>
             <div className="text-base tabular text-foreground font-medium mt-0.5">{value}</div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
-          </div>
+          </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
       </Tooltip>
@@ -922,7 +926,7 @@ const FriendlyMetric = React.forwardRef<HTMLDivElement, {
 });
 
 /** Same as FriendlyMetric but shows a delta vs the live baseline. */
-const FriendlyDeltaMetric = React.forwardRef<HTMLDivElement, {
+const FriendlyDeltaMetric = React.forwardRef<HTMLButtonElement, {
   label: string;
   sub: string;
   cur: number;
@@ -961,11 +965,15 @@ const FriendlyDeltaMetric = React.forwardRef<HTMLDivElement, {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div ref={ref} className="cursor-help">
+          <button
+            type="button"
+            ref={ref}
+            className="cursor-help text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+          >
             <div className="text-xs text-muted-foreground leading-tight">{label}</div>
             {body}
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
-          </div>
+          </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-[220px] text-xs">{hint} Number in parentheses is the change vs the live strategy.</TooltipContent>
       </Tooltip>
