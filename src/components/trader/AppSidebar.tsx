@@ -22,32 +22,33 @@ import { useAlerts } from "@/hooks/useAlerts";
 import { useSignals } from "@/hooks/useSignals";
 import { useExperiments } from "@/hooks/useExperiments";
 import { useGuardrails } from "@/hooks/useGuardrails";
+import { OwnerBadge, type OwnerName } from "@/components/trader/OwnerBadge";
 
 const sections = [
   {
     label: "Operations",
     items: [
-      { title: "Overview", url: "/", icon: LayoutDashboard },
-      { title: "Market Intel", url: "/market", icon: LineChart },
-      { title: "Trades", url: "/trades", icon: Activity },
-      { title: "Performance", url: "/performance", icon: BarChart2 },
-      { title: "Alerts", url: "/alerts", icon: Bell },
-      { title: "Journals", url: "/journals", icon: BookOpen },
+      { title: "Overview", url: "/", icon: LayoutDashboard, owner: "Bobby" },
+      { title: "Market Intel", url: "/market", icon: LineChart, owner: "Brain Trust" },
+      { title: "Trades", url: "/trades", icon: Activity, owner: "Wags" },
+      { title: "Performance", url: "/performance", icon: BarChart2, owner: "Taylor" },
+      { title: "Alerts", url: "/alerts", icon: Bell, owner: "Wendy" },
+      { title: "Journals", url: "/journals", icon: BookOpen, owner: "Hall" },
     ],
   },
   {
     label: "Strategy",
     items: [
-      { title: "Edge", url: "/edge", icon: Gem },
-      { title: "Strategy Lab", url: "/strategy", icon: TestTube2 },
-      { title: "Risk Center", url: "/risk", icon: Shield },
-      { title: "Learning", url: "/learning", icon: Brain },
+      { title: "Edge", url: "/edge", icon: Gem, owner: "Taylor" },
+      { title: "Strategy Lab", url: "/strategy", icon: TestTube2, owner: "Katrina" },
+      { title: "Risk Center", url: "/risk", icon: Shield, owner: "Wendy" },
+      { title: "Learning", url: "/learning", icon: Brain, owner: "Katrina" },
     ],
   },
   {
     label: "Assistant",
     items: [
-      { title: "AI Copilot", url: "/copilot", icon: Sparkles },
+      { title: "AI Copilot", url: "/copilot", icon: Sparkles, owner: "Bobby" },
     ],
   },
 ];
@@ -141,7 +142,8 @@ export function AppSidebar() {
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
                           {!collapsed && <span>{item.title}</span>}
-                          {!collapsed && showBadge && (
+                          {!collapsed && item.owner && <OwnerBadge owner={item.owner as OwnerName} className="ml-auto" />}
+                          {!collapsed && showBadge && !item.owner && (
                             <span
                               className="ml-auto flex items-center justify-center min-w-[16px] h-4 rounded-full text-[9px] font-bold text-white px-1"
                               style={{ background: badge.bg }}
