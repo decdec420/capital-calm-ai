@@ -5,6 +5,7 @@ import { StatusFooter } from "@/components/trader/StatusFooter";
 import { FloatingKillSwitch } from "@/components/trader/FloatingKillSwitch";
 import { ShortcutsOverlay } from "@/components/trader/ShortcutsOverlay";
 import { BrokerReconnectBanner } from "@/components/trader/BrokerReconnectBanner";
+import { SharedStatusStrip } from "@/components/trader/SharedStatusStrip";
 import { Outlet } from "react-router-dom";
 import { useMarkToMarket } from "@/hooks/useMarkToMarket";
 
@@ -20,6 +21,7 @@ export function AppLayout() {
         <div className="flex-1 flex flex-col min-w-0">
           <TopBar />
           <BrokerReconnectBanner />
+          <SharedStatusStrip />
           <main className="flex-1 overflow-auto">
             <div className="p-6 max-w-[1600px] mx-auto w-full">
               <Outlet />
