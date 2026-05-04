@@ -438,7 +438,8 @@ export async function executeTool(
 
   const reason = (args.reason as string) ?? (args.reasoning as string) ?? "no reason provided";
   // actorShort used in audit logs. Maps technical actor IDs → display names.
-  const actorShort = actor === "harvey_chat" ? "wags" : "bobby";
+  const actorShort =
+    actor === "harvey_chat" || actor === "wags_chat" ? "wags" : "bobby";
 
   const logEntry = {
     user_id: userId,
