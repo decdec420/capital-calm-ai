@@ -554,6 +554,162 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
   if (wrErr) log("warn", "war_room_insert_failed", { fn: "post-trade-learn", agent: "wendy", tradeId: t.id, err: wrErr.message });
 }
 
+// ============================================================
+// Wendy aggregate mistake detection
+// ------------------------------------------------------------
+// Runs after every trade-coach entry. Scans the last 14 days of
+// coaching journal entries for this user. If the same mistake
+// pattern appears 3+ times, Wendy writes a pattern_alert entry
+// so the operator (and Bobby) can see the systemic issue.
+//
+// Patterns monitored:
+//   bad_process_*      → repeated bad process regardless of outcome
+//   fighting_macro     → repeatedly trading against the macro trend
+//   grade_d            → three D-grades in 14 days is a crisis
+//   grade_c            → five C-grades in 14 days shows no improvement
+// ============================================================
+
+const PATTERN_THRESHOLDS: Array<{
+  tag: string;
+  threshold: number;
+  title: (n: number) => string;
+  message: (n: number, symbol?: string) => string;
+  severity: "warning" | "critical";
+}> = [
+  {
+    tag: "bad_process_bad_outcome",
+    threshold: 3,
+    title: (n) => `⚠️ Wendy Pattern Alert: Bad process (bad outcome) — ${n}× in 14 days`,
+    message: (n) =>
+      `This is the ${n}rd (or more) time in 14 days that a trade was entered with a flawed process AND resulted in a loss. ` +
+      `This pattern suggests a systemic setup issue — not random variance. ` +
+      `Bobby, I need you to issue a directive to Taylor: tighten entry criteria until we break this streak. ` +
+      `No more "good enough" setups. A+ entries only for the next 7 days.`,
+    severity: "warning",
+  },
+  {
+    tag: "bad_process_good_outcome",
+    threshold: 3,
+    title: (n) => `⚠️ Wendy Pattern Alert: Getting lucky on bad process — ${n}× in 14 days`,
+    message: (n) =>
+      `${n} times in 14 days, the desk profited on a trade with a flawed process. ` +
+      `This is more dangerous than losing — it reinforces bad habits. ` +
+      `The market will not keep rewarding sloppy entries. ` +
+      `Bobby: enforce a process review before the next signal approval, regardless of confidence score.`,
+    severity: "warning",
+  },
+  {
+    tag: "fighting_macro",
+    threshold: 3,
+    title: (n) => `🔴 Wendy Pattern Alert: Fighting the macro — ${n}× in 14 days`,
+    message: (n) =>
+      `${n} trades in 14 days were flagged as fighting the macro trend. ` +
+      `This is not stubbornness — it's a systematic failure to respect macro alignment. ` +
+      `The Brain Trust provides macro context for a reason. ` +
+      `Bobby: I am recommending a temporary pause on any signal where macro_alignment = 'fighting_macro'. ` +
+      `Issue a directive to Taylor accordingly.`,
+    severity: "critical",
+  },
+  {
+    tag: "grade_d",
+    threshold: 3,
+    title: (n) => `🔴 Wendy Pattern Alert: ${n} D-grades in 14 days`,
+    message: (n) =>
+      `${n} D-grade entries in 14 days. A D-grade means the trade should not have been entered at all. ` +
+      `This is a pattern, not a one-time mistake. The entry filter is broken or being ignored. ` +
+      `Bobby: this requires immediate attention. Lower the autonomy threshold until Taylor demonstrates improved entry discipline. ` +
+      `I am flagging this to Chuck's next compliance review.`,
+    severity: "critical",
+  },
+  {
+    tag: "grade_c",
+    threshold: 5,
+    title: (n) => `⚠️ Wendy Pattern Alert: ${n} C-grades in 14 days — no improvement`,
+    message: (n) =>
+      `${n} C-grade entries in 14 days. C means "got through the gate but shouldn't have been the play." ` +
+      `Five of these in 14 days means the desk is settling for mediocre setups consistently. ` +
+      `Bobby: discuss this with Taylor. The bar for what counts as a valid entry needs to be raised.`,
+    severity: "warning",
+  },
+];
+
+async function runWendyPatternCheck(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  userId: string,
+): Promise<void> {
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Pull all coaching entries from the last 14 days.
+  const { data: recentEntries } = await admin
+    .from("journal_entries")
+    .select("tags, created_at")
+    .eq("user_id", userId)
+    .eq("kind", "learning")
+    .eq("source", "trade-coach")
+    .gte("created_at", fourteenDaysAgo);
+
+  if (!recentEntries || recentEntries.length === 0) return;
+
+  // Count each pattern tag.
+  const tagCounts: Record<string, number> = {};
+  for (const entry of recentEntries) {
+    for (const tag of (entry.tags as string[] ?? [])) {
+      tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
+    }
+  }
+
+  // Check each pattern threshold.
+  for (const pattern of PATTERN_THRESHOLDS) {
+    const count = tagCounts[pattern.tag] ?? 0;
+    if (count < pattern.threshold) continue;
+
+    // Dedup: only fire once per pattern per 7 days.
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const alertTitle = pattern.title(count);
+    const { data: existing } = await admin
+      .from("journal_entries")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("kind", "learning")
+      .eq("source", "wendy-pattern-alert")
+      .filter("raw->>patternTag", "eq", pattern.tag)
+      .gte("created_at", sevenDaysAgo)
+      .maybeSingle();
+
+    if (existing) continue; // Already alerted this week for this pattern.
+
+    const message = pattern.message(count);
+
+    // Write journal entry (kind=learning so JournalEventCard renders correctly).
+    await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "learning",
+      title: alertTitle,
+      summary: message,
+      tags: ["trade-coach", "pattern-alert", pattern.tag, `count_${count}`],
+      source: "wendy-pattern-alert",
+      raw: {
+        source: "wendy-pattern-alert",
+        patternTag: pattern.tag,
+        count,
+        threshold: pattern.threshold,
+        windowDays: 14,
+      },
+    });
+
+    // Fire an alert so the operator sees it immediately.
+    await admin.from("alerts").insert({
+      user_id: userId,
+      severity: pattern.severity,
+      title: alertTitle,
+      message,
+    });
+
+    log("warn", "wendy_pattern_alert", { fn: "post-trade-learn", userId, tag: pattern.tag, count });
+  }
+}
+
 Deno.serve(async (req) => {
     const cors = makeCorsHeaders(req);
 if (req.method === "OPTIONS") {
@@ -830,6 +986,15 @@ if (req.method === "OPTIONS") {
       } catch (e) {
         log("error", "trade_coach_failed", { fn: "post-trade-learn", tradeId: t.id, err: String(e) });
       }
+    }
+
+    // Wendy aggregate pattern detection — runs after every coaching entry.
+    // Scans the last 14 days for repeated mistake patterns. Best-effort;
+    // never block the journal write on pattern check errors.
+    try {
+      await runWendyPatternCheck(admin, t.user_id);
+    } catch (e) {
+      log("error", "wendy_pattern_check_failed", { fn: "post-trade-learn", userId: t.user_id, err: String(e) });
     }
 
     // Trade-milestone trigger for Katrina (strategy review agent).

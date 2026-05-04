@@ -25,15 +25,20 @@ function timeAgo(iso: string) {
 
 export function JournalEventCard({ entry, className }: { entry: JournalEntry; className?: string }) {
   const isCoach = entry.tags?.includes("trade-coach");
+  const isPatternAlert = entry.tags?.includes("pattern-alert");
   const gradeTag = entry.tags?.find((t) => t.startsWith("grade_"));
   const grade = gradeTag ? gradeTag.replace("grade_", "").toUpperCase() : null;
   const experimentQueued = entry.tags?.includes("experiment-queued");
 
   return (
-    <div className={cn("panel p-4 space-y-2 hover:border-border/80 transition-colors", className)}>
+    <div className={cn(
+      "panel p-4 space-y-2 hover:border-border/80 transition-colors",
+      isPatternAlert && "border-destructive/40",
+      className
+    )}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <StatusBadge tone={kindTone[entry.kind]} size="sm">
+          <StatusBadge tone={isPatternAlert ? "blocked" : kindTone[entry.kind]} size="sm">
             {isCoach ? (
               <span className="inline-flex items-center gap-1">
                 <Brain className="h-2.5 w-2.5" /> Wendy
@@ -42,7 +47,10 @@ export function JournalEventCard({ entry, className }: { entry: JournalEntry; cl
               entry.kind
             )}
           </StatusBadge>
-          {grade && (
+          {isPatternAlert && (
+            <StatusBadge tone="blocked" size="sm">pattern alert</StatusBadge>
+          )}
+          {grade && !isPatternAlert && (
             <StatusBadge
               tone={grade === "A" ? "safe" : grade === "B" ? "candidate" : grade === "C" ? "caution" : "blocked"}
               size="sm"
@@ -58,14 +66,16 @@ export function JournalEventCard({ entry, className }: { entry: JournalEntry; cl
           {timeAgo(entry.timestamp)}
         </span>
       </div>
-      {isCoach && (
+      {isPatternAlert ? (
+        <p className="text-[10px] uppercase tracking-wider text-destructive/70">Wendy's Pattern Alert</p>
+      ) : isCoach ? (
         <p className="text-[10px] uppercase tracking-wider text-primary/60">Wendy's Assessment</p>
-      )}
+      ) : null}
       <p className="text-sm font-medium text-foreground">{entry.title}</p>
       <p className="text-xs text-muted-foreground leading-relaxed">{entry.summary}</p>
       {entry.tags.length > 0 && (
         <div className="flex flex-wrap gap-1 pt-1">
-          {entry.tags.filter((t) => !t.startsWith("grade_") && t !== "experiment-queued" && t !== "trade-coach").map((t) => (
+          {entry.tags.filter((t) => !t.startsWith("grade_") && !t.startsWith("count_") && t !== "experiment-queued" && t !== "trade-coach" && t !== "pattern-alert").map((t) => (
             <ReasonChip key={t} label={t} />
           ))}
         </div>
