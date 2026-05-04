@@ -102,8 +102,8 @@ export function RealtimeSubscriptionProvider({ children }: { children: ReactNode
 
     for (const table of WATCHED_TABLES) {
       ch = ch.on(
-        // @ts-ignore — overloaded signature; string literal is valid
-        "postgres_changes" as any,
+        // @ts-expect-error — overloaded .on() signature; string literal is valid at runtime
+        "postgres_changes",
         { event: "*", schema: "public", table, filter: `user_id=eq.${uid}` },
         () => {
           // Fan out to every registered callback for this table.
@@ -119,7 +119,7 @@ export function RealtimeSubscriptionProvider({ children }: { children: ReactNode
       supabase.removeChannel(ch);
       channelRef.current = null;
     };
-  }, [user?.id]);
+  }, [user]);
 
   const subscribe = useCallback((table: WatchedTable, cb: Callback): (() => void) => {
     if (!registry.current.has(table)) {

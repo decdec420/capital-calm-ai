@@ -65,7 +65,7 @@ export default function Auth() {
         return;
       }
       // Existing users skip the onboarding/welcome tour
-      try { localStorage.setItem(WELCOME_KEY, "1"); } catch {}
+      try { localStorage.setItem(WELCOME_KEY, "1"); } catch { /* localStorage unavailable in some contexts — safe to ignore */ }
       toast.success("Welcome back, operator.");
       navigate(from, { replace: true });
     } finally {

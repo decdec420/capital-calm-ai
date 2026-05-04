@@ -56,7 +56,7 @@ describe("persona legacy token guard", () => {
           for (const token of BANNED_TOKENS) {
             const tokenRegex = new RegExp(`\\b${token}\\b`, "i");
             if (tokenRegex.test(line) && !isAllowedTechnicalContext(line)) {
-              violations.push(`${relPath}:${lineIdx + 1} contains banned token \"${token}\"`);
+              violations.push(`${relPath}:${lineIdx + 1} contains banned token "${token}"`);
             }
           }
         });

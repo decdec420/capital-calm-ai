@@ -36,6 +36,7 @@ export function DoctrineProposalBanner() {
     let cancelled = false;
     const load = async () => {
       const since = new Date(Date.now() - SHOW_WINDOW_MS).toISOString();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase as any)
         .from("system_events")
         .select("id, payload, created_at")

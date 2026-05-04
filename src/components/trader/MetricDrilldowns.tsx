@@ -784,6 +784,21 @@ function LossVsCapDrilldown({ open, onClose, lossToday, lossVsCap, closedToday }
 // ════════════════════════════════════════════════════════════════════════════
 
 function FloorDistanceDrilldown({ open, onClose, account, floorDistance, closed }: Common) {
+  // useMemo must be called unconditionally (Rules of Hooks) — compute before any early return.
+  const projection = useMemo(() => {
+    if (!account) return null;
+    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+    const recent = closed.filter((t) => t.closedAt && new Date(t.closedAt).getTime() >= cutoff);
+    if (recent.length === 0) return null;
+    const totalPnl = recent.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    const avgPerDay = totalPnl / 7;
+    if (avgPerDay === 0) return { direction: "flat" as const, days: 0, avgPerDay };
+    const headroom = account.equity - account.balanceFloor;
+    if (avgPerDay > 0) return { direction: "growing" as const, days: 0, avgPerDay };
+    const days = headroom / Math.abs(avgPerDay);
+    return { direction: "shrinking" as const, days, avgPerDay };
+  }, [closed, account]);
+
   if (!account) {
     return (
       <MetricDrilldownSheet
@@ -795,6 +810,7 @@ function FloorDistanceDrilldown({ open, onClose, account, floorDistance, closed 
       </MetricDrilldownSheet>
     );
   }
+
   const span = Math.max(account.equity, account.balanceFloor * 1.25);
   const equityPct = (account.equity / span) * 100;
   const floorPct = (account.balanceFloor / span) * 100;
@@ -810,20 +826,6 @@ function FloorDistanceDrilldown({ open, onClose, account, floorDistance, closed 
     ...s,
     distancePct: ((s.equityAfter - account.balanceFloor) / Math.max(s.equityAfter, 1e-9)) * 100,
   }));
-
-  // 7-day average daily PnL, projected against headroom.
-  const projection = useMemo(() => {
-    const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
-    const recent = closed.filter((t) => t.closedAt && new Date(t.closedAt).getTime() >= cutoff);
-    if (recent.length === 0) return null;
-    const totalPnl = recent.reduce((s, t) => s + (t.pnl ?? 0), 0);
-    const avgPerDay = totalPnl / 7;
-    if (avgPerDay === 0) return { direction: "flat" as const, days: 0, avgPerDay };
-    const headroom = account.equity - account.balanceFloor;
-    if (avgPerDay > 0) return { direction: "growing" as const, days: 0, avgPerDay };
-    const days = headroom / Math.abs(avgPerDay);
-    return { direction: "shrinking" as const, days, avgPerDay };
-  }, [closed, account.equity, account.balanceFloor]);
 
   return (
     <MetricDrilldownSheet

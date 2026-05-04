@@ -263,7 +263,7 @@ export default function Company() {
         ? "No snapshot"
         : dataStale
           ? "Context stale — needs refresh"
-          : `${(snapshot.perSymbol[0]?.regime ?? "unknown").replace(/_/g, " ")} · ${(snapshot.perSymbol[0]?.confidence * 100 ?? 0).toFixed(0)}% conf`,
+          : `${(snapshot.perSymbol[0]?.regime ?? "unknown").replace(/_/g, " ")} · ${((snapshot.perSymbol[0]?.confidence ?? 0) * 100).toFixed(0)}% conf`,
       lastAction: snapshot
         ? `Snapshot: ${new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
         : undefined,

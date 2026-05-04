@@ -74,7 +74,6 @@ export function ProfileEditor() {
       <div className="flex items-center gap-4">
         <div className="h-14 w-14 rounded-full bg-secondary border border-border overflow-hidden flex items-center justify-center text-sm font-medium text-foreground shrink-0">
           {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={avatarUrl}
               alt="Operator avatar"
