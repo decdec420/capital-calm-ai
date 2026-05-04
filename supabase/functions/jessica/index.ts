@@ -326,6 +326,7 @@ async function buildContext(
     { data: recentTrades },
     { data: warRoomPreview },
     { data: activeDirectives },
+    { data: recentSystemEvents },
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("account_state").select("equity,balance_floor,start_of_day_equity").eq("user_id", userId).maybeSingle(),
@@ -351,6 +352,14 @@ async function buildContext(
       .eq("status", "active")
       .order("issued_at", { ascending: false })
       .limit(10),
+    // System events (last 24h) — Bobby sees his own behavioral patterns:
+    // repeated pauses, kill-switch toggles, autonomy changes, etc.
+    admin.from("system_events")
+      .select("event_type,actor,payload,created_at")
+      .eq("user_id", userId)
+      .gte("created_at", new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(20),
   ]);
 
   // Brain Trust staleness per symbol
@@ -461,6 +470,16 @@ async function buildContext(
       priority: d.priority,
       issued_at: d.issued_at,
       expires_at: d.expires_at ?? "never",
+    })),
+    // ── System Events (last 24h) ──────────────────────────────────────
+    // Bobby uses this to spot behavioural patterns in his own decisions:
+    // e.g. "3 pauses today" → issue conservative directive; "kill switch
+    // toggled" → note caution; "autonomy changed manually" → respect it.
+    recent_system_events: (recentSystemEvents ?? []).map((e: Record<string, unknown>) => ({
+      type: e.event_type,
+      actor: e.actor,
+      when: e.created_at,
+      detail: e.payload,
     })),
   };
 }

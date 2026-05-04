@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { StatusBadge } from "./StatusBadge";
 import type { JournalEntry } from "@/lib/domain-types";
 import { ReasonChip } from "./ReasonChip";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Brain } from "lucide-react";
 
 const kindTone = {
   research: "candidate",
@@ -36,7 +36,7 @@ export function JournalEventCard({ entry, className }: { entry: JournalEntry; cl
           <StatusBadge tone={kindTone[entry.kind]} size="sm">
             {isCoach ? (
               <span className="inline-flex items-center gap-1">
-                <GraduationCap className="h-2.5 w-2.5" /> coach
+                <Brain className="h-2.5 w-2.5" /> Wendy
               </span>
             ) : (
               entry.kind
@@ -58,6 +58,9 @@ export function JournalEventCard({ entry, className }: { entry: JournalEntry; cl
           {timeAgo(entry.timestamp)}
         </span>
       </div>
+      {isCoach && (
+        <p className="text-[10px] uppercase tracking-wider text-primary/60">Wendy's Assessment</p>
+      )}
       <p className="text-sm font-medium text-foreground">{entry.title}</p>
       <p className="text-xs text-muted-foreground leading-relaxed">{entry.summary}</p>
       {entry.tags.length > 0 && (

@@ -40,6 +40,10 @@ const MIN_WIN_RATE_MARGIN = 0.03;
 const DRAWDOWN_TOLERANCE_PP = 0.10;
 const DRAWDOWN_CRITICAL_PP = 0.20;
 const COOLDOWN_DAYS = 7;
+// Minimum closed trades required before promoting in each mode.
+// Live mode keeps the full safety bar (100 trades); paper runs lower
+// (30) so the system builds calibration data faster.
+const MIN_TRADES_TO_EVALUATE = 100;
 
 type StrategyRow = {
   id: string;
@@ -54,7 +58,8 @@ type CandidateResult =
   | { candidate: string; outcome: "promoted"; trades: number }
   | { candidate: string; outcome: "retired"; trades: number; failReasons: string }
   | { candidate: string; outcome: "paused"; trades: number; reason: string }
-  | { candidate: string; outcome: "skipped"; trades: number; reason: "not_enough_trades" | "cooldown"; need?: number; cooldown_days_remaining?: number }
+  | { candidate: string; outcome: "skipped"; trades: number; reason: string; need?: number; cooldown_days_remaining?: number }
+  | { candidate: string; outcome: "needs_review"; trades: number; expMargin: number }
   | { candidate: string; outcome: "ready"; trades: number; expMargin: number };
 
 function metric(s: StrategyRow, key: string): number {
@@ -250,6 +255,39 @@ async function evaluateForUser(
         });
         continue;
       }
+
+      // Live mode safety gate: auto-promotion in live mode is disabled.
+      // A strategy swap while real money is deployed requires a human
+      // decision. Instead of auto-promoting, we fire a warning alert so
+      // the operator sees the candidate is ready and can promote manually
+      // from the Strategy Lab. In paper mode this gate is bypassed —
+      // the system auto-promotes freely to build calibration data faster.
+      if (!isPaper) {
+        const cExp = metric(c, "expectancy");
+        const cWin = metric(c, "winRate");
+        const winnerCi = ciByStrategy.get(c.id);
+        const ciNote = winnerCi && typeof winnerCi.avg_pnl_lo === "number"
+          ? ` · CI lower-bound: ${Number(winnerCi.avg_pnl_lo).toFixed(2)}R`
+          : "";
+        await createAlert(
+          admin,
+          userId,
+          "warning",
+          `Strategy ${c.version} ready to promote — your review required`,
+          `${c.version} passed all gates after ${trades} live trades ` +
+          `(exp +${expMargin.toFixed(2)}R, win ${(cWin * 100).toFixed(0)}%${ciNote}). ` +
+          `Auto-promotion is disabled in live mode. ` +
+          `Review in Strategy Lab and promote manually when ready.`,
+        );
+        results.push({
+          candidate: c.version,
+          outcome: "needs_review",
+          trades,
+          expMargin,
+        });
+        continue;
+      }
+
       readyToPromote.push({ row: c, expMargin, trades });
       results.push({
         candidate: c.version,
@@ -343,7 +381,6 @@ Deno.serve(async (req: Request) => {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   
-  const MIN_TRADES_TO_EVALUATE = 100;
 if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
