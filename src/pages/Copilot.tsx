@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/trader/StatusBadge";
 import { SignalCard } from "@/components/trader/SignalCard";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { SignalExplainDialog } from "@/components/trader/SignalExplainDialog";
+import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
 import { CalibrationChart } from "@/components/trader/CalibrationChart";
 import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
@@ -584,9 +585,18 @@ export default function Copilot() {
         description="The AI watches the tape, reasons over your context, and proposes trades. You approve. The bridge between brain and broker."
         actions={
           <>
-            <Button size="sm" onClick={runEngine} disabled={running} className="gap-1.5">
-              <Play className="h-3.5 w-3.5" /> {running ? "Thinking…" : "Run engine now"}
-            </Button>
+            <AsyncActionButton
+              size="sm"
+              className="gap-1.5"
+              onAction={runEngine}
+              riskTier="medium"
+              idleLabel="Run engine now"
+              pendingLabel="Running engine…"
+              successMessage="Signal engine run complete."
+              errorMessage="Signal engine failed."
+            >
+              <Play className="h-3.5 w-3.5" />
+            </AsyncActionButton>
             <StatusBadge tone="accent" dot pulse={streaming || running}>
               <Sparkles className="h-3 w-3" /> {running ? "engine" : streaming ? "thinking" : "ready"}
             </StatusBadge>

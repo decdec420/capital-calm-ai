@@ -17,6 +17,7 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
 import { BrokerConnectionCard } from "@/components/trader/BrokerConnectionCard";
+import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { ProfilePicker } from "@/components/trader/ProfilePicker";
 import { supabase } from "@/integrations/supabase/client";
@@ -138,9 +139,15 @@ export default function Settings() {
                   shiftMultiplier={10}
                   precision={2}
                 />
-                <Button size="sm" disabled={!capDirty} onClick={saveCap}>
-                  Save
-                </Button>
+                <AsyncActionButton
+                  size="sm"
+                  disabled={!capDirty}
+                  onAction={saveCap}
+                  idleLabel="Save"
+                  pendingLabel="Saving…"
+                  successMessage="Daily cap saved."
+                  errorMessage="Couldn't save cap."
+                />
               </div>
               <p className="text-[11px] text-muted-foreground italic">
                 Current: <span className="tabular text-foreground">${account.dailyAutoExecuteCapUsd.toFixed(2)}</span>
