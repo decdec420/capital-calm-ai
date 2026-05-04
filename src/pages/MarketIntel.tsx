@@ -14,6 +14,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, Brain, RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, ChevronDown } from "lucide-react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
+import { OwnerBadge } from "@/components/trader/OwnerBadge";
 import { PriceChart } from "@/components/trader/PriceChart";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { StatusBadge } from "@/components/trader/StatusBadge";
@@ -335,6 +336,7 @@ function BrainTrustPanel({
           <Brain className="h-4 w-4 text-primary shrink-0" />
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">Brain Trust</h3>
+            <OwnerBadge owner="Brain Trust" className="mt-1 w-fit" />
             <p className="text-[11px] text-muted-foreground">
               Hall · Dollar Bill · Mafee
               <span className={cn("ml-1", stale ? "text-destructive/80" : "")}>
@@ -488,6 +490,9 @@ export default function MarketIntel() {
       <SectionHeader
         eyebrow="Market Intelligence"
         title="Regime · Brain Trust · Signals"
+        owner="Brain Trust"
+        roleSubtitle="Macro + sentiment + pattern desk"
+        ownershipAction="Hall maintains the macro brief while Brain Trust updates symbol bias"
         description="Live candle regime alongside AI macro, sentiment, and pattern analysis from Hall, Dollar Bill, and Mafee — for all three symbols Bobby trades."
       />
 

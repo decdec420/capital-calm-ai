@@ -108,6 +108,9 @@ export default function Learning() {
       <SectionHeader
         eyebrow="Learning · Copilot R&D"
         title="The lab runs itself"
+        owner="Katrina"
+        roleSubtitle="Experiment governance"
+        ownershipAction="Katrina owns experiment review and promotion decisions"
         description="Copilot proposes parameter tweaks, backtests them, remembers what worked, and only bothers you when the numbers don't shout."
         actions={
           <div className="flex items-center gap-2">

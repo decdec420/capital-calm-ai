@@ -581,6 +581,9 @@ export default function Copilot() {
       <SectionHeader
         eyebrow="AI Copilot · Signal Bridge"
         title="Operator console"
+        owner="Bobby"
+        roleSubtitle="Autonomous orchestrator"
+        ownershipAction="Bobby coordinates Brain Trust synthesis and execution timing"
         description="The AI watches the tape, reasons over your context, and proposes trades. You approve. The bridge between brain and broker."
         actions={
           <>
