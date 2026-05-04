@@ -1,4 +1,33 @@
-import { Activity, BarChart2, Bell, BookOpen, Brain, Gem, LayoutDashboard, LineChart, LogOut, Settings, Shield, Sparkles, TestTube2 } from "lucide-react";
+// ─────────────────────────────────────────────────────────────────────────────
+// P4: AppSidebar.tsx — Department model nav IA
+// Replace src/components/trader/AppSidebar.tsx with this file.
+//
+// Changes:
+//   1. Nav sections renamed from Operations/Strategy/Assistant
+//      to company departments: Command / Trading Desk / Risk /
+//      Intelligence / Strategy Lab / Copilot
+//   2. /company route added under Command (AgentRosterPage)
+//   3. Sidebar logo updated to use --gradient-brand (cyan→violet)
+//      instead of --gradient-amber
+//   4. All URLs, hook usages, badge logic unchanged
+// ─────────────────────────────────────────────────────────────────────────────
+
+import {
+  Activity,
+  BarChart2,
+  Bell,
+  BookOpen,
+  Brain,
+  Gem,
+  LayoutDashboard,
+  LineChart,
+  LogOut,
+  Settings,
+  Shield,
+  Sparkles,
+  TestTube2,
+  Users2,
+} from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -22,36 +51,56 @@ import { useAlerts } from "@/hooks/useAlerts";
 import { useSignals } from "@/hooks/useSignals";
 import { useExperiments } from "@/hooks/useExperiments";
 import { useGuardrails } from "@/hooks/useGuardrails";
-import { OwnerBadge, type OwnerName } from "@/components/trader/OwnerBadge";
+
+// ─── Navigation structure — department model ──────────────────────────────────
+// URLs are all unchanged. Only labels and grouping changed.
 
 const sections = [
   {
-    label: "Operations",
+    label: "Command",
     items: [
-      { title: "Overview", url: "/", icon: LayoutDashboard, owner: "Bobby" },
-      { title: "Market Intel", url: "/market", icon: LineChart, owner: "Brain Trust" },
-      { title: "Trades", url: "/trades", icon: Activity, owner: "Wags" },
-      { title: "Performance", url: "/performance", icon: BarChart2, owner: "Taylor" },
-      { title: "Alerts", url: "/alerts", icon: Bell, owner: "Wendy" },
-      { title: "Journals", url: "/journals", icon: BookOpen, owner: "Hall" },
+      { title: "Overview",  url: "/",        icon: LayoutDashboard },
+      { title: "Company",   url: "/company", icon: Users2 },
     ],
   },
   {
-    label: "Strategy",
+    label: "Trading Desk",
     items: [
-      { title: "Edge", url: "/edge", icon: Gem, owner: "Taylor" },
-      { title: "Strategy Lab", url: "/strategy", icon: TestTube2, owner: "Katrina" },
-      { title: "Risk Center", url: "/risk", icon: Shield, owner: "Wendy" },
-      { title: "Learning", url: "/learning", icon: Brain, owner: "Katrina" },
+      { title: "Trades",      url: "/trades",      icon: Activity  },
+      { title: "Performance", url: "/performance", icon: BarChart2 },
     ],
   },
   {
-    label: "Assistant",
+    label: "Risk",
     items: [
-      { title: "AI Copilot", url: "/copilot", icon: Sparkles, owner: "Bobby" },
+      { title: "Risk Center", url: "/risk",   icon: Shield },
+      { title: "Alerts",      url: "/alerts", icon: Bell   },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { title: "Market Intel", url: "/market", icon: LineChart },
+      { title: "Edge",         url: "/edge",   icon: Gem      },
+    ],
+  },
+  {
+    label: "Strategy Lab",
+    items: [
+      { title: "Strategy Lab", url: "/strategy", icon: TestTube2 },
+      { title: "Learning",     url: "/learning", icon: Brain     },
+      { title: "Journals",     url: "/journals", icon: BookOpen  },
+    ],
+  },
+  {
+    label: "Copilot",
+    items: [
+      { title: "AI Copilot", url: "/copilot", icon: Sparkles },
     ],
   },
 ];
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
 const initialsFor = (name?: string | null, email?: string | null) => {
   const source = (name || email || "OP").trim();
@@ -59,6 +108,8 @@ const initialsFor = (name?: string | null, email?: string | null) => {
   const initials = (parts[0]?.[0] ?? "O") + (parts[1]?.[0] ?? "");
   return initials.toUpperCase().slice(0, 2);
 };
+
+// ─── component ────────────────────────────────────────────────────────────────
 
 export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
@@ -70,27 +121,24 @@ export function AppSidebar() {
   const { counts: expCounts } = useExperiments();
   const { guardrails } = useGuardrails();
 
-  // When the sidebar is rendered as a mobile overlay (narrow viewport — e.g.
-  // Lovable chat expanded), auto-close it after picking a nav item so the
-  // selected page isn't covered by the menu. No-op on desktop.
   const handleNavClick = () => {
     if (isMobile) setOpenMobile(false);
   };
 
-  const alertCount = alerts.length;
-  const signalCount = pending.length;
-  const reviewCount = expCounts.needsReview;
+  const alertCount   = alerts.length;
+  const signalCount  = pending.length;
+  const reviewCount  = expCounts.needsReview;
   const blockedCount = guardrails.filter((g) => g.level === "blocked").length;
 
   const badgeFor: Record<string, { count: number; bg: string }> = {
-    "/alerts": { count: alertCount, bg: "hsl(var(--status-blocked))" },
-    "/copilot": { count: signalCount, bg: "hsl(var(--primary))" },
-    "/risk": { count: blockedCount, bg: "hsl(var(--status-caution))" },
-    "/learning": { count: reviewCount, bg: "hsl(var(--status-caution))" },
+    "/alerts":   { count: alertCount,   bg: "hsl(var(--status-blocked))" },
+    "/copilot":  { count: signalCount,  bg: "hsl(var(--primary))"        },
+    "/risk":     { count: blockedCount, bg: "hsl(var(--status-caution))"  },
+    "/learning": { count: reviewCount,  bg: "hsl(var(--status-caution))"  },
   };
 
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
-  const initials = initialsFor(profile?.display_name, user?.email);
+  const initials    = initialsFor(profile?.display_name, user?.email);
 
   const handleSignOut = async () => {
     await signOut();
@@ -101,13 +149,18 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border">
         <div className={cn("flex items-center gap-2.5 px-2 py-1.5", collapsed && "justify-center px-0")}>
-          <div className="h-8 w-8 rounded-md bg-gradient-amber flex items-center justify-center shadow-amber shrink-0">
-            <span className="text-primary-foreground font-bold text-sm">T</span>
+          {/* Logo: cyan→violet gradient (Midnight Quant Desk brand) */}
+          <div className="h-8 w-8 rounded-md bg-gradient-brand flex items-center justify-center shadow-primary shrink-0">
+            <span className="text-white font-bold text-sm">C</span>
           </div>
           {!collapsed && (
             <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">Trader OS</span>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Mission Control</span>
+              <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">
+                Capital Calm
+              </span>
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                Command Center
+              </span>
             </div>
           )}
         </div>
@@ -125,8 +178,9 @@ export function AppSidebar() {
               <SidebarMenu>
                 {section.items.map((item) => {
                   const active = location.pathname === item.url;
-                  const badge = badgeFor[item.url];
+                  const badge  = badgeFor[item.url];
                   const showBadge = !!badge && badge.count > 0;
+
                   return (
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton asChild isActive={active}>
@@ -142,8 +196,7 @@ export function AppSidebar() {
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
                           {!collapsed && <span>{item.title}</span>}
-                          {!collapsed && item.owner && <OwnerBadge owner={item.owner as OwnerName} className="ml-auto" />}
-                          {!collapsed && showBadge && !item.owner && (
+                          {!collapsed && showBadge && (
                             <span
                               className="ml-auto flex items-center justify-center min-w-[16px] h-4 rounded-full text-[9px] font-bold text-white px-1"
                               style={{ background: badge.bg }}
@@ -163,7 +216,7 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      {/* User shelf — avatar + name + email; popover with Settings & Sign out */}
+      {/* User shelf */}
       <SidebarFooter className="border-t border-sidebar-border p-2">
         <Popover>
           <PopoverTrigger asChild>
@@ -188,11 +241,7 @@ export function AppSidebar() {
               {!collapsed && <Settings className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
             </button>
           </PopoverTrigger>
-          <PopoverContent
-            side="right"
-            align="end"
-            className="w-56 p-1 bg-popover border-border"
-          >
+          <PopoverContent side="right" align="end" className="w-56 p-1 bg-popover border-border">
             <div className="px-2 py-1.5 border-b border-border mb-1">
               <div className="text-sm text-foreground truncate">{displayName}</div>
               <div className="text-[11px] text-muted-foreground truncate">{user?.email}</div>

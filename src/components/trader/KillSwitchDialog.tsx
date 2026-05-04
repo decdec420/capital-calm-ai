@@ -1,4 +1,16 @@
-import { useEffect, useState } from "react";
+// ─────────────────────────────────────────────────────────────────────────────
+// P0 FIX: KillSwitchDialog.tsx
+// Replace src/components/trader/KillSwitchDialog.tsx with this file.
+//
+// Changes:
+//   1. KillSwitchDialog wrapped in React.forwardRef() — fixes the F12 warning
+//      "Function components cannot be given refs" that originates in
+//      FloatingKillSwitch's render, where AlertDialogTrigger uses asChild
+//      and tries to forward its ref to KillSwitchDialog.
+//   2. No logic, no visual, no prop changes — pure forwardRef wrapper.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { forwardRef, useEffect, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,108 +38,121 @@ const CONFIRM_PHRASE = "DISARM";
 /**
  * Engage = simple confirm (you want friction but not a typing tax in a panic).
  * Disarm = type-to-confirm (the "off" state must stay off until you really mean it).
+ *
+ * FIX: wrapped in forwardRef so FloatingKillSwitch's AlertDialogTrigger asChild
+ * composition can forward its ref through this component cleanly.
  */
-export function KillSwitchDialog({ open, onOpenChange, engaged, onConfirm }: KillSwitchDialogProps) {
-  const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
+export const KillSwitchDialog = forwardRef<HTMLDivElement, KillSwitchDialogProps>(
+  function KillSwitchDialog({ open, onOpenChange, engaged, onConfirm }, ref) {
+    const [typed, setTyped] = useState("");
+    const [busy, setBusy] = useState(false);
 
-  // Reset the typed phrase whenever the dialog opens/closes.
-  useEffect(() => {
-    if (!open) {
-      setTyped("");
-      setBusy(false);
-    }
-  }, [open]);
+    // Reset the typed phrase whenever the dialog opens/closes.
+    useEffect(() => {
+      if (!open) {
+        setTyped("");
+        setBusy(false);
+      }
+    }, [open]);
 
-  const isDisarming = engaged;
-  const canConfirm = isDisarming ? typed.trim().toUpperCase() === CONFIRM_PHRASE : true;
+    const isDisarming = engaged;
+    const canConfirm = isDisarming ? typed.trim().toUpperCase() === CONFIRM_PHRASE : true;
 
-  const handleConfirm = async () => {
-    if (!canConfirm) return;
-    setBusy(true);
-    try {
-      await onConfirm();
-      onOpenChange(false);
-    } finally {
-      setBusy(false);
-    }
-  };
+    const handleConfirm = async () => {
+      if (!canConfirm) return;
+      setBusy(true);
+      try {
+        await onConfirm();
+        onOpenChange(false);
+      } finally {
+        setBusy(false);
+      }
+    };
 
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="bg-card border-border">
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            {isDisarming ? (
-              <>
-                <ShieldCheck className="h-5 w-5 text-status-safe" />
-                Disarm kill-switch?
-              </>
-            ) : (
-              <>
-                <ShieldAlert className="h-5 w-5 text-status-blocked" />
-                Engage kill-switch?
-              </>
-            )}
-          </AlertDialogTitle>
-          <AlertDialogDescription className="space-y-2 pt-1">
-            {isDisarming ? (
-              <>
+    return (
+      <AlertDialog open={open} onOpenChange={onOpenChange}>
+        {/* The ref is attached to the content div so Radix can position it */}
+        <AlertDialogContent ref={ref} className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              {isDisarming ? (
+                <>
+                  <ShieldCheck className="h-5 w-5 text-status-safe" />
+                  Disarm kill-switch?
+                </>
+              ) : (
+                <>
+                  <ShieldAlert className="h-5 w-5 text-status-blocked" />
+                  Engage kill-switch?
+                </>
+              )}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 pt-1">
+              {isDisarming ? (
+                <>
+                  <span className="block">
+                    This re-arms the bot to accept proposals on the next tick. Open positions
+                    are not affected — only new entries.
+                  </span>
+                  <span className="block text-foreground">
+                    Type{" "}
+                    <span className="font-mono font-semibold text-primary">{CONFIRM_PHRASE}</span>{" "}
+                    to confirm.
+                  </span>
+                </>
+              ) : (
                 <span className="block">
-                  This re-arms the bot to accept proposals on the next tick. Open positions are not affected — only new entries.
+                  The bot will halt immediately. The cron sweep will skip your account, no new
+                  signals will be proposed, and the AI engine will refuse to open positions until
+                  you disarm. Open trades remain untouched.
                 </span>
-                <span className="block text-foreground">
-                  Type <span className="font-mono font-semibold text-primary">{CONFIRM_PHRASE}</span> to confirm.
-                </span>
-              </>
-            ) : (
-              <span className="block">
-                The bot will halt immediately. The cron sweep will skip your account, no new signals will be proposed,
-                and the AI engine will refuse to open positions until you disarm. Open trades remain untouched.
-              </span>
-            )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
 
-        {isDisarming && (
-          <div className="space-y-1.5">
-            <Label htmlFor="kill-confirm" className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Confirmation
-            </Label>
-            <Input
-              id="kill-confirm"
-              autoFocus
-              autoComplete="off"
-              spellCheck={false}
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              placeholder={CONFIRM_PHRASE}
-              className="font-mono"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && canConfirm && !busy) handleConfirm();
+          {isDisarming && (
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="kill-confirm"
+                className="text-[11px] uppercase tracking-wider text-muted-foreground"
+              >
+                Confirmation
+              </Label>
+              <Input
+                id="kill-confirm"
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                placeholder={CONFIRM_PHRASE}
+                className="font-mono"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canConfirm && !busy) handleConfirm();
+                }}
+              />
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleConfirm();
               }}
-            />
-          </div>
-        )}
-
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={(e) => {
-              e.preventDefault();
-              handleConfirm();
-            }}
-            disabled={!canConfirm || busy}
-            className={
-              isDisarming
-                ? "bg-status-safe text-background hover:bg-status-safe/90"
-                : "bg-status-blocked text-background hover:bg-status-blocked/90"
-            }
-          >
-            {busy ? "Working…" : isDisarming ? "Disarm" : "Engage"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
+              disabled={!canConfirm || busy}
+              className={
+                isDisarming
+                  ? "bg-status-safe text-background hover:bg-status-safe/90"
+                  : "bg-status-blocked text-background hover:bg-status-blocked/90"
+              }
+            >
+              {busy ? "Working…" : isDisarming ? "Disarm" : "Engage"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+);

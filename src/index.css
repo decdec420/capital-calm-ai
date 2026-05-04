@@ -1,12 +1,40 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+ * P3: index.css — token migration
+ * Replace src/index.css with this file.
+ *
+ * Changes:
+ *   1. --primary   → electric cyan oklch(72% 0.16 200) — replaces amber as
+ *                    the command/active/focus color throughout the app.
+ *                    Every shadcn primitive that reads --primary (ring, focus
+ *                    states, active nav, buttons) automatically picks this up.
+ *   2. --signal    → new token for amber oklch(72% 0.16 60). Use for:
+ *                    AI signals, Taylor output, caution states, pending
+ *                    decisions. This keeps amber semantic without it being
+ *                    the brand color.
+ *   3. --primary-glow updated to match cyan.
+ *   4. Sidebar primary tokens updated to cyan.
+ *   5. --ring updated to cyan (focus rings across all inputs/buttons).
+ *   6. All other tokens (surface, status, gradients) unchanged.
+ *   7. Dark class block updated to match.
+ *
+ * MIGRATION NOTE for tailwind.config.ts:
+ *   Replace font-sans line with:
+ *     font-sans: ["Space Grotesk", "ui-sans-serif", "system-ui", "sans-serif"],
+ *   Add to <head> in index.html (before existing font links):
+ *     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Trader OS — warm amber / graphite design system. All colors HSL. */
+/* Trader OS — Midnight Quant Desk design system. */
+/* Primary accent: electric cyan. Signal accent: amber. */
 
 @layer base {
   :root {
-    /* Graphite base */
+    /* ── Graphite base (unchanged) ── */
     --background: 30 10% 5%;
     --foreground: 36 20% 92%;
 
@@ -16,10 +44,23 @@
     --popover: 30 10% 8%;
     --popover-foreground: 36 20% 92%;
 
-    /* Warm amber accent */
-    --primary: 38 92% 55%;
+    /* ── PRIMARY: Electric cyan (was amber) ──────────────────────────────
+     * Used by: active nav border, focus rings, primary buttons, ring,
+     * all shadcn primitives that read --primary.
+     * Equivalent HSL approximation of oklch(72% 0.16 200):
+     * hsl(195 70% 52%) — close enough for HSL-based Tailwind tokens.
+     * ─────────────────────────────────────────────────────────────────── */
+    --primary: 195 70% 52%;
     --primary-foreground: 30 15% 8%;
-    --primary-glow: 42 95% 62%;
+    --primary-glow: 195 75% 62%;
+
+    /* ── SIGNAL: Amber (was --primary) ──────────────────────────────────
+     * Use this token for: AI signals, Taylor output, pending decisions,
+     * caution-level callouts. NOT for nav active states or focus rings.
+     * ─────────────────────────────────────────────────────────────────── */
+    --signal: 38 92% 55%;
+    --signal-foreground: 30 15% 8%;
+    --signal-glow: 42 95% 62%;
 
     --secondary: 30 8% 12%;
     --secondary-foreground: 36 15% 85%;
@@ -35,11 +76,13 @@
 
     --border: 30 8% 14%;
     --input: 30 8% 14%;
-    --ring: 38 92% 55%;
+
+    /* ── Ring: cyan (was amber) ── */
+    --ring: 195 70% 52%;
 
     --radius: 0.5rem;
 
-    /* Status semantics */
+    /* ── Status semantics (unchanged) ── */
     --status-safe: 145 50% 45%;
     --status-safe-foreground: 145 30% 95%;
     --status-caution: 25 85% 52%;
@@ -49,39 +92,47 @@
     --status-candidate: 210 60% 55%;
     --status-candidate-foreground: 210 30% 95%;
 
-    /* Surfaces */
+    /* ── Surfaces (unchanged) ── */
     --surface-1: 30 10% 7%;
     --surface-2: 30 10% 9%;
     --surface-3: 30 10% 11%;
     --hairline: 30 8% 16%;
 
-    /* Sidebar */
+    /* ── Sidebar: cyan primary (was amber) ── */
     --sidebar-background: 30 12% 4%;
     --sidebar-foreground: 36 12% 70%;
-    --sidebar-primary: 38 92% 55%;
+    --sidebar-primary: 195 70% 52%;
     --sidebar-primary-foreground: 30 15% 8%;
     --sidebar-accent: 30 10% 10%;
     --sidebar-accent-foreground: 36 20% 92%;
     --sidebar-border: 30 8% 12%;
-    --sidebar-ring: 38 92% 55%;
+    --sidebar-ring: 195 70% 52%;
 
-    /* Gradients & shadows */
+    /* ── Gradients & shadows ── */
+    /* Sidebar logo: cyan→violet gradient (replaces amber→orange) */
+    --gradient-brand: linear-gradient(135deg, hsl(195 70% 52%), hsl(265 65% 62%));
+    /* Keep gradient-amber as --gradient-signal for backward compat */
+    --gradient-signal: linear-gradient(135deg, hsl(38 92% 55%), hsl(32 88% 48%));
     --gradient-amber: linear-gradient(135deg, hsl(38 92% 55%), hsl(32 88% 48%));
     --gradient-surface: linear-gradient(180deg, hsl(30 10% 8%), hsl(30 10% 6%));
     --shadow-panel: 0 1px 0 hsl(36 20% 92% / 0.04) inset, 0 8px 24px -12px hsl(0 0% 0% / 0.6);
+    /* Cyan glow (replaces amber shadow) */
+    --shadow-primary: 0 0 0 1px hsl(195 70% 52% / 0.25), 0 8px 24px -8px hsl(195 70% 52% / 0.35);
+    /* Keep shadow-amber for legacy usages */
     --shadow-amber: 0 0 0 1px hsl(38 92% 55% / 0.25), 0 8px 24px -8px hsl(38 92% 45% / 0.35);
   }
 
   .dark {
-    /* Same as root — app is dark-first */
     --background: 30 10% 5%;
     --foreground: 36 20% 92%;
     --card: 30 10% 7%;
     --card-foreground: 36 20% 92%;
     --popover: 30 10% 8%;
     --popover-foreground: 36 20% 92%;
-    --primary: 38 92% 55%;
+    --primary: 195 70% 52%;
     --primary-foreground: 30 15% 8%;
+    --signal: 38 92% 55%;
+    --signal-foreground: 30 15% 8%;
     --secondary: 30 8% 12%;
     --secondary-foreground: 36 15% 85%;
     --muted: 30 8% 11%;
@@ -92,7 +143,7 @@
     --destructive-foreground: 36 20% 95%;
     --border: 30 8% 14%;
     --input: 30 8% 14%;
-    --ring: 38 92% 55%;
+    --ring: 195 70% 52%;
   }
 }
 
@@ -108,6 +159,7 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";
+    text-wrap: pretty;
   }
 
   /* Tabular numerals for metrics */
@@ -133,7 +185,7 @@
 }
 
 @layer base {
-  /* Strip the up/down spinner arrows from number inputs — Tommy hates them. */
+  /* Strip the up/down spinner arrows from number inputs */
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
