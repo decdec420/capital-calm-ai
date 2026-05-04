@@ -13,6 +13,7 @@ import { MultiSymbolStrip } from "@/components/trader/MultiSymbolStrip";
 import { MarketIntelligencePanel } from "@/components/trader/MarketIntelligencePanel";
 import { GateReasonList, gateIconFor, gateToneFor } from "@/components/trader/GateReasonRow";
 import { ConversationSidebar } from "@/components/trader/ConversationSidebar";
+import { TradeDecisionTimeline } from "@/components/trader/TradeDecisionTimeline";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import ReactMarkdown from "react-markdown";
@@ -26,16 +27,19 @@ import { useExperiments } from "@/hooks/useExperiments";
 import { useSignals } from "@/hooks/useSignals";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { Send, Sparkles, Brain, Play, Check, X, Telescope, Plus } from "lucide-react";
+import { Send, Sparkles, Brain, Play, Check, X, Telescope, Plus, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getProfile } from "@/lib/doctrine-constants";
 import type { TradeSignal, GateReason } from "@/lib/domain-types";
 
+// ─── agent-attributed suggested prompts ──────────────────────────────────────
 const SUGGESTED = [
-  "What's the board looking like right now?",
-  "Should I be sitting on hands?",
-  "What broke on my last trade?",
+  "What's Wags proposing right now?",
+  "Why isn't the engine firing?",
+  "What did Brain Trust see this morning?",
+  "What did Wendy learn from yesterday?",
   "Which guardrail is closest to tripping?",
+  "Should I be sitting on hands?",
 ];
 
 export default function Copilot() {
@@ -66,8 +70,9 @@ export default function Copilot() {
         if (!cancelled && data) setKatrinaReview(data as typeof katrinaReview);
       });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   const [pipelineStep, setPipelineStep] = useState<
     null | "braintrust" | "engine" | "briefing" | "done" | "error"
   >(null);
@@ -104,8 +109,6 @@ export default function Copilot() {
   const activeProfile = getProfile(system?.activeProfile);
 
   const lastBrainTrustRun = useMemo(() => {
-    // The Brain Trust strip should track MOMENTUM freshness — that's what the
-    // engine gates on. Falls back to macro generated_at when momentum is unset.
     const source = Object.keys(momentumTimestamps).length > 0 ? momentumTimestamps : intelTimestamps;
     const times = Object.values(source).map((t) => new Date(t).getTime()).filter(Boolean);
     if (times.length === 0) return null;
@@ -146,12 +149,10 @@ export default function Copilot() {
       }
     };
     load();
-    // Refresh every 30s so the strip doesn't go stale while the user sits.
     const interval = setInterval(load, 30_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Agent health — refreshed every 30s. Drives pipeline-strip dot colors.
   const [agentHealth, setAgentHealth] = useState<
     Record<string, { status: string; staleMinutes: number | null }>
   >({});
@@ -176,9 +177,6 @@ export default function Copilot() {
     return () => clearInterval(interval);
   }, []);
 
-  // Map an agent's health.status → tailwind dot class.
-  // 'healthy' → green · 'stale' → amber · 'degraded' → amber pulse · 'failed' → red pulse.
-  // Returns null if no health row exists yet so callers can fall back to timestamp-based logic.
   const healthDot = (agentKey: string): string | null => {
     const h = agentHealth[agentKey];
     if (!h) return null;
@@ -188,7 +186,6 @@ export default function Copilot() {
     return "bg-status-blocked animate-pulse";
   };
 
-  // Render a single structured gate reason as a sonner toast.
   const toastForGate = (g: GateReason) => {
     const Icon = gateIconFor(g.code);
     const tone = gateToneFor(g.severity);
@@ -205,10 +202,7 @@ export default function Copilot() {
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) {
-        toast.error("Sign in first.");
-        return;
-      }
+      if (!token) { toast.error("Sign in first."); return; }
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-engine`, {
         method: "POST",
         headers: {
@@ -227,19 +221,13 @@ export default function Copilot() {
       }
       const reasons: GateReason[] = Array.isArray(json.gateReasons) ? json.gateReasons : [];
       if (json.tick === "halted") {
-        // Account-level halt(s) — surface every reason so operator knows what tripped.
         if (reasons.length === 0) toast.error("Engine halted.");
         else reasons.forEach(toastForGate);
       } else if (json.tick === "skipped") {
-        // Per-symbol skip(s) — show first 2 inline, rest summarised.
         if (reasons.length === 0) toast.info("AI chose to skip. Logged to journal.");
         else {
           reasons.slice(0, 2).forEach(toastForGate);
-          if (reasons.length > 2) {
-            toast.info(`+${reasons.length - 2} more skip reasons`, {
-              description: "See engine snapshot for the full list.",
-            });
-          }
+          if (reasons.length > 2) toast.info(`+${reasons.length - 2} more skip reasons`);
         }
       } else if (json.tick === "ai_error") {
         reasons.forEach(toastForGate);
@@ -261,38 +249,22 @@ export default function Copilot() {
     if (pipelineStep !== null && pipelineStep !== "done" && pipelineStep !== "error") return;
     setPipelineStep("braintrust");
     setPipelineError(null);
-
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) {
-        toast.error("Sign in first.");
-        setPipelineStep("error");
-        setPipelineError("auth failed");
-        return;
-      }
-
+      if (!token) { toast.error("Sign in first."); setPipelineStep("error"); setPipelineError("auth failed"); return; }
       const headers = {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
         apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       };
-
-      // Step 1: Brain Trust
-      const brainRes = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-intelligence`,
-        { method: "POST", headers, body: JSON.stringify({}) },
-      );
+      const brainRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/market-intelligence`, { method: "POST", headers, body: JSON.stringify({}) });
       if (!brainRes.ok) {
         const e = await brainRes.json().catch(() => ({}));
-        setPipelineStep("error");
-        setPipelineError(e.error ?? "Brain Trust failed");
-        toast.error("Brain Trust failed — check function logs.");
-        return;
+        setPipelineStep("error"); setPipelineError(e.error ?? "Brain Trust failed");
+        toast.error("Brain Trust failed — check function logs."); return;
       }
-      const { data: freshIntel } = await supabase
-        .from("market_intelligence")
-        .select("symbol, generated_at, recent_momentum_at");
+      const { data: freshIntel } = await supabase.from("market_intelligence").select("symbol, generated_at, recent_momentum_at");
       if (freshIntel) {
         const macroMap: Record<string, string> = {};
         const momMap: Record<string, string> = {};
@@ -303,48 +275,30 @@ export default function Copilot() {
         setIntelTimestamps(macroMap);
         setMomentumTimestamps(momMap);
       }
-
-      // Step 2: Signal Engine (Taylor)
       setPipelineStep("engine");
-      const engineRes = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-engine`,
-        { method: "POST", headers, body: JSON.stringify({}) },
-      );
+      const engineRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-engine`, { method: "POST", headers, body: JSON.stringify({}) });
       let engineJson: Record<string, unknown> = {};
-      if (engineRes.ok) {
-        engineJson = await engineRes.json().catch(() => ({}));
-      } else {
+      if (engineRes.ok) { engineJson = await engineRes.json().catch(() => ({})); }
+      else {
         const e = await engineRes.json().catch(() => ({}));
-        setPipelineStep("error");
-        setPipelineError((e as { error?: string }).error ?? "Engine failed");
-        toast.error("Taylor signal engine failed — check function logs.");
-        return;
+        setPipelineStep("error"); setPipelineError((e as { error?: string }).error ?? "Engine failed");
+        toast.error("Taylor signal engine failed."); return;
       }
-
-      // Step 3: Wags briefing
       setPipelineStep("briefing");
       const tick = (engineJson.tick as string) ?? "unknown";
-      const reasons = Array.isArray(engineJson.gateReasons)
-        ? (engineJson.gateReasons as Array<{ message?: string }>)
-        : [];
+      const reasons = Array.isArray(engineJson.gateReasons) ? (engineJson.gateReasons as Array<{ message?: string }>) : [];
       const firstReason = reasons[0]?.message ?? null;
       const pipelinePrompt = [
         `[Pipeline run complete — Brain Trust refreshed, Taylor ticked]`,
         `Engine result: ${tick}${firstReason ? ` — ${firstReason}` : ""}.`,
         `Give me your two-sentence Wags briefing on what this means for the next window.`,
       ].join(" ");
-
-      if (activeId) {
-        await send(pipelinePrompt);
-      }
-
+      if (activeId) await send(pipelinePrompt);
       setPipelineStep("done");
       setTimeout(() => setPipelineStep(null), 8000);
     } catch (err) {
-      setPipelineStep("error");
-      setPipelineError("unexpected error");
-      toast.error("Pipeline error — see console.");
-      console.error("[runFullPipeline]", err);
+      setPipelineStep("error"); setPipelineError("unexpected error");
+      toast.error("Pipeline error — see console."); console.error("[runFullPipeline]", err);
     }
   };
 
@@ -354,188 +308,90 @@ export default function Copilot() {
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) {
-        toast.error("Sign in first.");
-        return;
-      }
+      if (!token) { toast.error("Sign in first."); return; }
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signal-decide`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
         body: JSON.stringify({ signalId: activeSignal.id, action }),
       });
       const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error ?? `Failed to ${action}`);
-        return;
-      }
+      if (!res.ok) { toast.error(json.error ?? `Failed to ${action}`); return; }
       toast.success(action === "approve" ? "Trade opened." : "Signal declined. AI noted.");
-    } catch {
-      toast.error("Connection error.");
-    } finally {
-      setBusy(null);
-    }
+    } catch { toast.error("Connection error."); }
+    finally { setBusy(null); }
   };
 
+  // Keyboard shortcuts: A=approve, R=reject, E=engine
   useKeyboardShortcuts({
-    a: () => {
-      if (activeSignal && !busy) decide("approve");
-    },
-    r: () => {
-      if (activeSignal && !busy) decide("reject");
-    },
-    e: () => {
-      if (!running) runEngine();
-    },
+    a: () => { if (activeSignal && !busy) decide("approve"); },
+    r: () => { if (activeSignal && !busy) decide("reject"); },
+    e: () => { if (!running) runEngine(); },
   });
+
   const buildContext = () => {
-    const momTimes = Object.values(momentumTimestamps)
-      .map((t) => new Date(t).getTime())
-      .filter((n) => Number.isFinite(n));
-    const oldestMomentumAgeMinutes = momTimes.length
-      ? Math.floor((Date.now() - Math.min(...momTimes)) / 60000)
-      : null;
+    const momTimes = Object.values(momentumTimestamps).map((t) => new Date(t).getTime()).filter((n) => Number.isFinite(n));
+    const oldestMomentumAgeMinutes = momTimes.length ? Math.floor((Date.now() - Math.min(...momTimes)) / 60000) : null;
     const brainTrustClient = {
-      momentumFresh:
-        momTimes.length === Object.keys(momentumTimestamps).length &&
-        momTimes.length > 0 &&
-        oldestMomentumAgeMinutes !== null &&
-        oldestMomentumAgeMinutes <= 75,
+      momentumFresh: momTimes.length === Object.keys(momentumTimestamps).length && momTimes.length > 0 && oldestMomentumAgeMinutes !== null && oldestMomentumAgeMinutes <= 75,
       oldestMomentumAgeMinutes,
-      perSymbol: Object.entries(momentumTimestamps).map(([symbol, ts]) => ({
-        symbol,
-        momentumAgeMin: Math.floor((Date.now() - new Date(ts).getTime()) / 60000),
-      })),
+      perSymbol: Object.entries(momentumTimestamps).map(([symbol, ts]) => ({ symbol, momentumAgeMin: Math.floor((Date.now() - new Date(ts).getTime()) / 60000) })),
     };
-    return ({
-    mode: system?.mode,
-    bot: system?.bot,
-    autonomy: system?.autonomyLevel,
-    liveTradingEnabled: system?.liveTradingEnabled,
-    killSwitchEngaged: system?.killSwitchEngaged,
-    tradingPausedUntil: system?.tradingPausedUntil,
-    pauseReason: system?.pauseReason,
-    account: account ? { equity: account.equity, balanceFloor: account.balanceFloor } : null,
-    engineSnapshot: snapshot
-      ? {
-          ranAt: snapshot.ranAt,
-          chosenSymbol: snapshot.chosenSymbol,
-          gateReasons: snapshot.gateReasons,
-          perSymbol: snapshot.perSymbol.map((p) => ({
-            symbol: p.symbol,
-            regime: p.regime,
-            setupScore: p.setupScore,
-            confidence: p.confidence,
-            chosen: p.chosen,
-          })),
-        }
-      : null,
-    openPosition: open[0] ?? null,
-    pendingSignal: activeSignal ?? null,
-    recentClosed: closed.slice(0, 5).map((t) => ({ side: t.side, outcome: t.outcome, pnlPct: t.pnlPct })),
-    recentSignals: history.slice(0, 5).map((s) => ({
-      side: s.side,
-      status: s.status,
-      confidence: s.confidence,
-      decidedBy: s.decidedBy,
-    })),
-    approvedStrategy: strategies.find((s) => s.status === "approved"),
-    experiments: {
-      running: expCounts.running + expCounts.queued,
-      needsReview: expCounts.needsReview,
-      copilotProposed: expCounts.copilotProposed,
-      autoResolved: expCounts.autoResolved,
-      pendingReview: expNeedsReview.slice(0, 3).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta, hypothesis: e.hypothesis })),
-      recentlyAccepted: expRecent.filter((e) => e.status === "accepted").slice(0, 5).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta })),
-    },
-    katrinaLatestReview: katrinaReview ? {
-      date: katrinaReview.reviewed_at,
-      brief: katrinaReview.brief_text,
-      trend: katrinaReview.win_rate_trend,
-      promote_count: (katrinaReview.promote_ids ?? []).length,
-      kill_count: (katrinaReview.kill_ids ?? []).length,
-    } : null,
-    brainTrust: brainTrustClient,
-    });
+    return {
+      mode: system?.mode, bot: system?.bot, autonomy: system?.autonomyLevel,
+      liveTradingEnabled: system?.liveTradingEnabled, killSwitchEngaged: system?.killSwitchEngaged,
+      tradingPausedUntil: system?.tradingPausedUntil, pauseReason: system?.pauseReason,
+      account: account ? { equity: account.equity, balanceFloor: account.balanceFloor } : null,
+      engineSnapshot: snapshot ? { ranAt: snapshot.ranAt, chosenSymbol: snapshot.chosenSymbol, gateReasons: snapshot.gateReasons, perSymbol: snapshot.perSymbol.map((p) => ({ symbol: p.symbol, regime: p.regime, setupScore: p.setupScore, confidence: p.confidence, chosen: p.chosen })) } : null,
+      openPosition: open[0] ?? null, pendingSignal: activeSignal ?? null,
+      recentClosed: closed.slice(0, 5).map((t) => ({ side: t.side, outcome: t.outcome, pnlPct: t.pnlPct })),
+      recentSignals: history.slice(0, 5).map((s) => ({ side: s.side, status: s.status, confidence: s.confidence, decidedBy: s.decidedBy })),
+      approvedStrategy: strategies.find((s) => s.status === "approved"),
+      experiments: { running: expCounts.running + expCounts.queued, needsReview: expCounts.needsReview, copilotProposed: expCounts.copilotProposed, autoResolved: expCounts.autoResolved, pendingReview: expNeedsReview.slice(0, 3).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta, hypothesis: e.hypothesis })), recentlyAccepted: expRecent.filter((e) => e.status === "accepted").slice(0, 5).map((e) => ({ parameter: e.parameter, before: e.before, after: e.after, delta: e.delta })) },
+      katrinaLatestReview: katrinaReview ? { date: katrinaReview.reviewed_at, brief: katrinaReview.brief_text, trend: katrinaReview.win_rate_trend, promote_count: (katrinaReview.promote_ids ?? []).length, kill_count: (katrinaReview.kill_ids ?? []).length } : null,
+      brainTrust: brainTrustClient,
+    };
   };
 
   const send = async (text: string) => {
     if (!text.trim()) return;
-    if (streaming) {
-      toast.info("Hold on — Wags is still on it.");
-      return;
-    }
-
-    // Make sure we have an active conversation. If not, create one on the fly.
+    if (streaming) { toast.info("Hold on — Wags is still on it."); return; }
     let convoId = activeId;
     if (!convoId) {
       convoId = await createConversation();
-      if (!convoId) {
-        toast.error("Could not start a new conversation.");
-        return;
-      }
+      if (!convoId) { toast.error("Could not start a new conversation."); return; }
     }
-
     appendLocalMessage({ role: "user", content: text });
-    // Seed an empty assistant bubble immediately so the user sees Wags "thinking"
-    // even before the first SSE token arrives. updateLastAssistant will fill it in.
     appendLocalMessage({ role: "assistant", content: "" });
     setInput("");
     setStreaming(true);
-
     let buffer = "";
     let streamSucceeded = false;
-    const upsert = (chunk: string) => {
-      buffer += chunk;
-      updateLastAssistant(buffer);
-    };
-
+    const upsert = (chunk: string) => { buffer += chunk; updateLastAssistant(buffer); };
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
-      if (!accessToken) {
-        toast.error("Sign in to use the Copilot.");
-        setStreaming(false);
-        return;
-      }
-
+      if (!accessToken) { toast.error("Sign in to use the Copilot."); setStreaming(false); return; }
       const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/copilot-chat`;
       const resp = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({
-          conversationId: convoId,
-          userMessage: text,
-          context: buildContext(),
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}`, apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+        body: JSON.stringify({ conversationId: convoId, userMessage: text, context: buildContext() }),
       });
-
       if (!resp.ok || !resp.body) {
         if (resp.status === 401) toast.error("Sign in to use the Copilot.");
         else if (resp.status === 429) toast.error("Rate limit reached. Give it a moment.");
-        else if (resp.status === 402) toast.error("AI credits depleted. Top up in Settings → Workspace → Usage.");
+        else if (resp.status === 402) toast.error("AI credits depleted.");
         else toast.error("Copilot failed to respond.");
-        setStreaming(false);
-        return;
+        setStreaming(false); return;
       }
-
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let textBuffer = "";
       let done = false;
-
       while (!done) {
         const { value, done: rdone } = await reader.read();
         if (rdone) break;
         textBuffer += decoder.decode(value, { stream: true });
-
         let idx: number;
         while ((idx = textBuffer.indexOf("\n")) !== -1) {
           let line = textBuffer.slice(0, idx);
@@ -544,36 +400,21 @@ export default function Copilot() {
           if (line.startsWith(":") || line.trim() === "") continue;
           if (!line.startsWith("data: ")) continue;
           const json = line.slice(6).trim();
-          if (json === "[DONE]") {
-            done = true;
-            break;
-          }
+          if (json === "[DONE]") { done = true; break; }
           try {
             const parsed = JSON.parse(json);
             const delta = parsed.choices?.[0]?.delta?.content;
             if (delta) upsert(delta);
-          } catch {
-            textBuffer = line + "\n" + textBuffer;
-            break;
-          }
+          } catch { textBuffer = line + "\n" + textBuffer; break; }
         }
       }
-
       streamSucceeded = true;
-      // Reload from server so we get canonical IDs and the auto-set title.
-      // Only on success — otherwise the DB reload could clobber the optimistic
-      // user message if the assistant insert never landed.
       await reloadActiveMessages();
     } catch (e) {
-      console.error(e);
-      toast.error("Copilot connection error.");
+      console.error(e); toast.error("Copilot connection error.");
     } finally {
       setStreaming(false);
-      // If we never got any tokens AND the stream failed, drop the empty assistant
-      // placeholder so the UI doesn't show a stranded "…" bubble.
-      if (!streamSucceeded && buffer.length === 0) {
-        updateLastAssistant("⚠️ No response — try again.");
-      }
+      if (!streamSucceeded && buffer.length === 0) updateLastAssistant("⚠️ No response — try again.");
     }
   };
 
@@ -607,95 +448,51 @@ export default function Copilot() {
         }
       />
 
-      {/* Pipeline Status Strip */}
+      {/* Agent pipeline strip */}
       <div className="flex items-center gap-4 px-1 py-2 border-b border-border/40 text-[11px] text-muted-foreground flex-wrap">
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 mr-1">Agents</span>
-
-        {/* Brain Trust */}
         <div className="flex items-center gap-1.5">
-          <span className={cn(
-            "w-1.5 h-1.5 rounded-full",
-            healthDot("brain_trust") ?? (
-              lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000
-                ? "bg-status-safe" : "bg-muted-foreground/40"
-            )
-          )} />
+          <span className={cn("w-1.5 h-1.5 rounded-full", healthDot("brain_trust") ?? (lastBrainTrustRun && (Date.now() - lastBrainTrustRun.getTime()) < 5 * 60 * 60 * 1000 ? "bg-status-safe" : "bg-muted-foreground/40"))} />
           <span>Brain Trust</span>
           <span className="text-muted-foreground/50">·</span>
           <span className="tabular">{formatAge(lastBrainTrustRun)}</span>
         </div>
-
         <span className="text-border">|</span>
-
-        {/* Signal Engine (Taylor) */}
         <div className="flex items-center gap-1.5">
-          <span className={cn(
-            "w-1.5 h-1.5 rounded-full",
-            healthDot("signal_engine") ?? (
-              lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000
-                ? "bg-status-safe animate-pulse"
-                : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000
-                  ? "bg-status-safe" : "bg-muted-foreground/40"
-            )
-          )} />
+          <span className={cn("w-1.5 h-1.5 rounded-full", healthDot("signal_engine") ?? (lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 2 * 60 * 1000 ? "bg-status-safe animate-pulse" : lastEngineRun && (Date.now() - lastEngineRun.getTime()) < 5 * 60 * 1000 ? "bg-status-safe" : "bg-muted-foreground/40"))} />
           <span>Taylor</span>
           <span className="text-muted-foreground/50">·</span>
           <span className="tabular">{formatAge(lastEngineRun)}</span>
         </div>
-
         <span className="text-border">|</span>
-
-        {/* Wags */}
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-status-safe" />
           <span>Wags</span>
           <span className="text-muted-foreground/50">·</span>
           <span className="text-muted-foreground/50">gemini-flash</span>
         </div>
-
         <span className="text-border">|</span>
-
-        {/* Bobby — autonomous orchestrator. Dot uses worst of (jessica, jessica_heartbeat). */}
         <div className="flex items-center gap-1.5">
           {(() => {
             const decision = system?.lastJessicaDecision ?? null;
             const ranAt = decision?.ran_at ?? null;
-            const ageSec = ranAt
-              ? Math.floor((Date.now() - new Date(ranAt).getTime()) / 1000)
-              : null;
-            const ageLabel =
-              ageSec === null
-                ? "never"
-                : ageSec < 60
-                  ? `${ageSec}s ago`
-                  : `${Math.floor(ageSec / 60)}m ago`;
-            // Pick the worse of Bobby's self-report and Postgres' heartbeat view.
-            const severity = (s?: string) =>
-              s === "failed" ? 3 : s === "degraded" ? 2 : s === "stale" ? 1 : 0;
+            const ageSec = ranAt ? Math.floor((Date.now() - new Date(ranAt).getTime()) / 1000) : null;
+            const ageLabel = ageSec === null ? "never" : ageSec < 60 ? `${ageSec}s ago` : `${Math.floor(ageSec / 60)}m ago`;
+            const severity = (s?: string) => s === "failed" ? 3 : s === "degraded" ? 2 : s === "stale" ? 1 : 0;
             const self = agentHealth["jessica"]?.status;
             const hb = agentHealth["jessica_heartbeat"]?.status;
-            const worstStatus = severity(self) >= severity(hb) ? self : hb;
-            const dotClass = worstStatus
-              ? (healthDot(severity(self) >= severity(hb) ? "jessica" : "jessica_heartbeat") ?? "bg-muted-foreground/40")
-              : (ageSec !== null && ageSec < 90 ? "bg-status-safe" : "bg-muted-foreground/40");
+            const dotClass = (severity(self) >= severity(hb) ? healthDot("jessica") : healthDot("jessica_heartbeat")) ?? (ageSec !== null && ageSec < 90 ? "bg-status-safe" : "bg-muted-foreground/40");
             return (
               <>
                 <span className={cn("w-1.5 h-1.5 rounded-full", dotClass)} />
                 <span>Bobby</span>
                 <span className="text-muted-foreground/50">·</span>
                 <span className="tabular">{ageLabel}</span>
-                {decision?.actions ? (
-                  <span className="text-muted-foreground/50 ml-1">
-                    {decision.actions} action{decision.actions !== 1 ? "s" : ""}
-                  </span>
-                ) : null}
+                {decision?.actions ? <span className="text-muted-foreground/50 ml-1">{decision.actions} action{decision.actions !== 1 ? "s" : ""}</span> : null}
               </>
             );
           })()}
         </div>
-
-
-        {/* Pipeline run progress inline */}
         {pipelineStep && (
           <>
             <span className="text-border">|</span>
@@ -708,10 +505,7 @@ export default function Copilot() {
                 const active = currentIdx === i;
                 const errored = pipelineStep === "error" && active;
                 return (
-                  <span key={step} className={cn(
-                    "flex items-center gap-1",
-                    done ? "text-status-safe" : active ? "text-foreground" : "text-muted-foreground/40"
-                  )}>
+                  <span key={step} className={cn("flex items-center gap-1", done ? "text-status-safe" : active ? "text-foreground" : "text-muted-foreground/40")}>
                     {errored ? "✗" : done ? "✓" : active ? "·" : "○"}
                     {labels[step]}
                   </span>
@@ -722,35 +516,97 @@ export default function Copilot() {
             </div>
           </>
         )}
-
         <div className="ml-auto">
           <Button
-            size="sm"
-            variant="ghost"
+            size="sm" variant="ghost"
             className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1.5 border border-border/50 hover:border-border"
             disabled={pipelineStep !== null && pipelineStep !== "done" && pipelineStep !== "error"}
             onClick={runFullPipeline}
           >
             <Sparkles className="h-3 w-3" />
-            {pipelineStep && pipelineStep !== "done" && pipelineStep !== "error"
-              ? "Running…"
-              : "⚡ Run full pipeline"}
+            {pipelineStep && pipelineStep !== "done" && pipelineStep !== "error" ? "Running…" : "⚡ Run full pipeline"}
           </Button>
         </div>
       </div>
 
-      {/* SIGNAL BRIDGE — top of page, above everything else */}
+      {/* ── SIGNAL BRIDGE — Wags briefing card + decision pipeline ── */}
       {activeSignal ? (
-        <div className="space-y-2">
-          <SignalCard signal={activeSignal} busy={busy} onDecide={decide} />
+        <div className="space-y-3">
+          {/* Wags briefing card */}
+          <div className="panel p-4 border-primary/40 bg-gradient-to-r from-primary/8 via-primary/4 to-transparent animate-fade-in">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-md bg-primary/20 text-primary flex items-center justify-center shrink-0">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">
+                    Wags — Chief Copilot
+                  </span>
+                  <StatusBadge
+                    tone={activeSignal.side === "long" ? "safe" : "blocked"}
+                    size="sm"
+                    dot
+                  >
+                    {activeSignal.side}
+                  </StatusBadge>
+                  <span className="text-[10px] text-muted-foreground tabular">
+                    {(activeSignal.confidence * 100).toFixed(0)}% confidence
+                  </span>
+                  <span className="text-[10px] text-muted-foreground tabular">
+                    {activeSignal.symbol} @ ${activeSignal.proposedEntry.toFixed(2)}
+                  </span>
+                </div>
+                <p className="text-sm text-foreground leading-snug">
+                  {activeSignal.aiReasoning || "Signal ready for your decision."}
+                </p>
+                {activeSignal.proposedStop && activeSignal.proposedTarget && (
+                  <div className="flex items-center gap-4 mt-2 text-[11px] font-mono">
+                    <span className="text-status-blocked">SL ${activeSignal.proposedStop.toFixed(2)}</span>
+                    <span className="text-status-safe">TP ${activeSignal.proposedTarget.toFixed(2)}</span>
+                    <span className="text-muted-foreground">
+                      R/R {(Math.abs(activeSignal.proposedTarget - activeSignal.proposedEntry) / Math.abs(activeSignal.proposedEntry - activeSignal.proposedStop)).toFixed(1)}:1
+                    </span>
+                  </div>
+                )}
+              </div>
+              {/* Primary decision CTAs with keyboard shortcuts */}
+              <div className="flex flex-col gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={!!busy}
+                  onClick={() => decide("approve")}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-status-safe text-background text-sm font-semibold hover:bg-status-safe/90 disabled:opacity-50 transition-colors"
+                  title="Approve (A)"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {busy === "approve" ? "Opening…" : "Approve"}
+                  <kbd className="text-[9px] opacity-60 ml-0.5">A</kbd>
+                </button>
+                <button
+                  type="button"
+                  disabled={!!busy}
+                  onClick={() => decide("reject")}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-secondary border border-status-blocked/30 text-status-blocked text-sm font-semibold hover:bg-status-blocked/10 disabled:opacity-50 transition-colors"
+                  title="Reject (R)"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  {busy === "reject" ? "Declining…" : "Reject"}
+                  <kbd className="text-[9px] opacity-60 ml-0.5">R</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 9-step trade decision pipeline */}
+          <div className="panel p-4">
+            <TradeDecisionTimeline signal={activeSignal} />
+          </div>
+
           <div className="flex justify-end">
             <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (activeSignal?.id) setExplainSignal(activeSignal);
-                else toast.error("Signal not ready — wait a moment and try again.");
-              }}
+              size="sm" variant="outline"
+              onClick={() => { if (activeSignal?.id) setExplainSignal(activeSignal); else toast.error("Signal not ready."); }}
               className="gap-1.5"
             >
               <Telescope className="h-3.5 w-3.5" /> Explain this decision
@@ -758,22 +614,27 @@ export default function Copilot() {
           </div>
         </div>
       ) : (
-        <div className="panel p-6 text-center border-dashed">
-          <div className="h-10 w-10 rounded-md bg-secondary text-muted-foreground flex items-center justify-center mx-auto mb-3">
-            <Brain className="h-5 w-5" />
+        <div className="panel p-5 space-y-4 border-dashed">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-md bg-secondary text-muted-foreground flex items-center justify-center shrink-0">
+              <Brain className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">No pending signals</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Tap <span className="text-primary">Run engine now</span> to make Taylor scan the tape.
+              </p>
+            </div>
           </div>
-          <p className="text-sm font-medium text-foreground">No pending signals</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Tap <span className="text-primary">Run engine now</span> to make the AI read the tape and propose (or skip).
-          </p>
+          {/* System pipeline view when idle */}
+          <TradeDecisionTimeline signal={null} />
         </div>
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)_280px] 2xl:grid-cols-[300px_minmax(0,1fr)_320px] gap-4 items-start">
-        {/* LEFT COLUMN — symbol context + gate readout */}
+        {/* LEFT — symbol context + gate readout */}
         <div className="space-y-3">
           <MultiSymbolStrip />
-
           <div className="panel p-4">
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-2">
               <div className="text-sm font-medium text-foreground">Last engine tick</div>
@@ -784,56 +645,37 @@ export default function Copilot() {
               )}
             </div>
             {!snapshot ? (
-              <p className="text-xs text-muted-foreground italic">
-                No engine snapshot yet. Hit <span className="text-primary">Run engine now</span>.
-              </p>
+              <p className="text-xs text-muted-foreground italic">No engine snapshot yet. Hit <span className="text-primary">Run engine now</span>.</p>
             ) : lastGateReasons.length === 0 ? (
               <p className="text-xs text-status-safe italic">All gates clear. Engine is free to act.</p>
             ) : (
               <GateReasonList reasons={lastGateReasons} max={4} />
             )}
           </div>
-
           <MarketIntelligencePanel />
         </div>
 
-        {/* CENTER COLUMN — chat / history / calibration tabs */}
-        <div
-          className="panel flex flex-col overflow-hidden"
-          style={{ height: "min(72vh, 760px)" }}
-        >
+        {/* CENTER — chat / history / calibration */}
+        <div className="panel flex flex-col overflow-hidden" style={{ height: "min(72vh, 760px)" }}>
           <Tabs defaultValue="chat" className="flex-1 min-h-0 flex flex-col">
             <div className="mx-3 mt-3 flex items-center justify-between gap-2">
               <TooltipProvider delayDuration={200}>
                 <TabsList>
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <TabsTrigger value="chat">Chat</TabsTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>Conversation with the Copilot. Live system context auto-attached.</TooltipContent>
+                    <TooltipTrigger asChild><TabsTrigger value="chat">Chat</TabsTrigger></TooltipTrigger>
+                    <TooltipContent>Conversation with the Copilot. Live context auto-attached.</TooltipContent>
                   </Tooltip>
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <TabsTrigger value="history">Signal Log</TabsTrigger>
-                    </TooltipTrigger>
+                    <TooltipTrigger asChild><TabsTrigger value="history">Signal Log</TabsTrigger></TooltipTrigger>
                     <TooltipContent>Every engine tick — proposed, skipped, executed, or halted.</TooltipContent>
                   </Tooltip>
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <TabsTrigger value="calibration">AI Accuracy</TabsTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      When the AI says 80% confidence, is it right 80% of the time? This chart grades its honesty.
-                    </TooltipContent>
+                    <TooltipTrigger asChild><TabsTrigger value="calibration">AI Accuracy</TabsTrigger></TooltipTrigger>
+                    <TooltipContent>When the AI says 80% confidence, is it right 80% of the time?</TooltipContent>
                   </Tooltip>
                 </TabsList>
               </TooltipProvider>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                onClick={async () => { await createConversation(); }}
-              >
+              <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground" onClick={async () => { await createConversation(); }}>
                 <Plus className="h-3 w-3" /> New chat
               </Button>
             </div>
@@ -850,7 +692,7 @@ export default function Copilot() {
                       <div className="h-12 w-12 rounded-md bg-primary/15 text-primary flex items-center justify-center mb-3">
                         <Sparkles className="h-5 w-5" />
                       </div>
-                      <p className="text-sm font-medium text-foreground">Ask the Copilot</p>
+                      <p className="text-sm font-medium text-foreground">Ask Wags anything</p>
                       <p className="text-xs text-muted-foreground mt-1 max-w-sm">
                         Live context (mode, regime, position, signals, autonomy) is auto-attached. Threads persist across refreshes.
                       </p>
@@ -869,14 +711,7 @@ export default function Copilot() {
                   )}
                   {messages.map((m) => (
                     <div key={m.id} className={cn("flex flex-col gap-0.5", m.role === "user" ? "items-end" : "items-start")}>
-                      <div
-                        className={cn(
-                          "max-w-[85%] rounded-lg px-3 py-2 text-xs",
-                          m.role === "user"
-                            ? "bg-primary/15 border border-primary/25 text-foreground"
-                            : "bg-secondary border border-border text-foreground",
-                        )}
-                      >
+                      <div className={cn("max-w-[85%] rounded-lg px-3 py-2 text-xs", m.role === "user" ? "bg-primary/15 border border-primary/25 text-foreground" : "bg-secondary border border-border text-foreground")}>
                         {m.role === "assistant" ? (
                           <div className="prose prose-xs prose-invert max-w-none prose-p:my-1 prose-li:my-0 prose-headings:text-foreground prose-strong:text-foreground prose-code:text-primary leading-relaxed">
                             <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
@@ -892,23 +727,11 @@ export default function Copilot() {
                   ))}
                 </div>
               )}
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  send(input);
-                }}
-                className="border-t border-border p-3 flex gap-2 items-end"
-              >
+              <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="border-t border-border p-3 flex gap-2 items-end">
                 <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      send(input);
-                    }
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
                   placeholder="Ask about the system, market, or a signal…"
                   className="min-h-[44px] max-h-32 resize-none bg-background border-border"
                   disabled={streaming}
@@ -925,12 +748,10 @@ export default function Copilot() {
                 <span className="text-xs text-muted-foreground">{history.length} decisions</span>
               </div>
               <p className="text-[11px] text-muted-foreground mb-3">
-                Every engine decision. Click the <Telescope className="inline h-3 w-3 align-text-bottom" /> icon on any row for the full reasoning.
+                Every engine decision. Click <Telescope className="inline h-3 w-3 align-text-bottom" /> for full reasoning.
               </p>
               {history.length === 0 ? (
-                <div className="panel p-6 text-center text-xs text-muted-foreground italic">
-                  No history yet. Every tick — propose, skip, or halt — lands here.
-                </div>
+                <div className="panel p-6 text-center text-xs text-muted-foreground italic">No history yet. Every tick lands here.</div>
               ) : (
                 <div className="space-y-2">
                   {history.slice(0, 10).map((s) => (
@@ -950,16 +771,7 @@ export default function Copilot() {
                           <div className="text-xs tabular text-foreground">{(s.confidence * 100).toFixed(0)}%</div>
                           <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            if (s?.id) setExplainSignal(s);
-                            else toast.error("Signal not ready — wait a moment and try again.");
-                          }}
-                          className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-                          title="Explain this decision"
-                        >
+                        <Button size="sm" variant="ghost" onClick={() => { if (s?.id) setExplainSignal(s); else toast.error("Signal not ready."); }} className="h-7 w-7 p-0 text-muted-foreground hover:text-primary">
                           <Telescope className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -978,31 +790,23 @@ export default function Copilot() {
           </Tabs>
         </div>
 
-        {/* RIGHT COLUMN — autonomy + attached context */}
+        {/* RIGHT — autonomy + context panel */}
         <div className="space-y-3">
           <AutonomyToggle />
-
           <div className="panel p-4 space-y-3">
             <div>
               <div className="text-sm font-medium text-foreground">What Wags sees</div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                Auto-attached to every message you send.
-              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Auto-attached to every message.</p>
             </div>
-
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Mode</span>
                 <span className="text-foreground capitalize tabular">{system?.mode ?? "—"}</span>
               </div>
-
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Equity</span>
-                <span className="text-foreground tabular">
-                  {account ? `$${account.equity.toFixed(2)}` : "—"}
-                </span>
+                <span className="text-foreground tabular">{account ? `$${account.equity.toFixed(2)}` : "—"}</span>
               </div>
-
               <div className="flex items-start justify-between gap-2">
                 <span className="text-muted-foreground shrink-0">Engine pick</span>
                 <span className="text-foreground text-right">
@@ -1018,61 +822,40 @@ export default function Copilot() {
                   )}
                 </span>
               </div>
-
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Open</span>
                 <span className="text-foreground">
-                  {open[0] ? (
-                    <span className="capitalize">{open[0].side} {open[0].symbol.replace("-USD", "")}</span>
-                  ) : (
-                    <span className="text-muted-foreground italic">none</span>
-                  )}
+                  {open[0] ? <span className="capitalize">{open[0].side} {open[0].symbol.replace("-USD", "")}</span> : <span className="text-muted-foreground italic">none</span>}
                 </span>
               </div>
-
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Signal</span>
                 <span className="text-foreground">
-                  {activeSignal ? (
-                    <span className="capitalize tabular">
-                      {activeSignal.side} {(activeSignal.confidence * 100).toFixed(0)}%
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground italic">none</span>
-                  )}
+                  {activeSignal ? <span className="capitalize tabular">{activeSignal.side} {(activeSignal.confidence * 100).toFixed(0)}%</span> : <span className="text-muted-foreground italic">none</span>}
                 </span>
               </div>
-
               <div className="flex items-center justify-between gap-2">
                 <span className="text-muted-foreground">Corr. cap</span>
                 <span className="text-foreground tabular">
                   {open.length}/{activeProfile.maxCorrelatedPositions}{" "}
-                  {open.length >= activeProfile.maxCorrelatedPositions ? (
-                    <span className="text-status-caution">active</span>
-                  ) : (
-                    <span className="text-status-safe">clear</span>
-                  )}
+                  {open.length >= activeProfile.maxCorrelatedPositions ? <span className="text-status-caution">active</span> : <span className="text-status-safe">clear</span>}
                 </span>
               </div>
             </div>
-
           </div>
         </div>
       </div>
 
-      {/* Conversation history — deprioritised below the action grid */}
+      {/* Conversation history */}
       <ConversationSidebar
         conversations={conversations}
         activeId={activeId}
         onSelect={setActiveId}
-        onNew={async () => {
-          await createConversation();
-        }}
+        onNew={async () => { await createConversation(); }}
         onRename={renameConversation}
         onDelete={deleteConversation}
         loading={convLoading}
       />
-
 
       <SignalExplainDialog
         signal={explainSignal}
@@ -1095,3 +878,4 @@ function statusTone(status: string): "safe" | "blocked" | "neutral" | "candidate
   if (status === "pending") return "candidate";
   return "neutral";
 }
+

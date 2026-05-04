@@ -3,26 +3,18 @@ import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { EmptyState } from "@/components/trader/EmptyState";
 import { Button } from "@/components/ui/button";
-
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+  DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useStrategies, type NewStrategyInput } from "@/hooks/useStrategies";
@@ -30,18 +22,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import type { StrategyParam, StrategyStatus, StrategyVersion, StrategyMetrics } from "@/lib/domain-types";
 import {
-  ArrowRight,
-  Beaker,
-  ChevronDown,
-  Copy,
-  FlaskConical,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
+  ArrowRight, Beaker, Brain, ChevronDown, Copy, FlaskConical,
+  Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, ShieldCheck,
+  Trash2, TrendingDown, TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchCandlesAndBacktest } from "@/lib/backtest";
@@ -51,22 +34,82 @@ import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel
 import { PipelineFlowBanner } from "@/components/trader/PipelineFlowBanner";
 import { StrategyGradeBadge } from "@/components/trader/StrategyGradeBadge";
 import { displayNameFor, autoSummaryFromVersion } from "@/lib/strategy-naming";
+import { cn } from "@/lib/utils";
 
 const TRADES_TO_PROMOTE = 100;
 
+// ─── Katrina review panel ─────────────────────────────────────────────────────
+
+interface KatrinaReview {
+  reviewed_at: string;
+  brief_text: string;
+  win_rate_trend: string | null;
+  promote_ids: string[] | null;
+  kill_ids: string[] | null;
+}
+
+function KatrinaReviewPanel({ review }: { review: KatrinaReview }) {
+  const ms = Date.now() - new Date(review.reviewed_at).getTime();
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const age = h > 0 ? `${h}h ago` : `${m}m ago`;
+
+  const trendUp   = review.win_rate_trend === "improving";
+  const trendDown = review.win_rate_trend === "declining";
+  const promoteCount = (review.promote_ids ?? []).length;
+  const killCount    = (review.kill_ids ?? []).length;
+
+  return (
+    <div className="panel p-4 flex items-start gap-3 animate-fade-in">
+      <div className="h-10 w-10 rounded-md bg-secondary border border-border flex items-center justify-center shrink-0">
+        <Brain className="h-5 w-5 text-muted-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+            Katrina — Strategy Governance
+          </span>
+          <span className="text-[10px] text-muted-foreground/50 tabular">{age}</span>
+          {trendUp && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-status-safe">
+              <TrendingUp className="h-3 w-3" /> win rate improving
+            </span>
+          )}
+          {trendDown && (
+            <span className="inline-flex items-center gap-1 text-[10px] text-status-blocked">
+              <TrendingDown className="h-3 w-3" /> win rate declining
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-foreground leading-snug">{review.brief_text}</p>
+        {(promoteCount > 0 || killCount > 0) && (
+          <div className="flex items-center gap-4 mt-2 text-[11px]">
+            {promoteCount > 0 && (
+              <span className="text-status-safe">
+                ↑ {promoteCount} strategy{promoteCount > 1 ? "s" : ""} recommended for promotion
+              </span>
+            )}
+            {killCount > 0 && (
+              <span className="text-status-blocked">
+                ✗ {killCount} strategy{killCount > 1 ? "s" : ""} recommended for retirement
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <Link to="/learning" className="shrink-0 text-xs text-primary hover:underline inline-flex items-center gap-1">
+        Open Lab <ArrowRight className="h-3 w-3" />
+      </Link>
+    </div>
+  );
+}
+
+// ─── page ─────────────────────────────────────────────────────────────────────
+
 export default function StrategyLab() {
   const {
-    strategies,
-    loading,
-    create,
-    update,
-    remove,
-    refetch,
-    approved,
-    inTestingList,
-    archived,
-    duplicateIds,
-    removeDuplicates,
+    strategies, loading, create, update, remove, refetch,
+    approved, inTestingList, archived, duplicateIds, removeDuplicates,
   } = useStrategies();
   const { user, session } = useAuth();
 
@@ -75,21 +118,30 @@ export default function StrategyLab() {
   const [backtestingId, setBacktestingId] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  const [katrinaReview, setKatrinaReview] = useState<KatrinaReview | null>(null);
 
-  /** Map of strategyId → experiment title that promoted it. */
+  // Load Katrina's latest strategy review
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from("strategy_reviews")
+      .select("reviewed_at, brief_text, win_rate_trend, promote_ids, kill_ids")
+      .order("reviewed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled && data) setKatrinaReview(data as KatrinaReview);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const [promotionMap, setPromotionMap] = useState<Record<string, string>>({});
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const ids = strategies.map((s) => s.id);
-      if (ids.length === 0) {
-        setPromotionMap({});
-        return;
-      }
-      const { data } = await supabase
-        .from("experiments")
-        .select("id,title,strategy_id")
-        .in("strategy_id", ids);
+      if (ids.length === 0) { setPromotionMap({}); return; }
+      const { data } = await supabase.from("experiments").select("id,title,strategy_id").in("strategy_id", ids);
       if (cancelled) return;
       const map: Record<string, string> = {};
       for (const row of (data ?? []) as Array<{ title: string; strategy_id: string | null }>) {
@@ -97,31 +149,21 @@ export default function StrategyLab() {
       }
       setPromotionMap(map);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [strategies]);
 
-  /** Auto-pilot heartbeat — when did the cron last run for this user. */
   const [lastEvaluatedAt, setLastEvaluatedAt] = useState<string | null>(null);
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     const load = async () => {
-      const { data } = await supabase
-        .from("system_state")
-        .select("last_evaluated_at")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const { data } = await supabase.from("system_state").select("last_evaluated_at").eq("user_id", user.id).maybeSingle();
       if (cancelled) return;
       setLastEvaluatedAt((data as { last_evaluated_at: string | null } | null)?.last_evaluated_at ?? null);
     };
     load();
-    const t = setInterval(load, 60_000); // refresh every minute so the "N min ago" stays fresh
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
   }, [user?.id]);
 
   const editingStrategy = editingId ? strategies.find((s) => s.id === editingId) ?? null : null;
@@ -133,9 +175,7 @@ export default function StrategyLab() {
       }
       await update(id, { status });
       toast.success(`Strategy moved to ${status}.`);
-    } catch {
-      toast.error("Couldn't update strategy.");
-    }
+    } catch { toast.error("Couldn't update strategy."); }
   };
 
   const cloneFrom = (source: StrategyVersion): NewStrategyInput => {
@@ -144,9 +184,7 @@ export default function StrategyLab() {
       (_m, a, b, suffix) => `v${a}.${Number(b) + 1}${suffix.includes("cand") ? suffix : "-cand"}`,
     );
     return {
-      name: source.name,
-      version: v,
-      displayName: source.displayName,
+      name: source.name, version: v, displayName: source.displayName,
       status: "candidate",
       description: `Clone of ${source.version} — tweak params and test in paper.`,
       params: source.params,
@@ -163,28 +201,20 @@ export default function StrategyLab() {
         toast.warning(`${s.version}: zero signals on the sample. Loosen the cross filter.`, { id: t });
       } else {
         await update(s.id, { metrics: result.metrics });
-        toast.success(
-          `${s.version}: ${result.metrics.trades} trades · ${(result.metrics.winRate * 100).toFixed(0)}% win · ${result.metrics.expectancy.toFixed(2)}R expectancy`,
-          { id: t },
-        );
+        toast.success(`${s.version}: ${result.metrics.trades} trades · ${(result.metrics.winRate * 100).toFixed(0)}% win · ${result.metrics.expectancy.toFixed(2)}R expectancy`, { id: t });
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Backtest failed", { id: t });
-    } finally {
-      setBacktestingId(null);
-    }
+    } finally { setBacktestingId(null); }
   };
 
-  /** Manual trigger for the auto-pilot. Now summarizes a multi-candidate response. */
   const triggerEvaluate = async () => {
     setEvaluating(true);
     const t = toast.loading(`Checking ${inTestingList.length} paper test${inTestingList.length === 1 ? "" : "s"}…`);
     try {
       const { data, error } = await supabase.functions.invoke("evaluate-candidate", {
         body: { source: "manual" },
-        headers: session?.access_token
-          ? { Authorization: `Bearer ${session.access_token}` }
-          : undefined,
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined,
       });
       if (error) throw error;
       const userBlock = (data?.results?.[0] ?? {}) as {
@@ -216,9 +246,7 @@ export default function StrategyLab() {
       await refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Evaluation failed", { id: t });
-    } finally {
-      setEvaluating(false);
-    }
+    } finally { setEvaluating(false); }
   };
 
   const dupCount = inTestingList.filter((s) => duplicateIds.has(s.id)).length;
@@ -236,13 +264,16 @@ export default function StrategyLab() {
         }
       />
 
-      {/* Feature 4: Backtest-first UX loop — shows the 5-stage pipeline */}
+      {/* Katrina review panel — shown when a review exists */}
+      {katrinaReview && <KatrinaReviewPanel review={katrinaReview} />}
+
+      {/* 5-stage pipeline banner */}
       <PipelineFlowBanner
         activeStage={
-          strategies.length === 0          ? 0           // no strategies → "Idea" stage
-          : !approved                       ? 3           // candidates only → "Paper test"
-          : inTestingList.length > 0        ? 3           // candidates in paper → "Paper test"
-          : 4                                             // approved, no candidates → "Live"
+          strategies.length === 0 ? 0
+          : !approved             ? 3
+          : inTestingList.length > 0 ? 3
+          : 4
         }
       />
 
@@ -257,7 +288,6 @@ export default function StrategyLab() {
         />
       ) : (
         <div className="space-y-6">
-          {/* ─── 1. LIVE ────────────────────────────────────────────── */}
           <LivePanel
             approved={approved}
             promotionTitle={approved ? promotionMap[approved.id] : undefined}
@@ -267,10 +297,8 @@ export default function StrategyLab() {
             backtestingId={backtestingId}
           />
 
-          {/* ─── Account-wide scaling readiness ─────────────────────── */}
           <ScalingReadinessPanel />
 
-          {/* ─── 2. IN TESTING (multi) ──────────────────────────────── */}
           <InTestingListPanel
             list={inTestingList}
             approved={approved}
@@ -289,36 +317,25 @@ export default function StrategyLab() {
               try {
                 const n = await removeDuplicates();
                 if (n > 0) toast.success(`Archived ${n} duplicate${n === 1 ? "" : "s"}.`);
-              } catch {
-                toast.error("Couldn't archive duplicates.");
-              }
+              } catch { toast.error("Couldn't archive duplicates."); }
             }}
           />
 
-          {/* ─── 3. ARCHIVE ──────────────────────────────────────────── */}
           {archived.length > 0 && (
             <Collapsible open={showArchive} onOpenChange={setShowArchive}>
               <CollapsibleTrigger asChild>
-                <button
-                  type="button"
-                  className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-md hover:bg-secondary/40 transition-colors"
-                >
+                <button type="button" className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 rounded-md hover:bg-secondary/40 transition-colors">
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                      Archive
-                    </span>
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Archive</span>
                     <span className="text-xs text-muted-foreground">— {archived.length}</span>
                   </div>
-                  <ChevronDown
-                    className={`h-4 w-4 text-muted-foreground transition-transform ${showArchive ? "rotate-180" : ""}`}
-                  />
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showArchive ? "rotate-180" : ""}`} />
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-2 space-y-1">
                 {archived.map((s) => (
                   <ArchiveRow
-                    key={s.id}
-                    s={s}
+                    key={s.id} s={s}
                     promotionTitle={promotionMap[s.id]}
                     onDelete={() => remove(s.id).then(() => toast.success("Strategy removed."))}
                   />
@@ -333,47 +350,27 @@ export default function StrategyLab() {
         open={newOpen}
         onOpenChange={setNewOpen}
         onSubmit={async (input) => {
-          try {
-            await create(input);
-            toast.success("Strategy created.");
-            setNewOpen(false);
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Couldn't create strategy");
-          }
+          try { await create(input); toast.success("Strategy created."); setNewOpen(false); }
+          catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't create strategy"); }
         }}
       />
-
       <StrategyDialog
         open={!!editingStrategy}
         strategy={editingStrategy ?? undefined}
         onOpenChange={(o) => !o && setEditingId(null)}
         onSubmit={async (input) => {
           if (!editingStrategy) return;
-          try {
-            await update(editingStrategy.id, input);
-            toast.success("Strategy updated.");
-            setEditingId(null);
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Couldn't update");
-          }
+          try { await update(editingStrategy.id, input); toast.success("Strategy updated."); setEditingId(null); }
+          catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't update"); }
         }}
       />
     </div>
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// LIVE
-// ────────────────────────────────────────────────────────────────────────
+// ─── Live panel ───────────────────────────────────────────────────────────────
 
-function LivePanel({
-  approved,
-  promotionTitle,
-  onClone,
-  onEdit,
-  onBacktest,
-  backtestingId,
-}: {
+function LivePanel({ approved, promotionTitle, onClone, onEdit, onBacktest, backtestingId }: {
   approved: StrategyVersion | null;
   promotionTitle?: string;
   onClone: (s: StrategyVersion) => void;
@@ -405,47 +402,29 @@ function LivePanel({
             <span className="text-xs text-muted-foreground font-mono">{approved.name} {approved.version}</span>
             <StrategyGradeBadge metrics={approved.metrics} size="sm" />
           </div>
-          {approved.description && (
-            <p className="text-sm text-muted-foreground max-w-xl">{approved.description}</p>
-          )}
+          {approved.description && <p className="text-sm text-muted-foreground max-w-xl">{approved.description}</p>}
           {promotionTitle && (
             <p className="text-[11px] text-muted-foreground italic">
               Promoted from experiment:{" "}
-              <Link to="/learning" className="text-primary hover:underline">
-                {promotionTitle}
-              </Link>
+              <Link to="/learning" className="text-primary hover:underline">{promotionTitle}</Link>
             </p>
           )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Live strategy actions">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onClone(approved)}>
-              <Copy className="h-4 w-4 mr-2" /> Clone as candidate
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onEdit(approved)}>
-              <Pencil className="h-4 w-4 mr-2" /> Edit
-            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onClone(approved)}><Copy className="h-4 w-4 mr-2" /> Clone as candidate</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEdit(approved)}><Pencil className="h-4 w-4 mr-2" /> Edit</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={backtestingId === approved.id}
-              onClick={() => onBacktest(approved)}
-            >
-              {backtestingId === approved.id ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <FlaskConical className="h-4 w-4 mr-2" />
-              )}
+            <DropdownMenuItem disabled={backtestingId === approved.id} onClick={() => onBacktest(approved)}>
+              {backtestingId === approved.id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FlaskConical className="h-4 w-4 mr-2" />}
               Re-run backtest
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-border">
         <FriendlyMetric label="Avg profit per trade" sub="Expectancy" value={m.trades === 0 ? "—" : `${m.expectancy.toFixed(2)}R`} hint="How many R you make on an average trade. Above 0 = profitable." />
         <FriendlyMetric label="How often it wins" sub="Win rate" value={m.trades === 0 ? "—" : `${(m.winRate * 100).toFixed(0)}%`} hint="% of trades that closed in profit." />
@@ -457,25 +436,12 @@ function LivePanel({
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// IN TESTING (multi)
-// ────────────────────────────────────────────────────────────────────────
+// ─── In testing panel ─────────────────────────────────────────────────────────
 
 function InTestingListPanel({
-  list,
-  approved,
-  promotionMap,
-  duplicateIds,
-  dupCount,
-  evaluating,
-  onTriggerEvaluate,
-  lastEvaluatedAt,
-  onForcePromote,
-  onRetire,
-  onEdit,
-  onBacktest,
-  backtestingId,
-  onRemoveDuplicates,
+  list, approved, promotionMap, duplicateIds, dupCount, evaluating,
+  onTriggerEvaluate, lastEvaluatedAt, onForcePromote, onRetire,
+  onEdit, onBacktest, backtestingId, onRemoveDuplicates,
 }: {
   list: StrategyVersion[];
   approved: StrategyVersion | null;
@@ -503,11 +469,7 @@ function InTestingListPanel({
           icon={<Beaker className="h-5 w-5" />}
           title="Nothing being tested"
           description="Head to Learning to promote an experiment, or clone the live strategy from the menu above."
-          action={
-            <Button asChild size="sm" variant="outline">
-              <Link to="/learning">Open Learning</Link>
-            </Button>
-          }
+          action={<Button asChild size="sm" variant="outline"><Link to="/learning">Open Learning</Link></Button>}
         />
       </div>
     );
@@ -519,9 +481,7 @@ function InTestingListPanel({
         <div className="space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge tone="candidate" size="sm" dot pulse>Paper testing</StatusBadge>
-            <span className="text-xs text-muted-foreground">
-              {list.length} running in parallel
-            </span>
+            <span className="text-xs text-muted-foreground">{list.length} running in parallel</span>
           </div>
           <p className="text-sm text-muted-foreground max-w-xl">
             Each candidate is collecting its own paper trades. The auto-pilot evaluates every one independently and only promotes the winner.
@@ -529,42 +489,23 @@ function InTestingListPanel({
         </div>
         <div className="flex items-center gap-2">
           {dupCount > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 h-8 text-xs"
-              onClick={onRemoveDuplicates}
-            >
+            <Button size="sm" variant="outline" className="gap-1.5 h-8 text-xs" onClick={onRemoveDuplicates}>
               <Trash2 className="h-3 w-3" /> Remove {dupCount} duplicate{dupCount === 1 ? "" : "s"}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 h-8"
-            onClick={onTriggerEvaluate}
-            disabled={evaluating}
-          >
-            {evaluating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
+          <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={onTriggerEvaluate} disabled={evaluating}>
+            {evaluating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Run check now
           </Button>
         </div>
       </div>
 
-      {/* Auto-pilot banner — adapts to count and shows last-check heartbeat */}
       <AutoPilotBanner count={list.length} lastEvaluatedAt={lastEvaluatedAt} />
 
-      {/* Per-candidate rows */}
       <div className="divide-y divide-border">
         {list.map((s) => (
           <CandidateRow
-            key={s.id}
-            s={s}
-            approved={approved}
+            key={s.id} s={s} approved={approved}
             promotionTitle={promotionMap[s.id]}
             isDuplicate={duplicateIds.has(s.id)}
             backtestingId={backtestingId}
@@ -579,13 +520,7 @@ function InTestingListPanel({
   );
 }
 
-function AutoPilotBanner({
-  count,
-  lastEvaluatedAt,
-}: {
-  count: number;
-  lastEvaluatedAt: string | null;
-}) {
+function AutoPilotBanner({ count, lastEvaluatedAt }: { count: number; lastEvaluatedAt: string | null }) {
   if (count === 0) return null;
   const heartbeat = formatHeartbeat(lastEvaluatedAt);
   const next = nextCheckLabel(lastEvaluatedAt);
@@ -633,15 +568,8 @@ function nextCheckLabel(iso: string | null): string | null {
 }
 
 function CandidateRow({
-  s,
-  approved,
-  promotionTitle,
-  isDuplicate,
-  backtestingId,
-  onForcePromote,
-  onRetire,
-  onEdit,
-  onBacktest,
+  s, approved, promotionTitle, isDuplicate, backtestingId,
+  onForcePromote, onRetire, onEdit, onBacktest,
 }: {
   s: StrategyVersion;
   approved: StrategyVersion | null;
@@ -658,8 +586,8 @@ function CandidateRow({
   const trades = m.trades ?? 0;
   const remaining = Math.max(0, TRADES_TO_PROMOTE - trades);
   const canForcePromote = trades >= TRADES_TO_PROMOTE;
-
   const friendly = displayNameFor(s);
+
   const paramDiffs = useMemo(() => {
     if (!approved) return [];
     const baseMap = new Map(approved.params.map((p) => [p.key, p.value]));
@@ -669,9 +597,7 @@ function CandidateRow({
       if (before !== p.value) diffs.push({ key: p.key, before: before ?? "—", after: p.value });
     }
     for (const p of approved.params) {
-      if (!s.params.some((x) => x.key === p.key)) {
-        diffs.push({ key: p.key, before: p.value, after: "—" });
-      }
+      if (!s.params.some((x) => x.key === p.key)) diffs.push({ key: p.key, before: p.value, after: "—" });
     }
     return diffs;
   }, [approved, s.params]);
@@ -691,46 +617,22 @@ function CandidateRow({
           </div>
           <p className="text-xs text-muted-foreground">
             Variant of <span className="text-foreground">{friendly}</span>
-            {promotionTitle && (
-              <>
-                {" · from "}
-                <Link to="/learning" className="text-primary hover:underline">
-                  {promotionTitle}
-                </Link>
-              </>
-            )}
+            {promotionTitle && <> · from <Link to="/learning" className="text-primary hover:underline">{promotionTitle}</Link></>}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs gap-1"
-            onClick={() => setExpanded((v) => !v)}
-            aria-label={expanded ? "Hide details" : "Show details"}
-          >
+          <Button size="sm" variant="ghost" className="h-7 text-xs gap-1" onClick={() => setExpanded((v) => !v)}>
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
             {expanded ? "Less" : "Details"}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Candidate actions">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><MoreHorizontal className="h-4 w-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEdit}>
-                <Pencil className="h-4 w-4 mr-2" /> Edit
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={backtestingId === s.id}
-                onClick={onBacktest}
-              >
-                {backtestingId === s.id ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <FlaskConical className="h-4 w-4 mr-2" />
-                )}
+              <DropdownMenuItem onClick={onEdit}><Pencil className="h-4 w-4 mr-2" /> Edit</DropdownMenuItem>
+              <DropdownMenuItem disabled={backtestingId === s.id} onClick={onBacktest}>
+                {backtestingId === s.id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FlaskConical className="h-4 w-4 mr-2" />}
                 Re-run backtest
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -744,9 +646,7 @@ function CandidateRow({
                     </span>
                   </TooltipTrigger>
                   {!canForcePromote && (
-                    <TooltipContent side="left">
-                      Need {remaining} more paper trade{remaining === 1 ? "" : "s"} (currently {trades}/{TRADES_TO_PROMOTE}).
-                    </TooltipContent>
+                    <TooltipContent side="left">Need {remaining} more paper trade{remaining === 1 ? "" : "s"} ({trades}/{TRADES_TO_PROMOTE}).</TooltipContent>
                   )}
                 </Tooltip>
               </TooltipProvider>
@@ -758,25 +658,11 @@ function CandidateRow({
         </div>
       </div>
 
-      {/* Headline deltas always visible */}
       <div className="mt-2.5 grid grid-cols-1 md:grid-cols-[auto_auto] gap-3 items-center justify-end">
-        <CompactDelta
-          label="Profit/trade"
-          cur={m.expectancy}
-          base={approved?.metrics.expectancy ?? null}
-          suffix="R"
-          untested={trades === 0}
-        />
-        <CompactDelta
-          label="Win rate"
-          cur={m.winRate * 100}
-          base={approved ? approved.metrics.winRate * 100 : null}
-          suffix="%"
-          untested={trades === 0}
-        />
+        <CompactDelta label="Profit/trade" cur={m.expectancy} base={approved?.metrics.expectancy ?? null} suffix="R" untested={trades === 0} />
+        <CompactDelta label="Win rate" cur={m.winRate * 100} base={approved ? approved.metrics.winRate * 100 : null} suffix="%" untested={trades === 0} />
       </div>
 
-      {/* Expanded details */}
       {expanded && (
         <div className="mt-3 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 pt-3 border-t border-border">
@@ -807,35 +693,19 @@ function CandidateRow({
   );
 }
 
-function CompactDelta({
-  label,
-  cur,
-  base,
-  suffix = "",
-  untested = false,
-}: {
-  label: string;
-  cur: number;
-  base: number | null;
-  suffix?: string;
-  untested?: boolean;
-}) {
-  if (untested) {
-    return (
-      <div className="text-right min-w-[78px]">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-sm tabular text-muted-foreground">—</div>
-      </div>
-    );
-  }
-  if (base == null || !Number.isFinite(base)) {
-    return (
-      <div className="text-right min-w-[78px]">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="text-sm tabular text-foreground">{cur.toFixed(2)}{suffix}</div>
-      </div>
-    );
-  }
+function CompactDelta({ label, cur, base, suffix = "", untested = false }: { label: string; cur: number; base: number | null; suffix?: string; untested?: boolean }) {
+  if (untested) return (
+    <div className="text-right min-w-[78px]">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-sm tabular text-muted-foreground">—</div>
+    </div>
+  );
+  if (base == null || !Number.isFinite(base)) return (
+    <div className="text-right min-w-[78px]">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-sm tabular text-foreground">{cur.toFixed(2)}{suffix}</div>
+    </div>
+  );
   const delta = cur - base;
   const better = delta > 0;
   const same = delta === 0;
@@ -852,41 +722,17 @@ function CompactDelta({
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// ARCHIVE
-// ────────────────────────────────────────────────────────────────────────
-
-function ArchiveRow({
-  s,
-  promotionTitle,
-  onDelete,
-}: {
-  s: StrategyVersion;
-  promotionTitle?: string;
-  onDelete: () => void;
-}) {
+function ArchiveRow({ s, promotionTitle, onDelete }: { s: StrategyVersion; promotionTitle?: string; onDelete: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2 px-3 text-sm rounded-md hover:bg-secondary/40">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <span className="text-muted-foreground truncate">{displayNameFor(s)}</span>
         <span className="text-muted-foreground text-xs font-mono">{s.name} {s.version}</span>
-        {promotionTitle && (
-          <span className="text-[11px] text-muted-foreground italic truncate">
-            · {promotionTitle}
-          </span>
-        )}
+        {promotionTitle && <span className="text-[11px] text-muted-foreground italic truncate">· {promotionTitle}</span>}
       </div>
       <div className="flex items-center gap-3">
-        <span className="text-[11px] text-muted-foreground tabular">
-          {new Date(s.createdAt).toLocaleDateString()}
-        </span>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-          onClick={onDelete}
-          aria-label="Delete permanently"
-        >
+        <span className="text-[11px] text-muted-foreground tabular">{new Date(s.createdAt).toLocaleDateString()}</span>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={onDelete}>
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -894,146 +740,86 @@ function ArchiveRow({
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Small primitives
-// ────────────────────────────────────────────────────────────────────────
-
-/** Plain-English metric tile. */
-const FriendlyMetric = React.forwardRef<HTMLButtonElement, {
-  label: string;
-  sub: string;
-  value: string;
-  hint: string;
-}>(function FriendlyMetric({ label, sub, value, hint }, ref) {
-  return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            ref={ref}
-            className="cursor-help text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-          >
-            <div className="text-xs text-muted-foreground leading-tight">{label}</div>
-            <div className="text-base tabular text-foreground font-medium mt-0.5">{value}</div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-});
-
-/** Same as FriendlyMetric but shows a delta vs the live baseline. */
-const FriendlyDeltaMetric = React.forwardRef<HTMLButtonElement, {
-  label: string;
-  sub: string;
-  cur: number;
-  base: number | null;
-  suffix?: string;
-  inverse?: boolean;
-  untested?: boolean;
-  hint: string;
-}>(function FriendlyDeltaMetric(
-  { label, sub, cur, base, suffix = "", inverse = false, untested = false, hint },
-  ref,
-) {
-  let body: React.ReactNode;
-  if (untested) {
-    body = <div className="text-base tabular text-muted-foreground font-medium mt-0.5">—</div>;
-  } else if (base == null || !Number.isFinite(base)) {
-    body = (
-      <div className="text-base tabular text-foreground font-medium mt-0.5">
-        {cur.toFixed(2)}{suffix}
-      </div>
-    );
-  } else {
-    const delta = cur - base;
-    const better = inverse ? delta < 0 : delta > 0;
-    const same = delta === 0;
-    body = (
-      <div className="text-base tabular text-foreground font-medium mt-0.5">
-        {cur.toFixed(2)}{suffix}{" "}
-        <span className={`text-xs ${same ? "text-muted-foreground" : better ? "text-status-safe" : "text-status-blocked"}`}>
-          ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
-        </span>
-      </div>
+const FriendlyMetric = React.forwardRef<HTMLButtonElement, { label: string; sub: string; value: string; hint: string }>(
+  function FriendlyMetric({ label, sub, value, hint }, ref) {
+    return (
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" ref={ref} className="cursor-help text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+              <div className="text-xs text-muted-foreground leading-tight">{label}</div>
+              <div className="text-base tabular text-foreground font-medium mt-0.5">{value}</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[200px] text-xs">{hint}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
-  return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            ref={ref}
-            className="cursor-help text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-          >
-            <div className="text-xs text-muted-foreground leading-tight">{label}</div>
-            {body}
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-[220px] text-xs">{hint} Number in parentheses is the change vs the live strategy.</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-});
-// ────────────────────────────────────────────────────────────────────────
+);
 
-function StrategyDialog({
-  open,
-  onOpenChange,
-  strategy,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  strategy?: StrategyVersion;
-  onSubmit: (input: NewStrategyInput) => void;
-}) {
+const FriendlyDeltaMetric = React.forwardRef<HTMLButtonElement, { label: string; sub: string; cur: number; base: number | null; suffix?: string; inverse?: boolean; untested?: boolean; hint: string }>(
+  function FriendlyDeltaMetric({ label, sub, cur, base, suffix = "", inverse = false, untested = false, hint }, ref) {
+    let body: React.ReactNode;
+    if (untested) {
+      body = <div className="text-base tabular text-muted-foreground font-medium mt-0.5">—</div>;
+    } else if (base == null || !Number.isFinite(base)) {
+      body = <div className="text-base tabular text-foreground font-medium mt-0.5">{cur.toFixed(2)}{suffix}</div>;
+    } else {
+      const delta = cur - base;
+      const better = inverse ? delta < 0 : delta > 0;
+      const same = delta === 0;
+      body = (
+        <div className="text-base tabular text-foreground font-medium mt-0.5">
+          {cur.toFixed(2)}{suffix}{" "}
+          <span className={`text-xs ${same ? "text-muted-foreground" : better ? "text-status-safe" : "text-status-blocked"}`}>
+            ({delta >= 0 ? "+" : ""}{delta.toFixed(2)})
+          </span>
+        </div>
+      );
+    }
+    return (
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" ref={ref} className="cursor-help text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+              <div className="text-xs text-muted-foreground leading-tight">{label}</div>
+              {body}
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">{sub}</div>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[220px] text-xs">{hint} Number in parentheses is the change vs the live strategy.</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  }
+);
+
+function StrategyDialog({ open, onOpenChange, strategy, onSubmit }: { open: boolean; onOpenChange: (o: boolean) => void; strategy?: StrategyVersion; onSubmit: (input: NewStrategyInput) => void }) {
   const [name, setName] = useState(strategy?.name ?? "trend-rev");
   const [version, setVersion] = useState(strategy?.version ?? "v1.0-cand");
   const [displayName, setDisplayName] = useState(strategy?.displayName ?? "");
   const [status, setStatus] = useState<StrategyStatus>(strategy?.status ?? "candidate");
   const [description, setDescription] = useState(strategy?.description ?? "");
   const [params, setParams] = useState<StrategyParam[]>(strategy?.params ?? []);
-  const [metricsText, setMetricsText] = useState(
-    strategy
-      ? JSON.stringify(strategy.metrics, null, 2)
-      : `{\n  "expectancy": 0,\n  "winRate": 0,\n  "maxDrawdown": 0,\n  "sharpe": 0,\n  "trades": 0\n}`,
-  );
+  const [metricsText, setMetricsText] = useState(strategy ? JSON.stringify(strategy.metrics, null, 2) : `{\n  "expectancy": 0,\n  "winRate": 0,\n  "maxDrawdown": 0,\n  "sharpe": 0,\n  "trades": 0\n}`);
 
   useEffect(() => {
     if (strategy) {
-      setName(strategy.name);
-      setVersion(strategy.version);
-      setDisplayName(strategy.displayName ?? "");
-      setStatus(strategy.status);
-      setDescription(strategy.description);
-      setParams(strategy.params);
+      setName(strategy.name); setVersion(strategy.version);
+      setDisplayName(strategy.displayName ?? ""); setStatus(strategy.status);
+      setDescription(strategy.description); setParams(strategy.params);
       setMetricsText(JSON.stringify(strategy.metrics, null, 2));
     }
   }, [strategy]);
 
   const submit = () => {
     let metrics: StrategyMetrics;
-    try {
-      metrics = JSON.parse(metricsText);
-    } catch {
-      return toast.error("Metrics is not valid JSON.");
-    }
+    try { metrics = JSON.parse(metricsText); }
+    catch { return toast.error("Metrics is not valid JSON."); }
     if (!name.trim() || !version.trim()) return toast.error("Name + version required.");
-    onSubmit({
-      name,
-      version,
-      displayName: displayName.trim() ? displayName.trim() : null,
-      status,
-      description,
-      params,
-      metrics,
-    });
+    onSubmit({ name, version, displayName: displayName.trim() ? displayName.trim() : null, status, description, params, metrics });
   };
 
   return (
@@ -1046,11 +832,7 @@ function StrategyDialog({
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Display name (optional)</Label>
-            <Input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="e.g. Steady Trender"
-            />
+            <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="e.g. Steady Trender" />
             <p className="text-[10px] text-muted-foreground">Friendly nickname shown in the UI. Leave blank to use the default.</p>
           </div>
           <div className="grid grid-cols-3 gap-3">

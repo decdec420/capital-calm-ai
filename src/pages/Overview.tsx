@@ -6,14 +6,14 @@ import { RegimeBadge } from "@/components/trader/RegimeBadge";
 import { DailyBriefPanel } from "@/components/trader/DailyBriefPanel";
 import { DoctrineProposalBanner } from "@/components/trader/DoctrineProposalBanner";
 import { SymbolStrip } from "@/components/trader/SymbolStrip";
+import { AgentStatusRow } from "@/components/trader/AgentStatusRow";
+import { NextBestAction } from "@/components/trader/NextBestAction";
 
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/MetricDrilldowns";
 
-import { AgentStatusRow } from "@/components/trader/AgentStatusRow";
-import { NextBestAction } from "@/components/trader/NextBestAction";
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Button } from "@/components/ui/button";
 import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
@@ -42,6 +42,7 @@ import { Brain } from "lucide-react";
 import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
 import type { Regime } from "@/lib/domain-types";
 import { DOCTRINE } from "@/lib/doctrine-constants";
+import { toast } from "sonner";
 
 function FreshnessDot({ timestamp }: { timestamp: number | null }) {
   const label = useRelativeTime(timestamp);
@@ -53,7 +54,6 @@ function FreshnessDot({ timestamp }: { timestamp: number | null }) {
         className={`inline-block rounded-full ${stale ? "bg-status-caution" : "bg-muted-foreground"}`}
         style={{ width: 5, height: 5 }}
       />
-      <AgentStatusRow />
       {label}
     </span>
   );
@@ -63,14 +63,14 @@ export default function Overview() {
   const { data: account, lastUpdatedAt: accountUpdatedAt, loading: accountLoading } = useAccountState();
   const { data: system, update: updateSystem } = useSystemState();
   const { open, closed } = useTrades();
-  
+
   const { guardrails } = useGuardrails();
   const { settings: doctrine } = useDoctrineSettings();
   const { candles } = useCandles();
   const { pending: pendingSignals } = useSignals();
   const [killOpen, setKillOpen] = useState(false);
   const [drilldown, setDrilldown] = useState<DrilldownKind | null>(null);
-  
+
   const activeSignal = pendingSignals[0];
 
   // Snapshot is the source of truth. Local computeRegime is the fallback
@@ -86,8 +86,6 @@ export default function Overview() {
       }
     : { regime: localRegime.regime, confidence: localRegime.confidence, setupScore: localRegime.setupScore };
   const lastGateReasons = snapshot?.gateReasons ?? [];
-  
-  // (Per-symbol prices are now rendered by SymbolStrip from the snapshot.)
 
   const openPosition = open[0];
   const closedToday = closed.filter((t) => t.closedAt && new Date(t.closedAt).toDateString() === new Date().toDateString());
@@ -95,17 +93,11 @@ export default function Overview() {
   const unrealizedToday = open.reduce((sum, t) => sum + (t.unrealizedPnl ?? 0), 0);
   const lossToday = Math.min(0, realizedToday);
 
-
-  
-
   const dailyPnl = account ? account.equity - account.startOfDayEquity : 0;
   const dailyPnlPct = account && account.startOfDayEquity ? (dailyPnl / account.startOfDayEquity) * 100 : 0;
   const floorDistance = account ? ((account.equity - account.balanceFloor) / account.equity) * 100 : 0;
   const lossVsCap = account ? (Math.abs(lossToday) / account.startOfDayEquity) * 100 : 0;
 
-  // Cumulative equity trail across the most recent N closed trades.
-  // Mirrors the EquityDrilldown computation so the spark line and the
-  // drilldown chart agree.
   const equitySeries = useMemo(() => {
     if (!account) return [] as number[];
     const sorted = [...closed]
@@ -126,16 +118,11 @@ export default function Overview() {
   const winsToday = closedToday.filter((t) => (t.pnl ?? 0) > 0).length;
   const lossesToday = closedToday.filter((t) => (t.pnl ?? 0) < 0).length;
 
-  // Adaptive precision: when amounts are small (typical for tiny paper accounts
-  // or fractional crypto sizing), 2 decimals hides all the action. Show 4
-  // decimals below $1 and 2 decimals above. Equity always at 2.
   const fmtMoney = (n: number, alwaysTwo = false) => {
     const abs = Math.abs(n);
     const digits = alwaysTwo ? 2 : abs < 1 ? 4 : 2;
     return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   };
-
-
 
   const toggleBot = async () => {
     if (!system) return;
@@ -170,24 +157,19 @@ export default function Overview() {
           </AsyncActionButton>
         }
       />
-      <AgentStatusRow />
 
       {system && (
         <BrokerStatusInline
           connection={system.brokerConnection}
           liveArmed={system.liveTradingEnabled}
         />
-      <AgentStatusRow />
       )}
-
-      {/* Trading pause — shown inline in DailyBriefPanel above */}
 
       {/* Compact status row */}
       <div className="panel p-4 flex flex-wrap items-center gap-x-6 gap-y-3 bg-gradient-surface">
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-md bg-primary/15 text-primary flex items-center justify-center">
             <Activity className="h-4 w-4" />
-      <AgentStatusRow />
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">System mode</div>
@@ -195,16 +177,13 @@ export default function Overview() {
           </div>
         </div>
         <div className="h-9 w-px bg-border hidden md:block" />
-      <AgentStatusRow />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC regime</div>
           <div className="mt-0.5">
             <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
-      <AgentStatusRow />
           </div>
         </div>
         <div className="h-9 w-px bg-border hidden md:block" />
-      <AgentStatusRow />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk posture</div>
           <div className="mt-0.5">
@@ -220,6 +199,8 @@ export default function Overview() {
         perSymbol={snapshot?.perSymbol ?? []}
         ranAt={snapshot?.ranAt ?? null}
       />
+
+      {/* Agent status row — who is doing what right now */}
       <AgentStatusRow />
 
       {/* Pending signal banner */}
@@ -230,7 +211,6 @@ export default function Overview() {
         >
           <div className="h-10 w-10 rounded-md bg-primary/20 text-primary flex items-center justify-center shrink-0">
             <Brain className="h-5 w-5" />
-      <AgentStatusRow />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
@@ -253,7 +233,7 @@ export default function Overview() {
         </Link>
       )}
 
-      {/* Why isn't the bot trading? — surfaced from the last engine snapshot */}
+      {/* Why isn't the bot trading? */}
       {!activeSignal && lastGateReasons.length > 0 && (
         <div className="panel p-4 space-y-2.5">
           <div className="flex items-center justify-between">
@@ -267,14 +247,13 @@ export default function Overview() {
             )}
           </div>
           <GateReasonList reasons={lastGateReasons} max={3} />
-      <AgentStatusRow />
           <Link to="/copilot" className="text-xs text-primary hover:underline inline-block">
             Open Copilot to act →
           </Link>
         </div>
       )}
 
-      {/* Small-account callout — honest math + a real path to fix it. */}
+      {/* Small-account callout */}
       {account && account.equity > 0 && account.equity < 50 && (() => {
         const pct = doctrine?.max_order_pct ?? 0.05;
         const floor = doctrine?.max_order_abs_floor ?? 0.25;
@@ -283,7 +262,6 @@ export default function Overview() {
         return (
           <div className="panel p-3 flex items-start gap-2.5 border-status-caution/40 bg-status-caution/5">
             <ShieldAlert className="h-4 w-4 text-status-caution shrink-0 mt-0.5" />
-      <AgentStatusRow />
             <div className="text-xs leading-snug">
               <span className="font-medium text-foreground">
                 Account too small for meaningful position sizing.
@@ -318,10 +296,8 @@ export default function Overview() {
               <>
                 Total account value: cash + open positions marked-to-market.
                 <br />
-      <AgentStatusRow />
                 Realized today: ${fmtMoney(realizedToday)} · Unrealized: ${fmtMoney(unrealizedToday)}
               </>
-      <AgentStatusRow />
             ) : (
               "Total account value: cash + open positions marked-to-market."
             )
@@ -330,7 +306,6 @@ export default function Overview() {
           loading={accountLoading}
           freshness={<FreshnessDot timestamp={accountUpdatedAt} />}
         />
-      <AgentStatusRow />
         <MetricCard
           label="Daily PnL"
           value={`${dailyPnl >= 0 ? "+" : "-"}$${fmtMoney(Math.abs(dailyPnl))}`}
@@ -351,7 +326,6 @@ export default function Overview() {
           onClick={() => setDrilldown("dailyPnl")}
           loading={accountLoading}
         />
-      <AgentStatusRow />
         <MetricCard
           label="Trades today"
           value={String(tradesTodayCount)}
@@ -366,7 +340,6 @@ export default function Overview() {
           onClick={() => setDrilldown("tradesToday")}
           loading={accountLoading}
         />
-      <AgentStatusRow />
         <MetricCard
           label="Loss vs cap"
           value={`${lossVsCap.toFixed(2)}%`}
@@ -382,7 +355,6 @@ export default function Overview() {
           onClick={() => setDrilldown("lossVsCap")}
           loading={accountLoading}
         />
-      <AgentStatusRow />
         <MetricCard
           label="Floor distance"
           value={account ? `${floorDistance.toFixed(1)}%` : "—"}
@@ -397,8 +369,6 @@ export default function Overview() {
           onClick={() => setDrilldown("floorDistance")}
           loading={accountLoading}
         />
-      <AgentStatusRow />
-
         <MetricCard
           label="Live mode"
           value={liveGated ? "Gated" : "Armed"}
@@ -410,14 +380,12 @@ export default function Overview() {
           onClick={() => setDrilldown("liveMode")}
           loading={accountLoading}
         />
-      <AgentStatusRow />
       </div>
 
       {/* Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <DoctrineProposalBanner />
-      <AgentStatusRow />
 
           <DailyBriefPanel
             jessicaDecision={system?.lastJessicaDecision ?? null}
@@ -425,13 +393,10 @@ export default function Overview() {
             tradingPausedUntil={system?.tradingPausedUntil ?? null}
             pauseReason={system?.pauseReason ?? null}
           />
-      <AgentStatusRow />
 
-          {/* Tactical reads & strategy roster live on dedicated tabs to keep
-              Overview scannable. Quick links surface the freshest context. */}
           <div className="panel p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Link
-              to="/market-intel"
+              to="/market"
               className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
             >
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -453,14 +418,14 @@ export default function Overview() {
               </div>
             </Link>
             <Link
-              to="/edge"
+              to="/company"
               className="rounded-md border border-border/60 bg-card/40 px-3 py-2.5 hover:border-primary/40 hover:bg-primary/5 transition-colors group"
             >
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                Edge
+                Company
               </div>
               <div className="text-sm text-foreground mt-0.5 group-hover:text-primary transition-colors">
-                Strategy roster · performance →
+                Agent roster · team status →
               </div>
             </Link>
           </div>
@@ -480,27 +445,23 @@ export default function Overview() {
                 </div>
                 <span className="text-xs text-primary inline-flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
                   Open in Trades <ArrowRight className="h-3 w-3" />
-      <AgentStatusRow />
                 </span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <PosCell label="Symbol" value={openPosition.symbol} />
-      <AgentStatusRow />
                 <PosCell label="Side" value={openPosition.side.toUpperCase()} />
-      <AgentStatusRow />
                 <PosCell label="Entry" value={`$${openPosition.entryPrice.toFixed(2)}`} />
-      <AgentStatusRow />
                 <PosCell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} />
-      <AgentStatusRow />
                 <PosCell label="TP" value={openPosition.takeProfit !== null ? `$${openPosition.takeProfit.toFixed(2)}` : "—"} />
-      <AgentStatusRow />
               </div>
             </Link>
           )}
         </div>
 
         <div className="space-y-4">
+          {/* Next best action — always shows what to do right now */}
           <NextBestAction onToggleBot={toggleBot} />
+
           <div className="panel p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-foreground">Kill-switches</span>
@@ -510,7 +471,6 @@ export default function Overview() {
             </div>
             {guardrails.slice(-3).map((g) => (
               <GuardrailRow key={g.id} guardrail={g} className="!p-3" />
-      <AgentStatusRow />
             ))}
             <Link to="/risk" className="block text-xs text-primary hover:underline pt-1">
               View all guardrails →
@@ -557,7 +517,6 @@ export default function Overview() {
           }
         }}
       />
-      <AgentStatusRow />
 
       <MetricDrilldowns
         open={drilldown}
@@ -576,8 +535,6 @@ export default function Overview() {
         floorDistance={floorDistance}
         pendingSignals={pendingSignals}
       />
-      <AgentStatusRow />
-
     </div>
   );
 }
@@ -590,3 +547,4 @@ function PosCell({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
