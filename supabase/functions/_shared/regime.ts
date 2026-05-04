@@ -168,6 +168,10 @@ export function computeRegime(
         : 0;
   const volBoost = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
 
+  // RSI computed once and reused for reversion + pullback detection below.
+  const rsiNow = rsi(closes, rsiP);
+  const rsiPrev = rsi(closes.slice(0, -1), rsiP);
+
   // Mean-reversion boost: range regime + RSI at extremes signals a high-quality
   // fade opportunity. Overbought (RSI ≥ 70) near resistance → short fade.
   // Oversold (RSI ≤ 30) near support → long fade. Without RSI extreme, no boost.
@@ -182,8 +186,6 @@ export function computeRegime(
   const emaSlow = emaSlowArr[emaSlowArr.length - 1];
   const emaSlowPrev = emaSlowArr[emaSlowArr.length - 6] ?? emaSlow;
   const slowRising = emaSlow > emaSlowPrev;
-  const rsiNow = rsi(closes, rsiP);
-  const rsiPrev = rsi(closes.slice(0, -1), rsiP);
   const recent = candles.slice(-3);
   const touchedFastEma = recent.some((c) => c.l <= emaFast * 1.004);
   const inUptrend = (regime === "trending_up" || regime === "breakout") && slowRising;
