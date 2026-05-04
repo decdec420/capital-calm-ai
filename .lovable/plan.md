@@ -1,63 +1,46 @@
-# Fix the system_events 404s (and the disappearing chat popup)
+## Why Brain Trust shows 561m staleness
 
-## Root cause
+The `market-intelligence-2m` cron job is firing every 2 minutes and succeeding. But inside `supabase/functions/market-intelligence/index.ts` (line 1115-1119), the cron sweep only picks up users whose `system_state.bot = 'running'`:
 
-The codebase reads from and writes to a `system_events` table in many places — Bobby (Jessica), Katrina, Chuck, desk-tools, the realtime subscription provider, `useSystemState`, and `DoctrineProposalBanner` — but **the table does not exist in the database**. I confirmed this:
-
-```sql
-SELECT table_name FROM information_schema.tables
-WHERE table_schema='public' AND table_name='system_events';
--- returns 0 rows
+```ts
+const { data: users } = await admin
+  .from("system_state").select("user_id").eq("bot", "running");
 ```
 
-So every call returns PostgREST 404 (`PGRST205`). The frontend ones are noisy in the console; the edge-function ones are wrapped in try/catch and silently lose every audit event Bobby/Katrina/Wags try to write.
+Your account is currently `bot = 'paused'` (kill-switch is disarmed, but the bot itself is paused). So the cron skips your user every tick. The last fresh row in `market_intelligence` is from **06:16 UTC** — ~9h25m ago, which lines up with the 561-minute staleness banner.
 
-This also explains the **chat popup that "appeared then disappeared"**: that's `DoctrineProposalBanner` mounting, hitting the 404, and then calling `setChanges([])`, which unmounts the banner. The "kill-switch is correct/disarmed" message you saw was the banner briefly trying to render a recently-applied doctrine change before the query failed. (Killswitch state itself is fine — that's read from `system_state` and works.)
+This is a real correctness bug, not a UI glitch: a paused bot still needs fresh market intelligence so the operator (you) can decide *when* to unpause. Right now the data only refreshes while trading, which is exactly backward — you need the freshest read precisely when you're flat.
 
-## Plan
+## The fix
 
-### 1. Create the `system_events` table
+**One change**, two lines, in `supabase/functions/market-intelligence/index.ts`:
 
-A simple append-only event log keyed by user.
+Replace the `bot = 'running'` filter with one that includes paused bots too, but excludes accounts that are fully kill-switched (those are an explicit "stop everything" signal):
 
-Columns:
-- `id uuid pk default gen_random_uuid()`
-- `user_id uuid not null references auth.users(id) on delete cascade`
-- `event_type text not null` (e.g. `doctrine_change`, `bobby_decision`, `state_changed`, `signal_engine_stuck`, `katrina_recommendation`)
-- `actor text not null` (e.g. `operator`, `jessica_autonomous`, `katrina`, `wags`)
-- `payload jsonb not null default '{}'::jsonb`
-- `created_at timestamptz not null default now()`
+```ts
+const { data: users } = await admin
+  .from("system_state")
+  .select("user_id, bot, kill_switch_engaged")
+  .in("bot", ["running", "paused"])
+  .eq("kill_switch_engaged", false);
+userIds = (users ?? []).map((u) => u.user_id);
+```
 
-Indexes:
-- `(user_id, created_at desc)` — primary access pattern
-- `(user_id, event_type, created_at desc)` — for the doctrine-banner / decision-history filters
+Rationale:
+- `running` — obviously needs fresh intel.
+- `paused` — operator-idle; still needs fresh intel for the unpause decision and for the war-room narrative.
+- `kill_switch_engaged = true` — explicit halt; no point burning Lovable AI tokens.
 
-Realtime: add to `supabase_realtime` publication, since `useRealtimeSubscriptions` already lists `system_events` as a watched table.
-
-### 2. RLS
-
-- Enable RLS.
-- `SELECT`: user can read their own rows (`auth.uid() = user_id`).
-- `INSERT` from authenticated client: user can insert their own rows (used by `useSystemState` for `state_changed`).
-- No `UPDATE` / `DELETE` policies → table is effectively append-only for clients.
-- Service role (used by all edge functions: jessica, katrina, chuck, desk-tools) bypasses RLS as usual.
-
-### 3. No code changes required
-
-The 9 existing call sites already match this schema (`event_type`, `actor`, `payload`, `user_id`, `created_at`), and the frontend already handles 404s gracefully. Once the table exists:
-- The 404 spam in DevTools stops.
-- `DoctrineProposalBanner` stops flickering — it'll only render when there's an actual recent applied doctrine change.
-- Bobby finally has a real behavioral memory (recent autonomy changes, kill-switch trips, his own past decisions in the last 24h) instead of always seeing an empty list at jessica/index.ts:357.
-- Chuck's market-brief generator (line 87) starts including real recent system events.
-
-### 4. Verify
-
-After the migration:
-- Reload `/overview` and confirm no `system_events` 404 in the network tab.
-- Toggle the kill-switch once and confirm a row lands in `system_events` with `event_type='state_changed'`.
-- Wait for the next Jessica tick and confirm a `bobby_decision` row appears.
+No schema change. No frontend change. The `market-intelligence-2m` cron will start refreshing your row within 2 minutes of deploy, and the staleness banner will drop to <2m.
 
 ## Out of scope
 
-- The React `forwardRef` warnings on `/auth` (`Auth` and `PasswordInput`) are unrelated cosmetic dev-only warnings. Happy to fix them in a follow-up if you want, but they don't affect behavior.
-- No changes to live trading, top-up flow, or doctrine logic.
+- The `activate-doctrine-changes` `cors is not defined` error spamming the logs. That's a separate bug (function references `cors` without importing it). Happy to fix in a follow-up — say the word.
+- The `DialogContent`/`DialogTitle` a11y warnings on the current view. Cosmetic.
+- No changes to freshness thresholds, expert gating, or sizing.
+
+## Verification after deploy
+
+1. Wait ~2 minutes.
+2. `select symbol, now() - generated_at as age from market_intelligence;` — all three should be <2m.
+3. Brain Trust banner on Copilot drops to "fresh".

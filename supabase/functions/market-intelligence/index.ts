@@ -1112,10 +1112,13 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
     if (cronToken && authHeader === `Bearer ${cronToken}`) {
       isCron = true;
+      // Refresh for both running and paused bots — paused operators still need
+      // fresh intel to make the unpause decision. Skip kill-switched accounts.
       const { data: users } = await admin
         .from("system_state")
         .select("user_id")
-        .eq("bot", "running");
+        .in("bot", ["running", "paused"])
+        .eq("kill_switch_engaged", false);
       userIds = (users ?? []).map((u: { user_id: string }) => u.user_id);
     } else {
       // User JWT — run for the signed-in caller on demand.
