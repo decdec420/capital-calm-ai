@@ -963,6 +963,37 @@ async function runIntelligenceForSymbol(
     throw new Error(`Upsert wrote 0 rows for ${userId}/${symbol}`);
   }
   log("info", "intelligence_upsert_ok", { fn: "market-intelligence", userId, symbol, momentum_at: upsertData[0].recent_momentum_at, generated_at: upsertData[0].generated_at });
+
+  // ── Write research journal entry (only when at least one expert actually ran) ──
+  // This gives Bobby and the operator a running log of what the Brain Trust said,
+  // visible in the Journals tab and the Market Intel "Research Notes" panel.
+  if (ran.length > 0) {
+    const bias    = upsertPayload.macro_bias;
+    const env     = upsertPayload.environment_rating;
+    const phase   = upsertPayload.market_phase;
+    const experts = ran.join(" · ");
+
+    // One-line headline + key facts Bobby can act on.
+    const headline =
+      `${symbol} — ${bias.replace(/_/g, " ")} · ${env.replace(/_/g, " ")} · ${phase.replace(/_/g, " ")}`;
+    const body = [
+      upsertPayload.macro_summary     ? `📊 Hall: ${upsertPayload.macro_summary}`     : null,
+      upsertPayload.sentiment_summary ? `🧠 Bill: ${upsertPayload.sentiment_summary}` : null,
+      upsertPayload.pattern_context   ? `📈 Mafee: ${upsertPayload.pattern_context}`  : null,
+      upsertPayload.key_level_notes   ? `Key levels: ${upsertPayload.key_level_notes}` : null,
+      `Experts ran: ${experts}`,
+    ].filter(Boolean).join("\n\n");
+
+    const { error: jErr } = await admin.from("journal_entries").insert({
+      user_id: userId,
+      kind: "research",
+      title: headline,
+      summary: body,
+      tags: [symbol, "brain-trust", "auto"],
+    });
+    if (jErr) log("warn", "research_journal_insert_failed", { fn: "market-intelligence", userId, symbol, err: jErr.message });
+  }
+
   return { ran };
 }
 
