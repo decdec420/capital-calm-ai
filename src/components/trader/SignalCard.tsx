@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { Check, X, Brain, Clock } from "lucide-react";
 import { toast } from "sonner";
@@ -7,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { TradeSignal } from "@/lib/domain-types";
 import { cn } from "@/lib/utils";
 import { DirectionBasisChip } from "@/components/trader/DirectionBasisChip";
+import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
 
 interface SignalCardProps {
   signal: TradeSignal;
@@ -139,23 +139,31 @@ export function SignalCard({ signal, onDecided, busy: controlledBusy, onDecide }
       </div>
 
       <div className="flex gap-2">
-        <Button
-          onClick={() => decide("approve")}
+        <AsyncActionButton
+          onAction={() => decide("approve")}
           disabled={busy !== null || remaining === 0}
           className="flex-1 gap-1.5 bg-status-safe hover:bg-status-safe/90 text-white"
+          riskTier="high"
+          idleLabel="Approve & open trade"
+          pendingLabel="Opening…"
+          successMessage="Trade approved."
+          errorMessage="Failed to approve signal."
         >
           <Check className="h-4 w-4" />
-          {busy === "approve" ? "Opening…" : "Approve & open trade"}
-        </Button>
-        <Button
-          onClick={() => decide("reject")}
+        </AsyncActionButton>
+        <AsyncActionButton
+          onAction={() => decide("reject")}
           disabled={busy !== null || remaining === 0}
           variant="outline"
           className="gap-1.5 border-status-blocked/40 text-status-blocked hover:bg-status-blocked/10 hover:text-status-blocked"
+          riskTier="medium"
+          idleLabel="Reject"
+          pendingLabel="Rejecting…"
+          successMessage="Signal rejected."
+          errorMessage="Failed to reject signal."
         >
           <X className="h-4 w-4" />
-          {busy === "reject" ? "…" : "Reject"}
-        </Button>
+        </AsyncActionButton>
       </div>
       {isExpiring && (
         <p className="text-center text-[11px] font-bold uppercase tracking-wider text-status-blocked animate-pulse-soft">

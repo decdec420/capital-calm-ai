@@ -14,6 +14,7 @@ import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/Metric
 
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Button } from "@/components/ui/button";
+import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
 import {
   Activity,
   ArrowRight,
@@ -35,7 +36,6 @@ import { useCandles } from "@/hooks/useCandles";
 import { useSignals } from "@/hooks/useSignals";
 import { computeRegime } from "@/lib/regime";
 
-import { toast } from "sonner";
 import { Brain } from "lucide-react";
 import { useRelativeTime, isStale } from "@/hooks/useRelativeTime";
 import type { Regime } from "@/lib/domain-types";
@@ -137,16 +137,10 @@ export default function Overview() {
   const toggleBot = async () => {
     if (!system) return;
     if (system.killSwitchEngaged && system.bot !== "running") {
-      toast.error("Kill-switch is engaged. Disarm it before starting the bot.");
-      return;
+      throw new Error("Kill-switch is engaged. Disarm it before starting the bot.");
     }
     const next = system.bot === "running" ? "paused" : "running";
-    try {
-      await updateSystem({ bot: next });
-      toast.success(`Bot ${next}.`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't toggle bot.");
-    }
+    await updateSystem({ bot: next });
   };
 
   const liveGated = !system?.liveTradingEnabled;
@@ -158,10 +152,19 @@ export default function Overview() {
         title="Overview"
         description="Calm, decisive view of the bot, the market, and your guardrails."
         actions={
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={toggleBot}>
+          <AsyncActionButton
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onAction={toggleBot}
+            riskTier="medium"
+            idleLabel={system?.bot === "running" ? "Pause bot" : "Resume bot"}
+            pendingLabel={system?.bot === "running" ? "Pausing…" : "Resuming…"}
+            successMessage={system?.bot === "running" ? "Bot paused." : "Bot resumed."}
+            errorMessage="Couldn't toggle bot."
+          >
             {system?.bot === "running" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-            {system?.bot === "running" ? "Pause bot" : "Resume bot"}
-          </Button>
+          </AsyncActionButton>
         }
       />
 
