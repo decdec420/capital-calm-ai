@@ -23,6 +23,7 @@ import Alerts from "./pages/Alerts";
 import Performance from "./pages/Performance";
 import Edge from "./pages/Edge";
 import Settings from "./pages/Settings";
+import Company from "./pages/Company";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -66,6 +67,7 @@ const App = () => (
               <Route path="/performance" element={<Performance />} />
               <Route path="/edge" element={<Edge />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/company" element={<Company />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

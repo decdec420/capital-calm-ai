@@ -12,6 +12,8 @@ import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
 import { GateReasonList } from "@/components/trader/GateReasonRow";
 import { MetricDrilldowns, type DrilldownKind } from "@/components/trader/MetricDrilldowns";
 
+import { AgentStatusRow } from "@/components/trader/AgentStatusRow";
+import { NextBestAction } from "@/components/trader/NextBestAction";
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
 import { Button } from "@/components/ui/button";
 import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
@@ -51,6 +53,7 @@ function FreshnessDot({ timestamp }: { timestamp: number | null }) {
         className={`inline-block rounded-full ${stale ? "bg-status-caution" : "bg-muted-foreground"}`}
         style={{ width: 5, height: 5 }}
       />
+      <AgentStatusRow />
       {label}
     </span>
   );
@@ -167,12 +170,14 @@ export default function Overview() {
           </AsyncActionButton>
         }
       />
+      <AgentStatusRow />
 
       {system && (
         <BrokerStatusInline
           connection={system.brokerConnection}
           liveArmed={system.liveTradingEnabled}
         />
+      <AgentStatusRow />
       )}
 
       {/* Trading pause — shown inline in DailyBriefPanel above */}
@@ -182,6 +187,7 @@ export default function Overview() {
         <div className="flex items-center gap-3">
           <div className="h-9 w-9 rounded-md bg-primary/15 text-primary flex items-center justify-center">
             <Activity className="h-4 w-4" />
+      <AgentStatusRow />
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">System mode</div>
@@ -189,13 +195,16 @@ export default function Overview() {
           </div>
         </div>
         <div className="h-9 w-px bg-border hidden md:block" />
+      <AgentStatusRow />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">BTC regime</div>
           <div className="mt-0.5">
             <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
+      <AgentStatusRow />
           </div>
         </div>
         <div className="h-9 w-px bg-border hidden md:block" />
+      <AgentStatusRow />
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk posture</div>
           <div className="mt-0.5">
@@ -211,6 +220,7 @@ export default function Overview() {
         perSymbol={snapshot?.perSymbol ?? []}
         ranAt={snapshot?.ranAt ?? null}
       />
+      <AgentStatusRow />
 
       {/* Pending signal banner */}
       {activeSignal && (
@@ -220,6 +230,7 @@ export default function Overview() {
         >
           <div className="h-10 w-10 rounded-md bg-primary/20 text-primary flex items-center justify-center shrink-0">
             <Brain className="h-5 w-5" />
+      <AgentStatusRow />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
@@ -256,6 +267,7 @@ export default function Overview() {
             )}
           </div>
           <GateReasonList reasons={lastGateReasons} max={3} />
+      <AgentStatusRow />
           <Link to="/copilot" className="text-xs text-primary hover:underline inline-block">
             Open Copilot to act →
           </Link>
@@ -271,6 +283,7 @@ export default function Overview() {
         return (
           <div className="panel p-3 flex items-start gap-2.5 border-status-caution/40 bg-status-caution/5">
             <ShieldAlert className="h-4 w-4 text-status-caution shrink-0 mt-0.5" />
+      <AgentStatusRow />
             <div className="text-xs leading-snug">
               <span className="font-medium text-foreground">
                 Account too small for meaningful position sizing.
@@ -305,8 +318,10 @@ export default function Overview() {
               <>
                 Total account value: cash + open positions marked-to-market.
                 <br />
+      <AgentStatusRow />
                 Realized today: ${fmtMoney(realizedToday)} · Unrealized: ${fmtMoney(unrealizedToday)}
               </>
+      <AgentStatusRow />
             ) : (
               "Total account value: cash + open positions marked-to-market."
             )
@@ -315,6 +330,7 @@ export default function Overview() {
           loading={accountLoading}
           freshness={<FreshnessDot timestamp={accountUpdatedAt} />}
         />
+      <AgentStatusRow />
         <MetricCard
           label="Daily PnL"
           value={`${dailyPnl >= 0 ? "+" : "-"}$${fmtMoney(Math.abs(dailyPnl))}`}
@@ -335,6 +351,7 @@ export default function Overview() {
           onClick={() => setDrilldown("dailyPnl")}
           loading={accountLoading}
         />
+      <AgentStatusRow />
         <MetricCard
           label="Trades today"
           value={String(tradesTodayCount)}
@@ -349,6 +366,7 @@ export default function Overview() {
           onClick={() => setDrilldown("tradesToday")}
           loading={accountLoading}
         />
+      <AgentStatusRow />
         <MetricCard
           label="Loss vs cap"
           value={`${lossVsCap.toFixed(2)}%`}
@@ -364,6 +382,7 @@ export default function Overview() {
           onClick={() => setDrilldown("lossVsCap")}
           loading={accountLoading}
         />
+      <AgentStatusRow />
         <MetricCard
           label="Floor distance"
           value={account ? `${floorDistance.toFixed(1)}%` : "—"}
@@ -378,6 +397,7 @@ export default function Overview() {
           onClick={() => setDrilldown("floorDistance")}
           loading={accountLoading}
         />
+      <AgentStatusRow />
 
         <MetricCard
           label="Live mode"
@@ -390,12 +410,14 @@ export default function Overview() {
           onClick={() => setDrilldown("liveMode")}
           loading={accountLoading}
         />
+      <AgentStatusRow />
       </div>
 
       {/* Two-column body */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <DoctrineProposalBanner />
+      <AgentStatusRow />
 
           <DailyBriefPanel
             jessicaDecision={system?.lastJessicaDecision ?? null}
@@ -403,6 +425,7 @@ export default function Overview() {
             tradingPausedUntil={system?.tradingPausedUntil ?? null}
             pauseReason={system?.pauseReason ?? null}
           />
+      <AgentStatusRow />
 
           {/* Tactical reads & strategy roster live on dedicated tabs to keep
               Overview scannable. Quick links surface the freshest context. */}
@@ -457,20 +480,27 @@ export default function Overview() {
                 </div>
                 <span className="text-xs text-primary inline-flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
                   Open in Trades <ArrowRight className="h-3 w-3" />
+      <AgentStatusRow />
                 </span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <PosCell label="Symbol" value={openPosition.symbol} />
+      <AgentStatusRow />
                 <PosCell label="Side" value={openPosition.side.toUpperCase()} />
+      <AgentStatusRow />
                 <PosCell label="Entry" value={`$${openPosition.entryPrice.toFixed(2)}`} />
+      <AgentStatusRow />
                 <PosCell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} />
+      <AgentStatusRow />
                 <PosCell label="TP" value={openPosition.takeProfit !== null ? `$${openPosition.takeProfit.toFixed(2)}` : "—"} />
+      <AgentStatusRow />
               </div>
             </Link>
           )}
         </div>
 
         <div className="space-y-4">
+          <NextBestAction onToggleBot={toggleBot} />
           <div className="panel p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-foreground">Kill-switches</span>
@@ -480,6 +510,7 @@ export default function Overview() {
             </div>
             {guardrails.slice(-3).map((g) => (
               <GuardrailRow key={g.id} guardrail={g} className="!p-3" />
+      <AgentStatusRow />
             ))}
             <Link to="/risk" className="block text-xs text-primary hover:underline pt-1">
               View all guardrails →
@@ -526,6 +557,7 @@ export default function Overview() {
           }
         }}
       />
+      <AgentStatusRow />
 
       <MetricDrilldowns
         open={drilldown}
@@ -544,6 +576,7 @@ export default function Overview() {
         floorDistance={floorDistance}
         pendingSignals={pendingSignals}
       />
+      <AgentStatusRow />
 
     </div>
   );
