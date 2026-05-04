@@ -20,6 +20,7 @@ export type Database = {
           base_currency: string
           cash: number
           created_at: string
+          daily_auto_execute_cap_usd: number
           equity: number
           id: string
           start_of_day_equity: number
@@ -31,6 +32,7 @@ export type Database = {
           base_currency?: string
           cash?: number
           created_at?: string
+          daily_auto_execute_cap_usd?: number
           equity?: number
           id?: string
           start_of_day_equity?: number
@@ -42,6 +44,7 @@ export type Database = {
           base_currency?: string
           cash?: number
           created_at?: string
+          daily_auto_execute_cap_usd?: number
           equity?: number
           id?: string
           start_of_day_equity?: number
@@ -134,6 +137,45 @@ export type Database = {
           request_count?: number
           user_id?: string
           window_start?: string
+        }
+        Relationships: []
+      }
+      bobby_directives: {
+        Row: {
+          completed_at: string | null
+          directive: string
+          expires_at: string | null
+          id: string
+          issued_at: string
+          priority: string
+          reason: string | null
+          status: string
+          target_agent: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          directive: string
+          expires_at?: string | null
+          id?: string
+          issued_at?: string
+          priority?: string
+          reason?: string | null
+          status?: string
+          target_agent: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          directive?: string
+          expires_at?: string | null
+          id?: string
+          issued_at?: string
+          priority?: string
+          reason?: string | null
+          status?: string
+          target_agent?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -1217,6 +1259,33 @@ export type Database = {
         }
         Relationships: []
       }
+      system_events: {
+        Row: {
+          actor: string
+          created_at: string
+          event_type: string
+          id: string
+          payload: Json
+          user_id: string
+        }
+        Insert: {
+          actor: string
+          created_at?: string
+          event_type: string
+          id?: string
+          payload?: Json
+          user_id: string
+        }
+        Update: {
+          actor?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          payload?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       system_state: {
         Row: {
           active_profile: string
@@ -1639,6 +1708,60 @@ export type Database = {
           unrealized_pnl?: number | null
           unrealized_pnl_pct?: number | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      war_room_messages: {
+        Row: {
+          acted_on: boolean
+          action_taken: string | null
+          body: string
+          created_at: string
+          expires_at: string
+          from_agent: string
+          id: string
+          message_type: string
+          metadata: Json
+          priority: string
+          read_by_bobby: boolean
+          subject: string
+          symbol: string | null
+          to_agent: string
+          user_id: string
+        }
+        Insert: {
+          acted_on?: boolean
+          action_taken?: string | null
+          body: string
+          created_at?: string
+          expires_at?: string
+          from_agent: string
+          id?: string
+          message_type: string
+          metadata?: Json
+          priority?: string
+          read_by_bobby?: boolean
+          subject: string
+          symbol?: string | null
+          to_agent?: string
+          user_id: string
+        }
+        Update: {
+          acted_on?: boolean
+          action_taken?: string | null
+          body?: string
+          created_at?: string
+          expires_at?: string
+          from_agent?: string
+          id?: string
+          message_type?: string
+          metadata?: Json
+          priority?: string
+          read_by_bobby?: boolean
+          subject?: string
+          symbol?: string | null
+          to_agent?: string
           user_id?: string
         }
         Relationships: []
