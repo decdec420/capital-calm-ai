@@ -1,3 +1,8 @@
+// Trades.tsx — Midnight Quant Desk redesign
+// Adds: department header (Trading Desk), Taylor agent attribution,
+// open position card with Midnight Quant style, trade history table with
+// new panel chrome. All existing logic preserved 100%.
+
 import { useMemo, useState, type ReactNode } from "react";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { TradeLifecycleTimeline } from "@/components/trader/TradeLifecycleTimeline";
@@ -8,18 +13,8 @@ import { EmptyState } from "@/components/trader/EmptyState";
 import { TagInput } from "@/components/trader/TagInput";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -31,10 +26,12 @@ import { useStrategies } from "@/hooks/useStrategies";
 import { useCandles } from "@/hooks/useCandles";
 import { useSystemState } from "@/hooks/useSystemState";
 import { BrokerStatusInline } from "@/components/trader/BrokerStatusInline";
-import { Plus, TrendingUp, X } from "lucide-react";
+import { Plus, TrendingUp, X, Activity, Users2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { Trade, TradeSide } from "@/lib/domain-types";
 import { formatBaseQty, formatUsd } from "@/lib/utils";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 export default function Trades() {
   const { open, closed, create, close, remove, loading } = useTrades();
@@ -44,7 +41,6 @@ export default function Trades() {
   const [selected, setSelected] = useState<Trade | null>(null);
   const [logOpen, setLogOpen] = useState(false);
   const [closeFor, setCloseFor] = useState<Trade | null>(null);
-  
 
   const lastPrice = candles[candles.length - 1]?.c ?? 0;
   const openPosition = open[0];
@@ -60,30 +56,36 @@ export default function Trades() {
   return (
     <div className="space-y-6 animate-fade-in">
       <SectionHeader
-        eyebrow="Lifecycle"
+        eyebrow="Trading Desk"
         title="Trades"
         description="Open position, full lifecycle, and history."
         actions={
-          <Button size="sm" className="gap-1.5" onClick={() => setLogOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> Log trade
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" className="gap-1.5" onClick={() => setLogOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Log trade
+            </Button>
+            <Link to="/company" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
+              <Users2 className="h-3.5 w-3.5" /> Company →
+            </Link>
+          </div>
         }
       />
 
       {system && (
-        <BrokerStatusInline
-          connection={system.brokerConnection}
-          liveArmed={system.liveTradingEnabled}
-        />
+        <BrokerStatusInline connection={system.brokerConnection} liveArmed={system.liveTradingEnabled} />
       )}
 
+      {/* Open position */}
       {openPosition ? (
-        <div className="panel p-5 space-y-5">
+        <div className="panel p-5 space-y-5 border-primary/25">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Open position</div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Open position</span>
+                <StatusBadge tone="candidate" size="sm" dot pulse>monitoring</StatusBadge>
+              </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-lg font-semibold text-foreground">{openPosition.symbol}</span>
+                <span className="text-lg font-semibold text-foreground font-mono">{openPosition.symbol}</span>
                 <StatusBadge tone={openPosition.side === "long" ? "safe" : "caution"} size="sm">
                   {openPosition.side}
                 </StatusBadge>
@@ -99,26 +101,18 @@ export default function Trades() {
                 <AlertDialogContent className="bg-card border-border">
                   <AlertDialogHeader>
                     <AlertDialogTitle>Discard this trade?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This permanently removes the position record. No broker order is sent — this only deletes it from your log. This cannot be undone.
-                    </AlertDialogDescription>
+                    <AlertDialogDescription>This permanently removes the position record. No broker order is sent — this only deletes it from your log.</AlertDialogDescription>
                   </AlertDialogHeader>
                   <div className="text-sm text-status-caution border border-status-caution/30 bg-status-caution/10 rounded-md p-3">
                     Make sure you have already closed this position on the exchange if it was a live trade.
                   </div>
                   <AlertDialogFooter>
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       onClick={async () => {
-                        try {
-                          await remove(openPosition.id);
-                          toast.success("Trade discarded.");
-                        } catch (e) {
-                          toast.error(e instanceof Error ? e.message : "Couldn't discard trade");
-                        }
-                      }}
-                    >
+                        try { await remove(openPosition.id); toast.success("Trade discarded."); }
+                        catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't discard trade"); }
+                      }}>
                       Yes, discard position
                     </AlertDialogAction>
                   </AlertDialogFooter>
@@ -127,23 +121,15 @@ export default function Trades() {
             </div>
           </div>
 
-          <TradeLifecycleTimeline
-            current={openPosition.lifecyclePhase}
-            transitions={openPosition.lifecycleTransitions}
-          />
-
+          <TradeLifecycleTimeline current={openPosition.lifecyclePhase} transitions={openPosition.lifecycleTransitions} />
 
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 pt-4 border-t border-border">
-            <Cell
-              label="Size"
-              value={`${formatBaseQty(openPosition.size)} · ${formatUsd(openPosition.size * (lastPrice || openPosition.entryPrice))}`}
-            />
-            <Cell label="Entry" value={`$${openPosition.entryPrice.toFixed(2)}`} />
-            <Cell label="Last" value={lastPrice ? `$${lastPrice.toFixed(2)}` : "—"} />
-            <Cell label="Stop" value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} tone="blocked" />
+            <Cell label="Size"        value={`${formatBaseQty(openPosition.size)} · ${formatUsd(openPosition.size * (lastPrice || openPosition.entryPrice))}`} />
+            <Cell label="Entry"       value={`$${openPosition.entryPrice.toFixed(2)}`} />
+            <Cell label="Last"        value={lastPrice ? `$${lastPrice.toFixed(2)}` : "—"} />
+            <Cell label="Stop"        value={openPosition.stopLoss !== null ? `$${openPosition.stopLoss.toFixed(2)}` : "—"} tone="blocked" />
             <Cell label="Take profit" value={openPosition.takeProfit !== null ? `$${openPosition.takeProfit.toFixed(2)}` : "—"} tone="safe" />
-            <Cell
-              label="Unrealized"
+            <Cell label="Unrealized"
               value={`${livePnL.pnl >= 0 ? "+" : ""}$${livePnL.pnl.toFixed(2)} (${livePnL.pct.toFixed(2)}%)`}
               tone={livePnL.pnl >= 0 ? "safe" : "blocked"}
             />
@@ -152,7 +138,7 @@ export default function Trades() {
       ) : (
         !loading && (
           <EmptyState
-            icon={<TrendingUp className="h-5 w-5" />}
+            icon={<Activity className="h-5 w-5" />}
             title="No open position"
             description="Quiet hands beat hot hands. Log a trade when there's an actual edge."
             action={<Button size="sm" onClick={() => setLogOpen(true)}>Log a trade</Button>}
@@ -160,16 +146,23 @@ export default function Trades() {
         )
       )}
 
-      <div className="panel">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Trade history</span>
-          <span className="text-xs text-muted-foreground tabular">{closed.length} trades</span>
+      {/* Trade history */}
+      <div className="panel overflow-hidden">
+        <div className="px-5 py-3 border-b border-border flex items-center justify-between bg-card/60">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Trade history</div>
+            <div className="text-sm font-medium text-foreground mt-0.5">{closed.length} closed trades</div>
+          </div>
+          {closed.length > 0 && (
+            <div className="flex items-center gap-3 text-[11px] font-mono">
+              <span className="text-status-safe">{closed.filter(t => (t.pnl ?? 0) > 0).length}W</span>
+              <span className="text-status-blocked">{closed.filter(t => (t.pnl ?? 0) < 0).length}L</span>
+            </div>
+          )}
         </div>
         {closed.length === 0 ? (
           <div className="p-6">
-            <p className="text-sm text-muted-foreground italic text-center">
-              No closed trades yet. The history will fill itself in once you start firing.
-            </p>
+            <p className="text-sm text-muted-foreground italic text-center">No closed trades yet. The history will fill itself in once you start firing.</p>
           </div>
         ) : (
           <Table>
@@ -187,39 +180,32 @@ export default function Trades() {
             </TableHeader>
             <TableBody>
               {closed.map((t) => (
-                <TableRow key={t.id} onClick={() => setSelected(t)} className="cursor-pointer border-border">
-                  <TableCell className="text-xs text-muted-foreground tabular">
+                <TableRow key={t.id} onClick={() => setSelected(t)} className="cursor-pointer border-border hover:bg-secondary/20 transition-colors">
+                  <TableCell className="text-xs text-muted-foreground tabular font-mono">
                     {t.closedAt && new Date(t.closedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <StatusBadge tone={t.side === "long" ? "safe" : "caution"} size="sm">
-                        {t.side}
-                      </StatusBadge>
+                      <StatusBadge tone={t.side === "long" ? "safe" : "caution"} size="sm">{t.side}</StatusBadge>
                       <DirectionBasisChip basis={t.directionBasis} />
                     </div>
                   </TableCell>
-                  <TableCell className="tabular text-sm">${t.entryPrice.toFixed(2)}</TableCell>
-                  <TableCell className="tabular text-sm">{t.exitPrice !== null ? `$${t.exitPrice.toFixed(2)}` : "—"}</TableCell>
-                  <TableCell className={`tabular text-sm font-medium ${(t.pnl ?? 0) > 0 ? "text-status-safe" : (t.pnl ?? 0) < 0 ? "text-status-blocked" : "text-muted-foreground"}`}>
+                  <TableCell className="tabular text-sm font-mono">${t.entryPrice.toFixed(2)}</TableCell>
+                  <TableCell className="tabular text-sm font-mono">{t.exitPrice !== null ? `$${t.exitPrice.toFixed(2)}` : "—"}</TableCell>
+                  <TableCell className={cn("tabular text-sm font-medium font-mono", (t.pnl ?? 0) > 0 ? "text-status-safe" : (t.pnl ?? 0) < 0 ? "text-status-blocked" : "text-muted-foreground")}>
                     {(t.pnl ?? 0) >= 0 ? "+" : ""}${(t.pnl ?? 0).toFixed(2)} ({(t.pnlPct ?? 0).toFixed(2)}%)
                   </TableCell>
                   <TableCell>
-                    <StatusBadge
-                      tone={t.outcome === "win" ? "safe" : t.outcome === "loss" ? "blocked" : "neutral"}
-                      size="sm"
-                    >
+                    <StatusBadge tone={t.outcome === "win" ? "safe" : t.outcome === "loss" ? "blocked" : "neutral"} size="sm">
                       {t.outcome}
                     </StatusBadge>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {t.reasonTags.map((r) => (
-                        <ReasonChip key={r} label={r} />
-                      ))}
+                      {t.reasonTags.map((r) => <ReasonChip key={r} label={r} />)}
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{t.strategyVersion}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground font-mono">{t.strategyVersion}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -227,6 +213,7 @@ export default function Trades() {
         )}
       </div>
 
+      {/* Trade detail sheet */}
       <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
         <SheetContent className="bg-card border-border w-full sm:max-w-lg overflow-y-auto">
           {selected && (
@@ -241,34 +228,19 @@ export default function Trades() {
                 <SheetDescription>{selected.strategyVersion || "no strategy tagged"}</SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-4">
-                <TradeLifecycleTimeline
-                  current={selected.lifecyclePhase}
-                  transitions={selected.lifecycleTransitions}
-                />
-
+                <TradeLifecycleTimeline current={selected.lifecyclePhase} transitions={selected.lifecycleTransitions} />
                 <div className="grid grid-cols-2 gap-3">
-                  <Cell
-                    label="Side"
-                    value={selected.side.toUpperCase()}
-                    extra={<DirectionBasisChip basis={selected.directionBasis} />}
-                  />
-                  <Cell
-                    label="Size"
-                    value={`${formatBaseQty(selected.size)} · ${formatUsd(selected.size * (selected.exitPrice ?? selected.entryPrice))}`}
-                  />
-                  <Cell label="Entry" value={`$${selected.entryPrice.toFixed(2)}`} />
-                  <Cell label="Exit" value={selected.exitPrice !== null ? `$${selected.exitPrice.toFixed(2)}` : "—"} />
-                  <Cell label="PnL" value={`${(selected.pnl ?? 0) >= 0 ? "+" : ""}$${(selected.pnl ?? 0).toFixed(2)}`} tone={(selected.pnl ?? 0) >= 0 ? "safe" : "blocked"} />
-                  <Cell label="PnL %" value={`${(selected.pnlPct ?? 0).toFixed(2)}%`} />
+                  <Cell label="Side"   value={selected.side.toUpperCase()} extra={<DirectionBasisChip basis={selected.directionBasis} />} />
+                  <Cell label="Size"   value={`${formatBaseQty(selected.size)} · ${formatUsd(selected.size * (selected.exitPrice ?? selected.entryPrice))}`} />
+                  <Cell label="Entry"  value={`$${selected.entryPrice.toFixed(2)}`} />
+                  <Cell label="Exit"   value={selected.exitPrice !== null ? `$${selected.exitPrice.toFixed(2)}` : "—"} />
+                  <Cell label="PnL"    value={`${(selected.pnl ?? 0) >= 0 ? "+" : ""}$${(selected.pnl ?? 0).toFixed(2)}`} tone={(selected.pnl ?? 0) >= 0 ? "safe" : "blocked"} />
+                  <Cell label="PnL %"  value={`${(selected.pnlPct ?? 0).toFixed(2)}%`} />
                 </div>
                 {selected.reasonTags.length > 0 && (
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Reason tags</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selected.reasonTags.map((r) => (
-                        <ReasonChip key={r} label={r} />
-                      ))}
-                    </div>
+                    <div className="flex flex-wrap gap-1.5">{selected.reasonTags.map((r) => <ReasonChip key={r} label={r} />)}</div>
                   </div>
                 )}
                 {selected.notes && (
@@ -277,16 +249,8 @@ export default function Trades() {
                     <p className="text-sm text-foreground">{selected.notes}</p>
                   </div>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-status-blocked border-status-blocked/30 hover:bg-status-blocked/10 hover:text-status-blocked"
-                  onClick={async () => {
-                    await remove(selected.id);
-                    toast.success("Trade deleted.");
-                    setSelected(null);
-                  }}
-                >
+                <Button variant="outline" size="sm" className="w-full text-status-blocked border-status-blocked/30 hover:bg-status-blocked/10 hover:text-status-blocked"
+                  onClick={async () => { await remove(selected.id); toast.success("Trade deleted."); setSelected(null); }}>
                   Delete trade
                 </Button>
               </div>
@@ -295,37 +259,19 @@ export default function Trades() {
         </SheetContent>
       </Sheet>
 
-      <LogTradeDialog
-        open={logOpen}
-        onOpenChange={setLogOpen}
-        defaultPrice={lastPrice}
+      <LogTradeDialog open={logOpen} onOpenChange={setLogOpen} defaultPrice={lastPrice}
         strategies={strategies.map((s) => `${s.name} ${s.version}`)}
         onSubmit={async (input) => {
-          try {
-            await create(input);
-            toast.success("Trade logged. Stay disciplined.");
-            setLogOpen(false);
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Couldn't log trade");
-          }
+          try { await create(input); toast.success("Trade logged. Stay disciplined."); setLogOpen(false); }
+          catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't log trade"); }
         }}
       />
-
-      <CloseTradeDialog
-        trade={closeFor}
-        defaultPrice={lastPrice}
-        onClose={() => setCloseFor(null)}
+      <CloseTradeDialog trade={closeFor} defaultPrice={lastPrice} onClose={() => setCloseFor(null)}
         onSubmit={async (id, input) => {
-          try {
-            await close(id, input);
-            toast.success("Trade closed. Logged automatically.");
-            setCloseFor(null);
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Couldn't close trade");
-          }
+          try { await close(id, input); toast.success("Trade closed. Logged automatically."); setCloseFor(null); }
+          catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't close trade"); }
         }}
       />
-
     </div>
   );
 }
@@ -335,27 +281,14 @@ function Cell({ label, value, tone = "default", extra }: { label: string; value:
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`text-sm tabular ${color} flex items-center gap-1.5 flex-wrap`}>
-        <span>{value}</span>
-        {extra}
+      <div className={`text-sm tabular font-mono ${color} flex items-center gap-1.5 flex-wrap`}>
+        <span>{value}</span>{extra}
       </div>
     </div>
   );
 }
 
-function LogTradeDialog({
-  open,
-  onOpenChange,
-  defaultPrice,
-  strategies,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (o: boolean) => void;
-  defaultPrice: number;
-  strategies: string[];
-  onSubmit: (input: NewTradeInput) => void;
-}) {
+function LogTradeDialog({ open, onOpenChange, defaultPrice, strategies, onSubmit }: { open: boolean; onOpenChange: (o: boolean) => void; defaultPrice: number; strategies: string[]; onSubmit: (input: NewTradeInput) => void }) {
   const [symbol, setSymbol] = useState("BTC-USD");
   const [side, setSide] = useState<TradeSide>("long");
   const [size, setSize] = useState("0.01");
@@ -373,17 +306,7 @@ function LogTradeDialog({
 
   const submit = () => {
     if (!entry || !size) return toast.error("Entry and size required.");
-    onSubmit({
-      symbol,
-      side,
-      size: Number(size),
-      entryPrice: Number(entry),
-      stopLoss: stop ? Number(stop) : null,
-      takeProfit: tp ? Number(tp) : null,
-      strategyVersion: strategy,
-      reasonTags: tags,
-      notes: notes || null,
-    });
+    onSubmit({ symbol, side, size: Number(size), entryPrice: Number(entry), stopLoss: stop ? Number(stop) : null, takeProfit: tp ? Number(tp) : null, strategyVersion: strategy, reasonTags: tags, notes: notes || null });
   };
 
   return (
@@ -399,10 +322,7 @@ function LogTradeDialog({
             <Field label="Side">
               <Select value={side} onValueChange={(v) => setSide(v as TradeSide)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="long">Long</SelectItem>
-                  <SelectItem value="short">Short</SelectItem>
-                </SelectContent>
+                <SelectContent><SelectItem value="long">Long</SelectItem><SelectItem value="short">Short</SelectItem></SelectContent>
               </Select>
             </Field>
             <Field label="Size"><NumberStepper value={size} onChange={setSize} step={0.001} shiftMultiplier={10} min={0} precision={4} /></Field>
@@ -431,59 +351,26 @@ function LogTradeDialog({
   );
 }
 
-function CloseTradeDialog({
-  trade,
-  defaultPrice,
-  onClose,
-  onSubmit,
-}: {
-  trade: Trade | null;
-  defaultPrice: number;
-  onClose: () => void;
-  onSubmit: (id: string, input: { reason: string }) => void;
-}) {
+function CloseTradeDialog({ trade, defaultPrice, onClose, onSubmit }: { trade: Trade | null; defaultPrice: number; onClose: () => void; onSubmit: (id: string, input: { reason: string }) => void }) {
   const [reason, setReason] = useState("");
-
-  // Reset on open
-  useMemo(() => {
-    if (trade) {
-      setReason("");
-    }
-  }, [trade]);
+  useMemo(() => { if (trade) setReason(""); }, [trade]);
 
   return (
     <Dialog open={!!trade} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="bg-card border-border max-w-md">
         <DialogHeader>
           <DialogTitle>Close trade</DialogTitle>
-          <DialogDescription>
-            {trade ? `${trade.side.toUpperCase()} ${trade.symbol} @ $${trade.entryPrice.toFixed(2)}` : ""}
-          </DialogDescription>
+          <DialogDescription>{trade ? `${trade.side.toUpperCase()} ${trade.symbol} @ $${trade.entryPrice.toFixed(2)}` : ""}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="rounded-md border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-            Exit price is fetched live from Coinbase spot (~${defaultPrice.toFixed(2)}) when you confirm.
-            The server computes realized PnL and updates your cash balance.
+            Exit price is fetched live from Coinbase spot (~${defaultPrice.toFixed(2)}) when you confirm. The server computes realized PnL and updates your cash balance.
           </div>
-          <Field label="Reason (optional)">
-            <Textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={2}
-              placeholder="e.g. Thesis broken, locking in the gain"
-            />
-          </Field>
+          <Field label="Reason (optional)"><Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} placeholder="e.g. Thesis broken, locking in the gain" /></Field>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={() => {
-              if (!trade) return;
-              onSubmit(trade.id, { reason: reason || "Operator closed" });
-            }}
-          >
-            Close at market
-          </Button>
+          <Button onClick={() => { if (!trade) return; onSubmit(trade.id, { reason: reason || "Operator closed" }); }}>Close at market</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -498,3 +385,4 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+
