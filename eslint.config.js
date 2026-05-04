@@ -23,4 +23,14 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // Deno edge functions use `any` extensively for Supabase client JSON
+  // deserialization and Deno-specific runtime interop. These are not
+  // TypeScript browser code — suppress no-explicit-any project-wide for
+  // the functions directory rather than 75+ individual disable comments.
+  {
+    files: ["supabase/functions/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 );
