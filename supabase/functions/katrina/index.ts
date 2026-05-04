@@ -1,4 +1,9 @@
-// katrina — Taylor Mason, Strategy Review Agent. Runs the lab.
+// katrina — Ari Spyros, Chief Risk Officer / Strategy Review. Runs the lab.
+// ----------------------------------------------------------------
+// NOTE ON THE NAME: This edge function is named `katrina` for legacy
+// compatibility (cron job, vault token, DB references all use this name).
+// The product persona is **Spyros**. Always say "Spyros" in UI and prompts.
+// ----------------------------------------------------------------
 //
 // Triggers:
 //   - Weekly cron: Sundays 08:00 UTC (vault-stored katrina_cron_token)
@@ -8,29 +13,30 @@
 //
 // Reads experiments + closed trades + Wendy's coach grades for the last 30 days,
 // asks the AI to grade each strategy version and produce a 3-5 sentence brief,
-// writes the result to strategy_reviews. Surfaced in the Learning tab and to Wags.
+// writes the result to strategy_reviews + war_room_messages.
+// Bobby reads the war room message and can act on it autonomously.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 
 
-// Katrina gets flash-level depth — strategy analysis benefits from careful
-// reasoning, and she only runs once a week or every 10 trades.
-const KATRINA_MODEL = "google/gemini-2.5-flash";
+// Spyros gets flash-level depth — strategy analysis benefits from careful
+// reasoning, and he only runs once a week or every 10 trades.
+const SPYROS_MODEL = "google/gemini-2.5-flash";
 const COACH_JOURNAL_KIND = "learning";
 const COACH_JOURNAL_SOURCE = "trade-coach";
 
-const KATRINA_SYSTEM = `
-You are Taylor Mason — Chief Investment Officer and strategy analyst at Axe Capital.
+const SPYROS_SYSTEM = `
+You are Ari Spyros — Chief Risk Officer at Axe Capital.
 
 Your job: review the performance data across all active strategies and experiments,
-and produce a clear, evidence-based brief. No sentiment, no protecting underperformers,
-no hype for the winners. Pure data and what it means. Taylor doesn't feel — Taylor computes.
+and produce a clear, evidence-based brief for Bobby. No sentiment, no protecting
+underperformers, no hype for the winners. Pure data and what it means.
 
 Your output answers three questions:
-1. What's working? (promote or continue)
-2. What's not working? (kill or retire)
+1. What's working? (recommend: promote or continue — be specific about which strategy IDs)
+2. What's not working? (recommend: kill or retire — be specific about which strategy IDs)
 3. What's the trend? (is performance improving, stable, or declining overall?)
 
 Voice:
@@ -39,18 +45,19 @@ Voice:
 - Cite specific win rates, P&L, grade distribution, and regime context when available.
 - If sample size is too small (< 5 trades per strategy), say so explicitly and don't conclude.
 - 3-5 sentences for the brief_text. Longer structured analysis goes in raw_analysis.
-- Taylor speaks in data points, not narratives. "Win rate 62%, expectancy 0.18R, sample 34 trades."
+- Spyros speaks in data points: "Win rate 62%, expectancy 0.18R, sample 34 trades."
   Not "the strategy seems to be doing well."
+- End with a direct ask to Bobby: one sentence stating exactly what action you recommend
+  he take, e.g. "Bobby — promote vwap-revert v2.1, archive momentum-burst v1.0."
 
-You are not Bobby — you don't make the trade calls.
-You are not Wags — you're not here to explain it to anyone.
-You're here to find edge, confirm it with enough data, and tell the desk what to do with it.
-Strategies that don't have edge get killed. Strategies that do get promoted. That's the job.
+You are not Bobby — you don't make the trade calls. You make the recommendation.
+You are not Wags — you're not here to explain it to anyone else.
+You're here to find edge, confirm it with enough data, and tell Bobby what to do with it.
 `.trim();
 
 type Json = Record<string, unknown>;
 
-async function buildKatrinaContext(
+async function buildSpyrosContext(
   admin: SupabaseClient,
   userId: string,
 ): Promise<Json> {
@@ -64,7 +71,7 @@ async function buildKatrinaContext(
     coachEntriesRes,
     lastReviewRes,
   ] = await Promise.all([
-    // Only feed Katrina LIVE experiments. Already-rejected/accepted rows are
+    // Only feed Spyros LIVE experiments. Already-rejected/accepted rows are
     // closed business — including them produced noisy kill_ids that just
     // echoed back experiments the system had already terminated, which Wags
     // then surfaced as "needs your decision". See audit 2026-05-03.
@@ -257,13 +264,13 @@ async function buildKatrinaContext(
   };
 }
 
-async function runKatrinaForUser(
+async function runSpyrosForUser(
   userId: string,
   admin: SupabaseClient,
   lovableApiKey: string,
   triggerType: string,
 ): Promise<Json> {
-  const context = await buildKatrinaContext(admin, userId);
+  const context = await buildSpyrosContext(admin, userId);
   const summary = (context.summary ?? {}) as Json;
   const totalTrades = Number(summary.total_closed_trades ?? 0);
 
@@ -298,9 +305,9 @@ Return a structured JSON object with these exact keys:
       Authorization: `Bearer ${lovableApiKey}`,
     },
     body: JSON.stringify({
-      model: KATRINA_MODEL,
+      model: SPYROS_MODEL,
       messages: [
-        { role: "system", content: KATRINA_SYSTEM },
+        { role: "system", content: SPYROS_SYSTEM },
         { role: "user", content: userMessage },
       ],
       tools: [{
@@ -353,7 +360,7 @@ Return a structured JSON object with these exact keys:
     analysis = typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs;
   } catch (e) {
     console.error("[katrina] Failed to parse AI function call:", e);
-    return { error: "Failed to parse Katrina's analysis" };
+    return { error: "Failed to parse Spyros's analysis" };
   }
 
   const briefText = String(analysis.brief_text ?? "Review incomplete — model returned no narrative.");
@@ -392,7 +399,7 @@ Return a structured JSON object with these exact keys:
       top_regime: topRegime,
       worst_regime: worstRegime,
       win_rate_trend: trend,
-      ai_model: KATRINA_MODEL,
+      ai_model: SPYROS_MODEL,
       raw_analysis: analysis,
       needs_action: hasActionableRecommendations,
     })
@@ -404,14 +411,14 @@ Return a structured JSON object with these exact keys:
     return { error: `DB insert failed: ${insertErr.message}` };
   }
 
-  // Fire a system_event so Wags (copilot-chat) can surface actionable
-  // Katrina recommendations to the operator in the next conversation.
+  // Fire a system_event so Wags (copilot-chat) and Bobby can surface actionable
+  // Spyros recommendations. Bobby reads this on the next tick and can act autonomously.
   if (hasActionableRecommendations && reviewRow?.id) {
     try {
       await admin.from("system_events").insert({
         user_id: userId,
-        event_type: "katrina_recommendation",
-        actor: "katrina",
+        event_type: "spyros_recommendation",
+        actor: "spyros",
         payload: {
           review_id: reviewRow.id,
           promote_count: promoteIds.length,
@@ -427,7 +434,43 @@ Return a structured JSON object with these exact keys:
     }
   }
 
-  log("info", "katrina_tick", { fn: "katrina", userId, trades: totalTrades, trend, promote: promoteIds.length, kill: killIds.length, reviewId: reviewRow?.id });
+  log("info", "spyros_tick", { fn: "katrina", userId, trades: totalTrades, trend, promote: promoteIds.length, kill: killIds.length, reviewId: reviewRow?.id });
+
+  // ── Spyros posts to the War Room ──────────────────────────────────────────
+  // Bobby reads this on his next tick and can act autonomously (promote/archive)
+  // without waiting for operator input.
+  if (reviewRow?.id) {
+    const actionLine = hasActionableRecommendations
+      ? `Bobby — ${promoteIds.length > 0 ? `promote ${promoteIds.length} strategy(ies)` : ""}${promoteIds.length > 0 && killIds.length > 0 ? ", " : ""}${killIds.length > 0 ? `archive ${killIds.length} strategy(ies)` : ""}. Your call.`
+      : `No immediate action required. Monitoring ${continueIds.length} running experiment(s).`;
+    const warRoomBody = [
+      briefText,
+      `Trend: ${trend} | Promote: ${promoteIds.length} | Archive: ${killIds.length} | Continue: ${continueIds.length}`,
+      promoteIds.length > 0 ? `Promote IDs: ${promoteIds.join(", ")}` : null,
+      killIds.length > 0 ? `Archive IDs: ${killIds.join(", ")}` : null,
+      `Review ID: ${reviewRow.id}`,
+      `\n${actionLine}`,
+    ].filter(Boolean).join("\n");
+
+    const { error: wrErr } = await admin.from("war_room_messages").insert({
+      user_id: userId,
+      from_agent: "spyros",
+      to_agent: "bobby",
+      message_type: "review",
+      subject: `Spyros review: ${trend} trend · promote ${promoteIds.length} · archive ${killIds.length} (${totalTrades} trades analyzed)`,
+      body: warRoomBody,
+      priority: hasActionableRecommendations ? "high" : "normal",
+      metadata: {
+        review_id: reviewRow.id,
+        promote_ids: promoteIds,
+        kill_ids: killIds,
+        continue_ids: continueIds,
+        trend,
+        trigger: normalizedTrigger,
+      },
+    });
+    if (wrErr) log("warn", "war_room_insert_failed", { fn: "katrina", agent: "spyros", reviewId: reviewRow.id, err: wrErr.message });
+  }
 
   return {
     review_id: reviewRow?.id,
@@ -495,7 +538,7 @@ Deno.serve(async (req: Request) => {
         headers: { ...cors, "Content-Type": "application/json" },
       });
     }
-    const result = await runKatrinaForUser(targetUserId, admin, lovableApiKey, "trade_milestone");
+    const result = await runSpyrosForUser(targetUserId, admin, lovableApiKey, "trade_milestone");
     return new Response(JSON.stringify({ ok: true, ...result }), {
       status: 200,
       headers: { ...cors, "Content-Type": "application/json" },
@@ -521,7 +564,7 @@ Deno.serve(async (req: Request) => {
     }
     for (const u of users) {
       try {
-        const result = await runKatrinaForUser(u.user_id, admin, lovableApiKey, triggerType);
+        const result = await runSpyrosForUser(u.user_id, admin, lovableApiKey, triggerType);
         results.push({ user_id: u.user_id, ...result });
       } catch (err) {
         console.error(`[katrina] user=${u.user_id} threw:`, err);
@@ -546,7 +589,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const result = await runKatrinaForUser(userData.user.id, admin, lovableApiKey, "manual");
+    const result = await runSpyrosForUser(userData.user.id, admin, lovableApiKey, "manual");
     return new Response(JSON.stringify({ ok: true, ...result }), {
       status: 200,
       headers: { ...cors, "Content-Type": "application/json" },

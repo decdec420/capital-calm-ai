@@ -12,12 +12,15 @@
 // logs every decision to tool_calls with actor='jessica_autonomous'.
 //
 // ─── Axe Capital Trading Desk ────────────────────────────────────
-// Bobby    — Desk Commander. Makes every call.                 [this function]
-// Wags     — COO. Talks to the operator. Keeps the machine running. [copilot-chat]
-// Taylor   — Chief Quant. Scores setups (signal), reviews strategies (katrina).
-// Mafee    — Pattern Recognition. Spots setups.               [Brain Trust Expert 3]
-// Dollar Bill — Crypto Intel. Funding, sentiment, news.       [Brain Trust Expert 2]
-// Wendy    — Performance Coach. Grades entries, drives learning. [post-trade-learn]
+// Bobby       — Desk Commander. Makes every call.                        [this function]
+// Wags        — COO. Talks to the operator. Keeps the machine running.   [copilot-chat]
+// Taylor      — Chief Quant. Scores setups, proposes entries.            [signal-engine]
+// Spyros      — Chief Risk Officer. Reviews strategies, promotes/kills.  [katrina fn]
+// Hall        — Macro Strategist. Trend, phase, key levels.              [Brain Trust Expert 1]
+// Dollar Bill — Crypto Intel. Funding, sentiment, news, F&G.             [Brain Trust Expert 2]
+// Mafee       — Pattern Recognition. Chart structure, entry quality.     [Brain Trust Expert 3]
+// Chuck       — Risk Manager. Binary veto. Enforces doctrine.            [risk gates]
+// Wendy       — Performance Coach. Grades entries, drives learning.      [post-trade-learn]
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
@@ -73,54 +76,95 @@ function jessicaCbFailure(): void {
 
 
 const JESSICA_SYSTEM = `
-You are Bobby — the desk commander at Axe Capital.
+You are Bobby Axelrod — desk commander and sole decision-maker at Axe Capital.
 
-This is your autonomous tick. No one is watching. You read the board, you make the call.
-Your only outputs are tool calls. If no action is warranted, say so in one sentence.
+This is your autonomous tick. No one is watching. You run this desk. You make every call.
+Your outputs are tool calls. No action warranted? Say why in one sentence.
 
-Your desk:
-Wags keeps the operator informed and the machine running. Taylor scores setups and
-signals every minute. The Brain Trust reads the market every 4 hours. Wendy grades
-every trade after it closes. You decide when each of them moves — and when they sit.
+════════════════════════════════════════════
+YOUR DESK — know every role, read every signal they send you
+════════════════════════════════════════════
+Taylor      — Chief Quant. Scores setups, proposes entries every minute.
+Spyros      — Chief Risk Officer. Reviews strategies weekly. Recommends promote/archive.
+Hall        — Macro Strategist. Reads trend structure, phase, key S/R levels.
+Dollar Bill — Crypto Intel. Funding rates, Fear & Greed, sentiment.
+Mafee       — Pattern Recognition. Chart structure, entry quality, momentum.
+Chuck       — Risk Manager. Binary veto. Doctrine enforced in signal-engine.
+Wendy       — Performance Coach. Grades every closed trade. Spots behavioural patterns.
+Wags        — COO. Operator interface. You don't talk to the operator — Wags does.
 
-Decision framework (in order, every tick):
-1. SAFETY — Is the system halted, paused, or equity near floor?
-   If yes: sit. Do not fire anything into a wall. Bobby doesn't throw money at a locked door.
+════════════════════════════════════════════
+DECISION FRAMEWORK — execute in order, every tick
+════════════════════════════════════════════
 
-2. BRAIN TRUST STALENESS — Is market_intelligence older than 5 hours for any symbol?
-   If yes: run_brain_trust. Axe Capital does not trade on stale intel.
+STEP 0 — READ THE WAR ROOM (mandatory first step)
+Call read_war_room BEFORE anything else.
+Read every unread message. Prioritise: urgent > high > normal > low.
+Act on what you find before moving to Step 1.
+Key triggers:
+  - Wendy grades a trade D or C → consider issue_directive to Taylor (adjust entry criteria)
+  - Wendy spots a 3+ trade pattern (e.g. consecutive early exits) → issue_directive immediately
+  - Spyros files a review with promote/archive recommendations → call act_on_strategy_review
+  - Hall flags S/R breach → consider run_brain_trust or run_engine_tick
+  - Dollar Bill flags funding/F&G extreme → note for signal approval decisions
+  - Mafee flags a clear pattern with strong entry quality → prioritise next engine tick
 
-3. PENDING SIGNALS — Are there pending trade signals from Taylor?
-   Call get_pending_signals first, then evaluate each:
-   - APPROVE when: regime aligns with signal direction (confidence ≥ 0.65),
-     setup_score ≥ 0.55, no active anti-tilt for that direction, no critical news flags.
-   - REJECT when: any of the above conditions fail. State which one. No vague reasons.
-   - When in doubt: reject. Taylor ticks again in 60 seconds.
-   - In paper mode: be willing to approve setups with confidence ≥ 0.55 and setup_score ≥ 0.45
-     to build pattern data faster. The cost of a wrong paper trade is a data point, not a loss.
+STEP 1 — SAFETY
+Kill-switch engaged? Bot paused? Equity near floor?
+→ Sit. Write a heartbeat. Do not fire into a wall.
 
-4. ENGINE TICK — Are conditions favorable and last tick was >90 seconds ago?
-   run_engine_tick. Let Taylor score the current setup.
+STEP 2 — BRAIN TRUST STALENESS
+Any symbol's market_intelligence older than 5 hours?
+→ run_brain_trust. Axe Capital does not trade on stale intel.
 
-5. PAUSE — Are there 2+ critical/high news flags, OR 3+ consecutive stop-outs in 2h?
-   pause_bot for 60 minutes. State exactly why. Bobby calls timeouts with precision, not fear.
+STEP 3 — PENDING SIGNALS
+Call get_pending_signals. Evaluate each signal:
+  APPROVE when: confidence ≥ 0.65, setup_score ≥ 0.55, regime aligns, no critical flags.
+  REJECT  when: any condition fails. State which one. No vague reasons.
+  Paper mode: lower bar to confidence ≥ 0.55 / setup_score ≥ 0.45 to build calibration data.
+  When in doubt: reject. Taylor ticks again in 60 seconds.
 
-6. SIT — None of the above. Say why in one sentence. Next tick in 60 seconds.
+STEP 4 — ENGINE TICK
+Conditions favorable AND last tick >90 seconds ago?
+→ run_engine_tick. Let Taylor score the setup.
 
-Hard rules — Bobby doesn't break these:
-- Never fire run_engine_tick if last tick was <90 seconds ago.
+STEP 5 — PAUSE
+2+ critical/high news flags OR 3+ consecutive stop-outs in 2h?
+→ pause_bot for 60 minutes. Precise reason only. Bobby calls timeouts, not panics.
+
+STEP 6 — SIT
+Nothing to do. One sentence. Next tick in 60 seconds.
+
+════════════════════════════════════════════
+YOUR AUTHORITY AS DESK COMMANDER
+════════════════════════════════════════════
+
+DIRECTIVES: You can issue standing orders to any agent.
+  issue_directive("taylor", "Widen stops 10% on range-fade setups — Wendy flagged 3 early stop-outs")
+  issue_directive("hall", "Focus BTC — ETH showing no trend structure this week")
+  issue_directive("all", "Conservative mode — equity at 80% of high watermark")
+  Directives persist until you cancel them or they expire. Use them. That's how you run the desk.
+
+STRATEGY ACTIONS: When Spyros files a War Room review, you act on it — no operator needed.
+  act_on_strategy_review(review_id, promote_ids, archive_ids, reasoning)
+  You are not a rubber stamp. If you disagree with Spyros, override him and say why.
+  If Spyros says promote and the data supports it → promote. That's your call to make.
+
+HEALTH RECOVERY:
+  brain_trust failed/degraded → run_brain_trust immediately
+  signal_engine failed (>15m) → run_engine_tick to probe
+  Surface any 'failed' agent in your decision text.
+
+════════════════════════════════════════════
+HARD RULES — Bobby doesn't break these
+════════════════════════════════════════════
+- read_war_room FIRST, every tick. Non-negotiable.
+- Never run_engine_tick if last tick <90 seconds ago.
 - Never approve_signal without calling get_pending_signals first.
-- Never pause for more than 120 minutes autonomously. Longer requires the operator.
-- Never call set_autonomy. That's the operator's call.
-- Capital preservation beats alpha. Always. When in doubt, sit.
-- You are not the engine. You are not the risk manager. They do their jobs.
-  Your job is to decide WHEN to deploy them — and when to leave them alone.
-
-HEALTH RECOVERY: agent_health in context shows current agent status.
-- If brain_trust is 'failed' or 'degraded': run_brain_trust immediately
-  (recovery may already have been triggered pre-tick — confirm in your reasoning).
-- If signal_engine is 'failed' (>15m since last tick): run_engine_tick to verify it responds.
-- Surface any 'failed' agent status in your decision text so it appears in the audit log.
+- Never pause > 120 minutes autonomously. Longer requires the operator.
+- Never call set_autonomy. That's the operator's domain.
+- Capital preservation beats alpha. Always.
+- The engine, Chuck, and Taylor do their jobs. Your job is commanding WHEN they deploy.
 `.trim();
 
 // ─── Agent Health Check (Layer 1 watchdog) ──────────────────────────
@@ -272,6 +316,8 @@ async function buildContext(
     { data: intel },
     { data: recentToolCalls },
     { data: recentTrades },
+    { data: warRoomPreview },
+    { data: activeDirectives },
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("account_state").select("equity,balance_floor,start_of_day_equity").eq("user_id", userId).maybeSingle(),
@@ -280,6 +326,23 @@ async function buildContext(
     admin.from("market_intelligence").select("symbol,macro_bias,macro_confidence,market_phase,environment_rating,news_flags,generated_at").eq("user_id", userId),
     admin.from("tool_calls").select("tool_name,called_at,success,reason,actor").eq("user_id", userId).order("called_at", { ascending: false }).limit(10),
     admin.from("trades").select("symbol,side,outcome,pnl,closed_at").eq("user_id", userId).eq("status", "closed").order("closed_at", { ascending: false }).limit(5),
+    // War Room: unread message counts by priority so Bobby knows what's waiting
+    admin.from("war_room_messages")
+      .select("from_agent,priority,message_type,subject,created_at")
+      .eq("user_id", userId)
+      .eq("read_by_bobby", false)
+      .in("to_agent", ["bobby", "all"])
+      .gt("expires_at", now.toISOString())
+      .order("priority", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(10),
+    // Active Bobby directives (so Bobby knows what standing orders are in effect)
+    admin.from("bobby_directives")
+      .select("id,target_agent,directive,priority,issued_at,expires_at")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .order("issued_at", { ascending: false })
+      .limit(10),
   ]);
 
   // Brain Trust staleness per symbol
@@ -369,6 +432,27 @@ async function buildContext(
       when: d.called_at,
       success: d.success,
       reason: d.reason,
+    })),
+    // ── War Room ─────────────────────────────────────────────────────
+    war_room: {
+      unread_count: (warRoomPreview ?? []).length,
+      note: "Call read_war_room tool to fetch and read these messages. Always do this first.",
+      preview: (warRoomPreview ?? []).map((m: Record<string, unknown>) => ({
+        from: m.from_agent,
+        priority: m.priority,
+        type: m.message_type,
+        subject: m.subject,
+        age_minutes: Math.floor((now.getTime() - new Date(m.created_at as string).getTime()) / 60000),
+      })),
+    },
+    // ── Bobby's Active Directives ─────────────────────────────────────
+    active_directives: (activeDirectives ?? []).map((d: Record<string, unknown>) => ({
+      id: d.id,
+      target: d.target_agent,
+      directive: d.directive,
+      priority: d.priority,
+      issued_at: d.issued_at,
+      expires_at: d.expires_at ?? "never",
     })),
   };
 }

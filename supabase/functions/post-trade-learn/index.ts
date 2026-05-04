@@ -519,6 +519,39 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
       experimentId: queuedExperimentId,
     },
   });
+
+  // ── Wendy posts to the War Room ───────────────────────────────────────────
+  // Bobby reads this on his next tick. If the grade is poor or a pattern is
+  // emerging, Bobby can issue a directive to Taylor to adjust behaviour.
+  const gradeIsLow = grade === "D" || grade === "C";
+  const pnlStr = t.pnl != null ? `${t.pnl >= 0 ? "+" : ""}$${Number(t.pnl).toFixed(2)}` : "unknown P&L";
+  const warRoomSubject =
+    `${t.symbol} ${t.side.toUpperCase()} closed — Wendy grades it ${grade} (${verdict.replace(/_/g, " ")}) · ${pnlStr}`;
+  const warRoomBody = [
+    `Grade: ${grade} | Process: ${verdict.replace(/_/g, " ")} | Macro alignment: ${macroAlign}`,
+    `Lesson: ${lesson}`,
+    hasHypothesis ? `Experiment queued: ${hyp} (parameter: ${param})${queuedExperimentId ? ` — ID ${queuedExperimentId}` : ""}` : null,
+    gradeIsLow ? `⚠️ Low grade — Bobby, consider reviewing Taylor's entry criteria for ${t.symbol} ${t.side} setups.` : null,
+  ].filter(Boolean).join("\n\n");
+
+  const { error: wrErr } = await admin.from("war_room_messages").insert({
+    user_id: t.user_id,
+    from_agent: "wendy",
+    to_agent: "bobby",
+    message_type: "coaching",
+    subject: warRoomSubject,
+    body: warRoomBody,
+    priority: gradeIsLow ? "high" : "normal",
+    symbol: t.symbol,
+    metadata: {
+      trade_id: t.id,
+      grade,
+      verdict,
+      macro_align: macroAlign,
+      experiment_id: queuedExperimentId ?? null,
+    },
+  });
+  if (wrErr) log("warn", "war_room_insert_failed", { fn: "post-trade-learn", agent: "wendy", tradeId: t.id, err: wrErr.message });
 }
 
 Deno.serve(async (req) => {

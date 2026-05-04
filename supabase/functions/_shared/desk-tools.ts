@@ -6,9 +6,8 @@
 // ─── Axe Capital Trading Desk ────────────────────────────────────
 // Bobby     — Desk Commander. Autonomous orchestrator. Makes every call. [jessica]
 // Wags      — COO. Operator interface. The operator talks to Wags.      [copilot-chat]
-// Taylor    — Chief Quant / CIO. Two modes:
-//               Signal mode: scores setups, proposes entries.           [signal-engine]
-//               Review mode: grades strategies, promotes/kills.         [katrina]
+// Taylor    — Chief Quant. Scores setups, proposes entries.             [signal-engine]
+// Spyros    — Chief Risk Officer. Reviews strategies, promotes/kills.   [katrina function]
 // Mafee     — Pattern Recognition. Spots setups, reads chart structure. [Brain Trust Expert 3]
 // Dollar Bill — Crypto Intel. Funding, sentiment, news, environment.    [Brain Trust Expert 2]
 // Hall      — Macro Strategist. Trend structure, market phase, bias.    [Brain Trust Expert 1]
@@ -289,6 +288,91 @@ export const DESK_TOOLS = [
           },
         },
         required: ["experiment_id", "reason"],
+      },
+    },
+  },
+  // ─── War Room + Autonomy tools (Bobby-only) ──────────────────────────────
+  {
+    type: "function",
+    function: {
+      name: "read_war_room",
+      description:
+        "Read unread War Room messages from the desk agents (Hall, Dollar Bill, Mafee, Wendy, Spyros, Taylor, Chuck). Always call this at the START of each tick before taking any other action. Returns the most urgent unread messages addressed to Bobby.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: {
+            type: "number",
+            description: "Max messages to return. Default 20.",
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "issue_directive",
+      description:
+        "Issue a standing directive to one or all desk agents. Directives persist across ticks until completed, cancelled, or expired. Use when Wendy flags a pattern, Spyros flags a risk, or conditions require the team to operate differently.",
+      parameters: {
+        type: "object",
+        properties: {
+          target_agent: {
+            type: "string",
+            description: "Agent to direct: 'all' | 'hall' | 'dollar_bill' | 'mafee' | 'wendy' | 'spyros' | 'taylor' | 'chuck'",
+          },
+          directive: {
+            type: "string",
+            description: "The standing order in plain English. Be specific. e.g. 'Taylor: widen stops 10% on range-fade setups for next 5 trades — Wendy flagged 3 consecutive early stop-outs.'",
+          },
+          reason: {
+            type: "string",
+            description: "Why this directive is being issued now.",
+          },
+          priority: {
+            type: "string",
+            description: "'urgent' | 'high' | 'normal' | 'low'. Default: 'normal'",
+          },
+          expires_in_hours: {
+            type: "number",
+            description: "Hours until this directive auto-expires. Omit for indefinite.",
+          },
+        },
+        required: ["target_agent", "directive", "reason"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "act_on_strategy_review",
+      description:
+        "Act on Spyros's strategy review recommendation. Bobby can promote experiments to approved strategies or archive underperformers — without waiting for the operator. Only call this after reading a Spyros review from the War Room.",
+      parameters: {
+        type: "object",
+        properties: {
+          review_id: {
+            type: "string",
+            description: "UUID of the strategy_review row Spyros filed.",
+          },
+          promote_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Experiment IDs to promote to approved status.",
+          },
+          archive_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Experiment IDs to archive / mark rejected.",
+          },
+          reasoning: {
+            type: "string",
+            description: "Bobby's 1-2 sentence rationale for agreeing with Spyros (or overriding him).",
+          },
+        },
+        required: ["review_id", "reasoning"],
       },
     },
   },
@@ -714,6 +798,135 @@ export async function executeTool(
         await adminClient
           .from("tool_calls")
           .insert({ ...logEntry, result, success: result.success });
+        return result;
+      }
+
+      case "read_war_room": {
+        const limit = Math.min(Number(args.limit ?? 20), 50);
+        const now = new Date().toISOString();
+        const { data: msgs, error } = await adminClient
+          .from("war_room_messages")
+          .select("id,from_agent,to_agent,message_type,subject,body,priority,symbol,created_at,metadata")
+          .eq("user_id", userId)
+          .eq("read_by_bobby", false)
+          .in("to_agent", ["bobby", "all"])
+          .gt("expires_at", now)
+          .order("priority", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (error) {
+          const result: ToolCallResult = { success: false, error: error.message };
+          await adminClient.from("tool_calls").insert({ ...logEntry, result, success: false });
+          return result;
+        }
+        // Mark all returned messages as read
+        const ids = (msgs ?? []).map((m: Record<string, unknown>) => m.id as string);
+        if (ids.length > 0) {
+          await adminClient
+            .from("war_room_messages")
+            .update({ read_by_bobby: true })
+            .in("id", ids);
+        }
+        const result: ToolCallResult = { success: true, data: { count: ids.length, messages: msgs ?? [] } };
+        await adminClient.from("tool_calls").insert({ ...logEntry, result, success: true });
+        return result;
+      }
+
+      case "issue_directive": {
+        const targetAgent = String(args.target_agent ?? "all");
+        const directive = String(args.directive ?? "");
+        const priority = String(args.priority ?? "normal");
+        const expiresInHours = args.expires_in_hours != null ? Number(args.expires_in_hours) : null;
+        const expiresAt = expiresInHours != null
+          ? new Date(Date.now() + expiresInHours * 3600_000).toISOString()
+          : null;
+        const { data: directive_row, error } = await adminClient
+          .from("bobby_directives")
+          .insert({
+            user_id: userId,
+            target_agent: targetAgent,
+            directive,
+            reason,
+            priority,
+            expires_at: expiresAt,
+          })
+          .select("id")
+          .maybeSingle();
+        if (error) {
+          const result: ToolCallResult = { success: false, error: error.message };
+          await adminClient.from("tool_calls").insert({ ...logEntry, result, success: false });
+          return result;
+        }
+        // Post acknowledgment back to War Room so agents know Bobby issued a directive
+        await adminClient.from("war_room_messages").insert({
+          user_id: userId,
+          from_agent: "bobby",
+          to_agent: targetAgent,
+          message_type: "directive",
+          subject: `Bobby directive → ${targetAgent}: ${directive.slice(0, 100)}${directive.length > 100 ? "…" : ""}`,
+          body: `${directive}\n\nReason: ${reason}${expiresAt ? `\nExpires: ${expiresAt}` : ""}`,
+          priority,
+          read_by_bobby: true,
+          acted_on: true,
+          metadata: { directive_id: directive_row?.id ?? null },
+        });
+        const result: ToolCallResult = { success: true, data: { directive_id: directive_row?.id, target_agent: targetAgent } };
+        await adminClient.from("tool_calls").insert({ ...logEntry, result, success: true });
+        return result;
+      }
+
+      case "act_on_strategy_review": {
+        const reviewId = String(args.review_id ?? "");
+        const promoteIds = Array.isArray(args.promote_ids) ? (args.promote_ids as string[]) : [];
+        const archiveIds = Array.isArray(args.archive_ids) ? (args.archive_ids as string[]) : [];
+        const actorReasoning = String(args.reasoning ?? reason);
+        const now = new Date().toISOString();
+        const errors: string[] = [];
+        const promoted: string[] = [];
+        const archived: string[] = [];
+
+        for (const expId of promoteIds) {
+          const { error } = await adminClient
+            .from("experiments")
+            .update({ status: "accepted", needs_review: false, notes: `Bobby promoted via War Room (${now}): ${actorReasoning}` })
+            .eq("id", expId).eq("user_id", userId);
+          if (error) errors.push(`promote ${expId}: ${error.message}`);
+          else promoted.push(expId);
+        }
+        for (const expId of archiveIds) {
+          const { error } = await adminClient
+            .from("experiments")
+            .update({ status: "rejected", needs_review: false, notes: `Bobby archived via War Room (${now}): ${actorReasoning}` })
+            .eq("id", expId).eq("user_id", userId);
+          if (error) errors.push(`archive ${expId}: ${error.message}`);
+          else archived.push(expId);
+        }
+        // Mark the War Room message acted-on
+        if (reviewId) {
+          await adminClient
+            .from("war_room_messages")
+            .update({ acted_on: true, action_taken: `Bobby promoted ${promoted.length}, archived ${archived.length}. ${actorReasoning}` })
+            .eq("user_id", userId)
+            .eq("metadata->>review_id", reviewId);
+        }
+        // Mark the strategy_review row actioned
+        await adminClient
+          .from("strategy_reviews")
+          .update({ needs_action: false })
+          .eq("id", reviewId).eq("user_id", userId);
+        // System event for audit
+        await adminClient.from("system_events").insert({
+          user_id: userId,
+          event_type: "bobby_strategy_action",
+          actor: "jessica_autonomous",
+          payload: { review_id: reviewId, promoted, archived, reasoning: actorReasoning },
+        }).then(() => {}).catch(() => {});
+        const result: ToolCallResult = {
+          success: errors.length === 0,
+          data: { promoted, archived, errors },
+          error: errors.length > 0 ? errors.join("; ") : undefined,
+        };
+        await adminClient.from("tool_calls").insert({ ...logEntry, result, success: result.success });
         return result;
       }
 

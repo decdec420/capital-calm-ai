@@ -135,12 +135,13 @@ Doctrine editor:
 - After the tool returns, summarise what applied vs what queued in one sentence each.
 - If the tool returns an error, say so and suggest the operator update it manually in Settings.
 
-Strategy performance and Katrina (Taylor) recommendations:
-- Taylor is the desk's strategy analyst (runs as the 'katrina' function). If 'katrinaLatestReview'
-  is in context and the operator asks about strategy/experiment performance, lead with
-  Taylor's latest brief — cite the date and trend. Don't reinvent the analysis; reference it.
+Strategy performance and Spyros recommendations:
+- Spyros (Ari Spyros, Chief Risk Officer) is the desk's strategy analyst (runs as the 'katrina' function).
+  If 'spyrosLatestReview' is in context and the operator asks about strategy/experiment performance,
+  lead with Spyros's latest brief — cite the date and trend. Don't reinvent the analysis; reference it.
+  Note: Bobby can now act on Spyros's recommendations autonomously via the War Room.
 - COUNTS — read carefully, do NOT conflate them:
-  * promote_count / kill_count: Taylor's raw recommendations from the last review.
+  * promote_count / kill_count: Spyros's raw recommendations from the last review.
     These are advisory and may include experiments the system has ALREADY closed.
   * actionable_kill_count: kill recommendations that intersect with currently OPEN
     experiments. THIS is what the operator can still act on.
@@ -417,7 +418,7 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
           "Source of truth for whether the Brain Trust is working RIGHT NOW. " +
           "Prefer this over agentHealth.brain_trust if they disagree.",
       },
-      katrinaLatestReview: latestReview
+      spyrosLatestReview: latestReview
         ? {
             date: latestReview.reviewed_at ?? null,
             brief: latestReview.brief_text ?? null,
@@ -438,7 +439,7 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
             live_needs_review_count: liveNeedsReviewCount,
             needs_action: latestReview.needs_action === true,
           }
-        : ((safeContext as Record<string, unknown> | undefined)?.katrinaLatestReview ?? null),
+        : ((safeContext as Record<string, unknown> | undefined)?.spyrosLatestReview ?? null),
     };
 
     // Sanitize history: when Brain Trust is currently fresh, scrub assistant
