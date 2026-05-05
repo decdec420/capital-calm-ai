@@ -24,6 +24,7 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useAlerts } from "@/hooks/useAlerts";
 import { useSignals } from "@/hooks/useSignals";
 import { useExperiments } from "@/hooks/useExperiments";
+import { useMarketIntelligence } from "@/hooks/useMarketIntelligence";
 import { isStale } from "@/hooks/useRelativeTime";
 import {
   Activity,
@@ -184,9 +185,27 @@ export default function Company() {
   const { pending: pendingSignals } = useSignals();
   const { counts: expCounts } = useExperiments();
 
+  const { data: marketIntel } = useMarketIntelligence();
   const snapshot       = system?.lastEngineSnapshot ?? null;
   const gateReasons    = snapshot?.gateReasons ?? [];
-  const dataStale      = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null);
+
+  // Brain Trust staleness: use the OLDEST recentMomentumAt across all symbols.
+  // Threshold: 120 min — matches signal-engine's BRAIN_TRUST_MOMENTUM_STALE gate.
+  const oldestMomentumAt = marketIntel.length > 0
+    ? marketIntel.reduce<string | null>((oldest, row) => {
+        if (!row.recentMomentumAt) return oldest;
+        if (!oldest) return row.recentMomentumAt;
+        return row.recentMomentumAt < oldest ? row.recentMomentumAt : oldest;
+      }, null)
+    : null;
+  const brainTrustStale = isStale(
+    oldestMomentumAt ? new Date(oldestMomentumAt).getTime() : null,
+    120 * 60_000, // 120 minutes
+  );
+  const brainTrustLastAt = oldestMomentumAt
+    ? new Date(oldestMomentumAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : null;
+
   const criticalAlerts = alerts.filter((a) => a.severity === "critical");
   const hardBlocks     = gateReasons.filter((r) => r.severity === "halt" || r.severity === "block");
   const decision       = system?.lastJessicaDecision;
@@ -258,14 +277,14 @@ export default function Company() {
       primaryLink: "/market",
       can: ["Classify market regime", "Surface key levels", "Assess macro context", "Score BTC setup"],
       cannot: ["Propose trades", "Override risk gates"],
-      dot: !snapshot ? "idle" : dataStale ? "alert" : "active",
-      statusLine: !snapshot
-        ? "No snapshot"
-        : dataStale
+      dot: !oldestMomentumAt ? "idle" : brainTrustStale ? "alert" : "active",
+      statusLine: !oldestMomentumAt
+        ? "No snapshot — waiting for first run"
+        : brainTrustStale
           ? "Context stale — needs refresh"
-          : `${(snapshot.perSymbol[0]?.regime ?? "unknown").replace(/_/g, " ")} · ${((snapshot.perSymbol[0]?.confidence ?? 0) * 100).toFixed(0)}% conf`,
-      lastAction: snapshot
-        ? `Snapshot: ${new Date(snapshot.ranAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+          : `${(snapshot?.perSymbol[0]?.regime ?? "unknown").replace(/_/g, " ")} · ${((snapshot?.perSymbol[0]?.confidence ?? 0) * 100).toFixed(0)}% conf`,
+      lastAction: brainTrustLastAt
+        ? `Momentum updated: ${brainTrustLastAt}`
         : undefined,
     },
     {
@@ -284,8 +303,8 @@ export default function Company() {
         : "No experiments pending",
     },
     {
-      id: "katrina",
-      name: "Katrina",
+      id: "spyros",
+      name: "Spyros",
       role: "Review & Governance — audits strategy performance, promotes/retires strategies.",
       dept: "Strategy Lab",
       deptTone: "neutral",
