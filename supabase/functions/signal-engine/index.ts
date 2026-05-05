@@ -1018,8 +1018,8 @@ async function runTickForUser(
   // faster. Signals are annotated as paper_grade so performance distributions stay
   // separate. Default to paper when mode is not explicitly "live".
   const isPaper = ((sys as { mode?: string } | null)?.mode ?? "paper") !== "live";
-  const MIN_SETUP_SCORE = isPaper ? 0.45 : 0.55;   // paper: 0.45, live: 0.55
-  const MIN_CONFIDENCE = isPaper ? 0.55 : 0.65;     // paper: 0.55, live: 0.65
+  const MIN_SETUP_SCORE = isPaper ? 0.40 : 0.55;   // paper: 0.40, live: 0.55
+  const MIN_CONFIDENCE = isPaper ? 0.50 : 0.65;     // paper: 0.50, live: 0.65
 
   // Event mode / manual pause check — halts all symbols this tick.
   const pausedGate = getActiveEventModeGateFromSystem({
