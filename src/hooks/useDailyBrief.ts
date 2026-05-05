@@ -30,9 +30,6 @@ function mapRow(r: Record<string, unknown>): DailyBrief {
   };
 }
 
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export function useDailyBrief() {
   const { user } = useAuth();
@@ -97,7 +94,15 @@ export function useDailyBrief() {
     }
   }, [refresh]);
 
-  const isToday = brief?.briefDate === todayUtc();
+  // "Fresh" if the brief was generated within the last 28 hours.
+  // A date-string equality check (briefDate === todayUtc()) breaks for users
+  // in US timezones: after midnight UTC the UTC date flips to tomorrow even
+  // though it's still the same local day, making today's brief appear stale.
+  // 28h covers the full calendar day in every UTC-12 to UTC+12 timezone.
+  const FRESH_WINDOW_MS = 28 * 60 * 60 * 1000;
+  const isToday = brief
+    ? Date.now() - new Date(brief.updatedAt).getTime() < FRESH_WINDOW_MS
+    : false;
 
   return { brief, loading, generating, error, refresh, generate, isToday };
 }
