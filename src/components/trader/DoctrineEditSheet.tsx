@@ -106,11 +106,13 @@ export function DoctrineEditSheet({ open, onOpenChange, focusField }: Props) {
       if (!token) throw new Error("Not signed in.");
 
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+      const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
       const res = await fetch(`${SUPABASE_URL}/functions/v1/update-doctrine`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          apikey: SUPABASE_KEY,
         },
         body: JSON.stringify({
           changes: changes.map((c) => ({ field: c.field, to_value: c.draft })),
