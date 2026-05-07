@@ -43,7 +43,7 @@ export const DOCTRINE_FALLBACK: DoctrineSettingsRow = {
   max_order_pct: 0.001,
   max_order_abs_cap: 1,
   max_order_abs_floor: 0.25,
-  daily_loss_pct: 0.003,
+  daily_loss_pct: 0.02,
   max_trades_per_day: 5,
   floor_pct: 0.80,
   floor_abs_min: 5,
@@ -137,13 +137,13 @@ export const DOCTRINE_FIELD_LABELS: Record<DoctrineField, string> = {
 
 // ── Profile presets ───────────────────────────────────────────
 export const SENTINEL_PRESET = {
-  max_order_pct: 0.001, max_order_abs_cap: 1,  daily_loss_pct: 0.003, floor_pct: 0.80, max_trades_per_day: 5,  risk_per_trade_pct: 0.01,  scan_interval_seconds: 300, max_correlated_positions: 3,
+  max_order_pct: 0.001, max_order_abs_cap: 1,  daily_loss_pct: 0.02,  floor_pct: 0.80, max_trades_per_day: 5,  risk_per_trade_pct: 0.01,  scan_interval_seconds: 300, max_correlated_positions: 3,
 };
 export const ACTIVE_PRESET = {
-  max_order_pct: 0.005, max_order_abs_cap: 5,  daily_loss_pct: 0.01,  floor_pct: 0.75, max_trades_per_day: 15, risk_per_trade_pct: 0.015, scan_interval_seconds: 120, max_correlated_positions: 3,
+  max_order_pct: 0.005, max_order_abs_cap: 15, daily_loss_pct: 0.03,  floor_pct: 0.75, max_trades_per_day: 15, risk_per_trade_pct: 0.015, scan_interval_seconds: 120, max_correlated_positions: 5,
 };
 export const AGGRESSIVE_PRESET = {
-  max_order_pct: 0.025, max_order_abs_cap: 25, daily_loss_pct: 0.03,  floor_pct: 0.60, max_trades_per_day: 30, risk_per_trade_pct: 0.02,  scan_interval_seconds: 60,  max_correlated_positions: 4,
+  max_order_pct: 0.025, max_order_abs_cap: 50, daily_loss_pct: 0.05,  floor_pct: 0.60, max_trades_per_day: 30, risk_per_trade_pct: 0.02,  scan_interval_seconds: 60,  max_correlated_positions: 6,
 };
 export type ProfilePresetId = "sentinel" | "active" | "aggressive";
 export const PROFILE_PRESETS: Record<ProfilePresetId, typeof SENTINEL_PRESET> = {

@@ -99,6 +99,33 @@ Deno.serve(async (req) => {
       .eq("user_id", userId);
     if (updErr) throw updErr;
 
+    // Sync doctrine_settings.starting_equity_usd (one-way ratchet: only ever increases).
+    // This keeps the kill-switch floor anchored to the actual capital in the account.
+    // Without this, a top-up would raise equity but leave the floor based on the old
+    // starting balance, making guardrails effectively toothless.
+    try {
+      const { data: docRow } = await admin
+        .from("doctrine_settings")
+        .select("starting_equity_usd")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      const currentStarting =
+        docRow?.starting_equity_usd != null ? Number(docRow.starting_equity_usd) : 0;
+      if (newEquity > currentStarting) {
+        await admin
+          .from("doctrine_settings")
+          .update({
+            starting_equity_usd: newEquity,
+            updated_via: "topup_equity_sync",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", userId);
+      }
+    } catch (e) {
+      console.warn("[topup-paper-balance] doctrine starting_equity sync failed (non-fatal):", e);
+    }
+
     // Audit (best-effort; do not fail the call if the audit insert errors).
     try {
       await admin.from("system_audit_log").insert({

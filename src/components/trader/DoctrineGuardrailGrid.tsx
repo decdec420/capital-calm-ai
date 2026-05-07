@@ -61,7 +61,7 @@ export function DoctrineGuardrailGrid() {
   const { data: account } = useAccountState();
   const { open, closed } = useTrades();
   const { data: system } = useSystemState();
-  const { resolved } = useDoctrineSettings();
+  const { resolved, settings, updatedAt } = useDoctrineSettings();
   const [editOpen, setEditOpen] = useState(false);
   const [focusField, setFocusField] = useState<DoctrineField | undefined>(undefined);
 
@@ -146,7 +146,9 @@ export function DoctrineGuardrailGrid() {
       {
         key: "balance-floor",
         label: "Kill-switch floor",
-        description: `Halts trading if equity drops below ${formatUsd(FLOOR_USD)} (${(resolved.floorPct * 100).toFixed(0)}% of starting equity).`,
+        description: resolved.startingEquityKnown
+          ? `${(resolved.floorPct * 100).toFixed(0)}% × ${formatUsd(settings?.starting_equity_usd ?? 0)} starting = ${formatUsd(FLOOR_USD)}. Halts if equity drops here.`
+          : `Halts trading if equity drops below ${formatUsd(FLOOR_USD)} (${(resolved.floorPct * 100).toFixed(0)}% of starting equity).`,
         icon: DollarSign,
         current: formatUsd(equity),
         limit: formatUsd(FLOOR_USD),
@@ -177,13 +179,27 @@ export function DoctrineGuardrailGrid() {
     ];
   }, [account?.equity, open, closed, system?.dataFeed, resolved]);
 
+  const isPaper = system?.mode === "paper" || !system?.mode;
+
   return (
     <div className="space-y-3">
       <div className="flex items-end justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Doctrine guardrails</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Doctrine guardrails</h3>
+            {isPaper && (
+              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider bg-blue-500/15 text-blue-400 border border-blue-500/25">
+                Paper
+              </span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             What the engine actually enforces. Click any tile to edit. Tightening applies instantly; loosening waits 24h.
+            {updatedAt && (
+              <span className="ml-1 opacity-60">
+                · doctrine updated {new Date(updatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+              </span>
+            )}
           </p>
         </div>
         <button

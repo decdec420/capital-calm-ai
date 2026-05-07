@@ -49,7 +49,7 @@ const EDITABLE_FIELDS: DoctrineField[] = [
 ];
 
 export function DoctrineEditSheet({ open, onOpenChange, focusField }: Props) {
-  const { settings, refetch } = useDoctrineSettings();
+  const { settings, refetch, updatedAt } = useDoctrineSettings();
   const { data: account } = useAccountState();
   const equity = account?.equity ?? 0;
 
@@ -147,6 +147,11 @@ export function DoctrineEditSheet({ open, onOpenChange, focusField }: Props) {
           <SheetTitle>Edit doctrine</SheetTitle>
           <SheetDescription>
             Tighten risk → applies instantly. Loosen risk → 24-hour cooldown.
+            {updatedAt && (
+              <span className="block mt-0.5 text-[11px] opacity-70">
+                Last saved {new Date(updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+              </span>
+            )}
           </SheetDescription>
         </SheetHeader>
 
@@ -165,7 +170,8 @@ export function DoctrineEditSheet({ open, onOpenChange, focusField }: Props) {
               className="tabular"
             />
             <p className="text-[10px] text-muted-foreground">
-              Basis for kill-switch floor. Current: {settings.starting_equity_usd != null ? formatUsd(settings.starting_equity_usd) : "—"}
+              Basis for kill-switch floor. Current: {settings.starting_equity_usd != null ? formatUsd(settings.starting_equity_usd) : "—"}.
+              Auto-syncs upward on paper top-ups.
             </p>
           </div>
 

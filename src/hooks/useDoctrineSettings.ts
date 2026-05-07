@@ -36,12 +36,14 @@ export interface UseDoctrineSettingsResult {
   error: string | null;
   refetch: () => Promise<void>;
   needsOnboarding: boolean;
+  updatedAt: string | null;
 }
 
 export function useDoctrineSettings(): UseDoctrineSettingsResult {
   const { user } = useAuth();
   const { data: account } = useAccountState();
   const [settings, setSettings] = useState<DoctrineSettingsRow | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +55,11 @@ export function useDoctrineSettings(): UseDoctrineSettingsResult {
       .eq("user_id", user.id)
       .maybeSingle();
     if (err) setError(err.message);
-    else setSettings(data ? mapRow(data) : null);
+    else {
+      setSettings(data ? mapRow(data) : null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setUpdatedAt(data ? (data as any).updated_at ?? null : null);
+    }
     setLoading(false);
   }, [user]);
 
@@ -69,5 +75,5 @@ export function useDoctrineSettings(): UseDoctrineSettingsResult {
   const resolved = useMemo(() => resolveDoctrine(settings, equity), [settings, equity]);
   const needsOnboarding = !!user && !loading && (!settings || settings.starting_equity_usd === null);
 
-  return { settings, resolved, loading, error, refetch, needsOnboarding };
+  return { settings, resolved, loading, error, refetch, needsOnboarding, updatedAt };
 }

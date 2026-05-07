@@ -69,7 +69,7 @@ export const DOCTRINE_FALLBACK: DoctrineSettingsRow = {
   max_order_pct: 0.001,
   max_order_abs_cap: 1,
   max_order_abs_floor: 0.25,
-  daily_loss_pct: 0.003,
+  daily_loss_pct: 0.02,
   max_trades_per_day: 5,
   floor_pct: 0.80,
   floor_abs_min: 5,
