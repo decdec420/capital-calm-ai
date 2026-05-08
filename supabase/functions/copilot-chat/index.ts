@@ -495,7 +495,7 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
         return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
       }
       if (firstResp.status === 402) {
-        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
+        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage.", fallback: true }, 200);
       }
       const text = await firstResp.text().catch(() => "");
       console.error("Gateway error", firstResp.status, text);
