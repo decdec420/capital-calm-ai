@@ -3291,7 +3291,9 @@ if (req.method === "OPTIONS") {
       LOVABLE_API_KEY,
     );
     await tracker.flushHealth(admin, userData.user.id);
-    const status = result.tick === "ai_error" ? 500 : 200;
+    // Return 200 even on ai_error so the client can display a graceful fallback
+    // (AI credits exhausted / gateway hiccup) instead of crashing on a 500.
+    const status = 200;
     return new Response(JSON.stringify(result), {
       status,
       headers: { ...cors, "Content-Type": "application/json" },
