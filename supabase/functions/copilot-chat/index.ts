@@ -725,7 +725,7 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
         return json({ error: "Rate limit reached. Give it a moment, then try again." }, 429);
       }
       if (followupResp.status === 402) {
-        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage." }, 402);
+        return json({ error: "AI credits depleted. Top up in Settings → Workspace → Usage.", fallback: true }, 200);
       }
       const t = await followupResp.text().catch(() => "");
       console.error("followup gateway error", followupResp.status, t);
