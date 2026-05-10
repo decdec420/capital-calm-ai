@@ -26,6 +26,7 @@ import { useSignals } from "@/hooks/useSignals";
 import { useExperiments } from "@/hooks/useExperiments";
 import { useMarketIntelligence } from "@/hooks/useMarketIntelligence";
 import { isStale } from "@/hooks/useRelativeTime";
+import { AGENT_PERMISSIONS } from "@/lib/agent-permissions";
 import {
   Activity,
   ArrowRight,
@@ -219,8 +220,8 @@ export default function Company() {
       deptTone: "cyan",
       icon: <LayoutDashboard className="h-5 w-5" />,
       primaryLink: "/",
-      can: ["Approve trades", "Engage kill switch", "Arm live mode", "Override any gate"],
-      cannot: [],
+      can: [...AGENT_PERMISSIONS.bobby.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.bobby.forbidden],
       dot: system?.bot === "running" ? "active" : system?.bot === "halted" ? "blocked" : "idle",
       statusLine: system?.bot === "running"
         ? "Desk is running"
@@ -239,8 +240,8 @@ export default function Company() {
       deptTone: "amber",
       icon: <Sparkles className="h-5 w-5" />,
       primaryLink: "/copilot",
-      can: ["Stage trade proposals", "Run signal engine", "Synthesize intel", "Brief Bobby"],
-      cannot: ["Execute live orders", "Modify doctrine"],
+      can: [...AGENT_PERMISSIONS.wags.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.wags.forbidden],
       dot: pendingSignals.length > 0 ? "active" : "idle",
       statusLine: pendingSignals.length > 0
         ? `${pendingSignals.length} proposal${pendingSignals.length > 1 ? "s" : ""} staged — awaiting Bobby`
@@ -257,8 +258,8 @@ export default function Company() {
       deptTone: "green",
       icon: <Zap className="h-5 w-5" />,
       primaryLink: "/copilot",
-      can: ["Generate trade signals", "Compute market regime", "Score setups", "Propose entry/stop/target"],
-      cannot: ["Approve trades", "Bypass risk gates"],
+      can: [...AGENT_PERMISSIONS.taylor.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.taylor.forbidden],
       dot: pendingSignals.length > 0 ? "active" : snapshot ? "idle" : "idle",
       statusLine: pendingSignals[0]
         ? `${pendingSignals[0].side.toUpperCase()} ${pendingSignals[0].symbol} · ${(pendingSignals[0].confidence * 100).toFixed(0)}% confidence`
@@ -275,8 +276,8 @@ export default function Company() {
       deptTone: "violet",
       icon: <Brain className="h-5 w-5" />,
       primaryLink: "/market",
-      can: ["Classify market regime", "Surface key levels", "Assess macro context", "Score BTC setup"],
-      cannot: ["Propose trades", "Override risk gates"],
+      can: [...AGENT_PERMISSIONS.brainTrust.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.brainTrust.forbidden],
       dot: !oldestMomentumAt ? "idle" : brainTrustStale ? "alert" : "active",
       statusLine: !oldestMomentumAt
         ? "No snapshot — waiting for first run"
@@ -295,8 +296,8 @@ export default function Company() {
       deptTone: "neutral",
       icon: <BookOpen className="h-5 w-5" />,
       primaryLink: "/learning",
-      can: ["Log post-trade lessons", "Update experiments", "Surface patterns"],
-      cannot: ["Modify doctrine", "Approve live trades"],
+      can: [...AGENT_PERMISSIONS.wendy.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.wendy.forbidden],
       dot: expCounts.needsReview > 0 ? "alert" : "idle",
       statusLine: expCounts.needsReview > 0
         ? `${expCounts.needsReview} experiment${expCounts.needsReview > 1 ? "s" : ""} need review`
@@ -325,8 +326,8 @@ export default function Company() {
       deptTone: "green",
       icon: <Wifi className="h-5 w-5" />,
       primaryLink: "/alerts",
-      can: ["Monitor system health", "Triage incidents", "Reconnect feeds", "Diagnose broker issues"],
-      cannot: ["Make trading decisions", "Override risk gates"],
+      can: [...AGENT_PERMISSIONS.hall.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.hall.forbidden],
       dot: criticalAlerts.length > 0 ? "blocked" : system?.dataFeed === "connected" ? "active" : "alert",
       statusLine: criticalAlerts.length > 0
         ? `${criticalAlerts.length} critical incident${criticalAlerts.length > 1 ? "s" : ""} active`
@@ -345,8 +346,8 @@ export default function Company() {
       deptTone: "red",
       icon: <ShieldAlert className="h-5 w-5" />,
       primaryLink: "/risk",
-      can: ["Enforce all guardrails", "Trigger auto-halts", "Block over-limit trades", "Compute loss cap"],
-      cannot: ["Be overridden without Bobby", "Allow floor breaches"],
+      can: [...AGENT_PERMISSIONS.riskDoctrine.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.riskDoctrine.forbidden],
       dot: hardBlocks.length > 0 ? "blocked" : "active",
       statusLine: hardBlocks.length > 0
         ? `${hardBlocks.length} gate${hardBlocks.length > 1 ? "s" : ""} blocking new trades`
@@ -363,8 +364,8 @@ export default function Company() {
       deptTone: "green",
       icon: <DollarSign className="h-5 w-5" />,
       primaryLink: "/settings",
-      can: ["Submit live orders", "Cancel open orders", "Report fill status"],
-      cannot: ["Decide trade direction", "Override stop-loss"],
+      can: [...AGENT_PERMISSIONS.brokerGateway.canTrigger],
+      cannot: [...AGENT_PERMISSIONS.brokerGateway.forbidden],
       dot: system?.brokerConnection === "connected"
         ? "active"
         : system?.brokerConnection === "degraded"

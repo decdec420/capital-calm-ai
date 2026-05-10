@@ -8,6 +8,7 @@ import { DoctrineProposalBanner } from "@/components/trader/DoctrineProposalBann
 import { SymbolStrip } from "@/components/trader/SymbolStrip";
 import { AgentStatusRow } from "@/components/trader/AgentStatusRow";
 import { NextBestAction } from "@/components/trader/NextBestAction";
+import { WhyNoTradesPanel } from "@/components/trader/WhyNoTradesPanel";
 
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { KillSwitchDialog } from "@/components/trader/KillSwitchDialog";
@@ -461,6 +462,9 @@ export default function Overview() {
         <div className="space-y-4">
           {/* Next best action — always shows what to do right now */}
           <NextBestAction onToggleBot={toggleBot} />
+
+          {/* Full diagnostic — why no trades? */}
+          <WhyNoTradesPanel />
 
           <div className="panel p-4 space-y-3">
             <div className="flex items-center justify-between">

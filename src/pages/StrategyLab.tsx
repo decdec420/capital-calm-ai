@@ -33,6 +33,7 @@ import { Link } from "react-router-dom";
 import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel";
 import { PipelineFlowBanner } from "@/components/trader/PipelineFlowBanner";
 import { StrategyGradeBadge } from "@/components/trader/StrategyGradeBadge";
+import { StrategyEvidenceScorecard } from "@/components/trader/StrategyEvidenceScorecard";
 import { displayNameFor, autoSummaryFromVersion } from "@/lib/strategy-naming";
 import { cn } from "@/lib/utils";
 
@@ -432,6 +433,7 @@ function LivePanel({ approved, promotionTitle, onClone, onEdit, onBacktest, back
         <FriendlyMetric label="Smoothness" sub="Sharpe" value={m.trades === 0 ? "—" : m.sharpe.toFixed(2)} hint="How steady the returns are. Higher = less rollercoaster." />
         <FriendlyMetric label="Sample size" sub="Trades" value={m.trades === 0 ? "—" : String(m.trades)} hint="More trades = more confidence in the numbers above." />
       </div>
+      <StrategyEvidenceScorecard strategy={approved} className="mt-4" />
     </div>
   );
 }
