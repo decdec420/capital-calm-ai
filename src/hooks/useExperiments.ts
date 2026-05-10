@@ -27,6 +27,9 @@ function mapRow(r: any): Experiment {
     strategyId: r.strategy_id,
     autoResolved: !!r.auto_resolved,
     needsReview: !!r.needs_review,
+    source: r.source ?? null,
+    sourceRecommendationId: r.source_recommendation_id ?? null,
+    symbol: r.symbol ?? null,
   };
 }
 
