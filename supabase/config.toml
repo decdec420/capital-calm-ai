@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.process-decision-memory]
 verify_jwt = false
+
+[functions.process-strategy-learning]
+verify_jwt = false
