@@ -28,6 +28,7 @@ import {
   placeMarketBuy,
 } from "../_shared/broker.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import type { DecisionReplayPacket } from "../_shared/decision-replay.ts";
 
 validateDoctrineInvariants();
 
@@ -138,6 +139,18 @@ if (req.method === "OPTIONS") {
       }
       const transitions = appendTransition(prevTransitions, result.transition!);
 
+      // Patch replay packet to record that this proposal was rejected by the operator.
+      // The existing packet (written by signal-engine) has decision="approved" (optimistic);
+      // operator rejection changes it to "blocked_by_gate" with the operator's reason.
+      const existingPacket = sig.replay_packet as DecisionReplayPacket | null;
+      const rejectedPacket: DecisionReplayPacket | null = existingPacket
+        ? {
+            ...existingPacket,
+            decision: "blocked_by_gate",
+            decisionReason: reason ?? "Operator declined",
+          }
+        : null;
+
       await admin
         .from("trade_signals")
         .update({
@@ -147,6 +160,7 @@ if (req.method === "OPTIONS") {
           decided_at: nowIso,
           lifecycle_phase: "rejected",
           lifecycle_transitions: transitions,
+          ...(rejectedPacket ? { replay_packet: rejectedPacket } : {}),
         })
         .eq("id", signalId);
 
@@ -336,6 +350,18 @@ if (req.method === "OPTIONS") {
         : []),
     ];
 
+    // Patch replay packet: confirm operator approval so the packet is consistent
+    // with the final outcome. The packet was written with decision="approved"
+    // (from the engine's perspective); operator approval validates that choice.
+    const approveExistingPacket = sig.replay_packet as DecisionReplayPacket | null;
+    const approvedPacket: DecisionReplayPacket | null = approveExistingPacket
+      ? {
+          ...approveExistingPacket,
+          decision: "approved",
+          decisionReason: reason ?? "Operator approved",
+        }
+      : null;
+
     await admin
       .from("trade_signals")
       .update({
@@ -346,6 +372,7 @@ if (req.method === "OPTIONS") {
         executed_trade_id: tradeRow?.id ?? null,
         lifecycle_phase: "executed",
         lifecycle_transitions: nextTransitions,
+        ...(approvedPacket ? { replay_packet: approvedPacket } : {}),
       })
       .eq("id", signalId);
 

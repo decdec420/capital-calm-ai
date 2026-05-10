@@ -47,6 +47,8 @@ export interface MarketReplaySlice {
   confidence: number;
   volatility: string;
   brainTrustFresh: boolean;
+  /** Age of the Brain Trust brief at decision time (minutes). */
+  brainTrustAgeMinutes: number | null;
   /** Age of the engine snapshot at decision time (seconds). */
   snapshotAgeSeconds: number;
 }

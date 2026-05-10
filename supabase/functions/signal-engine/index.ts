@@ -82,6 +82,9 @@ import {
 import { recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
+import {
+  buildDecisionReplayPacket,
+} from "../_shared/decision-replay.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -2497,6 +2500,85 @@ async function runTickForUser(
 
 
   // ── Stage 5: INSERT signal row (FSM-traced) ──────────────────
+
+  // ── Build replay packet (non-blocking; placeholder id used pre-INSERT) ──
+  // The replay packet captures the full decision context so any future
+  // session can reconstruct exactly why this trade was proposed.
+  // Security: we store cap NUMBERS (not raw settings rows), model IDs
+  // (not API keys), and brief ages (not raw prompt text or credentials.
+  const tickRanAt = new Date().toISOString();
+  const brainTrustAgeMinutes = intel?.generated_at
+    ? Math.round((Date.now() - new Date(intel.generated_at).getTime()) / 60_000)
+    : null;
+  // The engine snapshot ranAt is already persisted in system_state;
+  // we compute age from the winner's perSymbol snapshot if available,
+  // otherwise from system_state.last_engine_snapshot.
+  const engineSnapshotRanAt = sys?.last_engine_snapshot?.ran_at ?? tickRanAt;
+  const engineSnapshotAgeSeconds = Math.round(
+    (Date.now() - new Date(engineSnapshotRanAt).getTime()) / 1_000,
+  );
+
+  // Collect all gate reasons seen during this per-symbol evaluation.
+  // The winner passed all halting gates, so we surface the non-blocking
+  // ones that were observed (warn/info/skip from prior checks).
+  const proposalGates: Array<{ code: string; severity: "halt" | "block" | "skip" | "warn" | "info"; message: string }> = [];
+  for (const r of clamp.clampedBy) {
+    if (r.severity !== "halt" && r.severity !== "block") {
+      proposalGates.push({ code: r.code, severity: r.severity as "skip" | "warn" | "info", message: r.message });
+    }
+  }
+  if (riskVerdict && riskVerdict.verdict !== "veto" && riskVerdict.verdict !== "approve") {
+    proposalGates.push({ code: "RISK_MANAGER_REDUCED", severity: "warn", message: riskVerdict.reason });
+  }
+
+  // Resolve profile label for replay (sentinel/active/aggressive).
+  const doctrineProfileLabel = ((): "sentinel" | "active" | "aggressive" => {
+    const id = activeProfile.id ?? "";
+    if (id === "aggressive") return "aggressive";
+    if (id === "active") return "active";
+    return "sentinel";
+  })();
+
+  const replayPacketPayload = buildDecisionReplayPacket({
+    signalId: "pending", // will be updated after INSERT returns the real id
+    ranAt: tickRanAt,
+    market: {
+      symbol: winner.symbol,
+      regime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: conf,
+      volatility: winner.regime.volatility ?? "unknown",
+      brainTrustFresh: brainTrustAgeMinutes !== null && brainTrustAgeMinutes <= 120,
+      brainTrustAgeMinutes,
+      snapshotAgeSeconds: engineSnapshotAgeSeconds,
+    },
+    doctrine: {
+      mode: isPaper ? "paper" : "live",
+      dailyLossCapUsd: resolvedDoctrine.dailyLossUsd,
+      killSwitchFloorUsd: resolvedDoctrine.killSwitchFloorUsd,
+      maxTradesPerDay: resolvedDoctrine.maxTradesPerDay,
+      // maxOrderPct and maxOrderAbsCap from doctrine settings (safe cap numbers, not credentials)
+      maxOrderPct: settingsRow?.max_order_pct ?? 0.001,
+      maxOrderAbsCap: settingsRow?.max_order_abs_cap ?? 1,
+      dailyLossPct: resolvedDoctrine.dailyLossPct,
+      floorPct: resolvedDoctrine.floorPct,
+      profile: doctrineProfileLabel,
+    },
+    model: {
+      taylorModel: "google/gemini-3-flash-preview",
+      taylorPromptVersion: "signal-engine-v2",
+      riskManagerModel: "google/gemini-3-flash-preview",
+      // No inputPacketHash here — candle data is large; omitted for perf.
+    },
+    gates: {
+      gates: proposalGates,
+      anyRefusal: false, // winner passed all halting gates
+      refusalCodes: [],
+    },
+    decision: "approved",
+    decisionReason: decision.reasoning ?? "AI proposed trade; all gates passed.",
+  });
+
   const proposedResult = transitionSignal("proposed", "proposed", {
     actor: "engine",
     reason: "AI proposed entry (synthetic origin)",
@@ -2577,6 +2659,9 @@ async function runTickForUser(
       // filters expires_at > NOW(), so stale signals from before a pause
       // window are automatically invisible on resume.
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      // Replayable decision packet — non-sensitive metadata only.
+      // signalId is set to "pending" here; updated below with the real id.
+      replay_packet: replayPacketPayload,
     })
     .select()
     .single();
@@ -2601,6 +2686,23 @@ async function runTickForUser(
       expiredCount,
       perSymbol,
     };
+  }
+
+  // ── Patch replay packet with the real signal id ───────────────
+  // The packet was written with signalId="pending" at INSERT time because
+  // the DB-generated UUID wasn't known yet. Now that we have the real id
+  // we patch it in-place. Best-effort — a failure here never blocks the tick.
+  if (signalRow?.id) {
+    const patchedPacket = { ...replayPacketPayload, signalId: signalRow.id };
+    admin
+      .from("trade_signals")
+      .update({ replay_packet: patchedPacket })
+      .eq("id", signalRow.id)
+      .then(({ error: patchErr }) => {
+        if (patchErr) {
+          log("warn", "replay_packet_id_patch_failed", { fn: "signal-engine", signalId: signalRow.id, err: patchErr.message });
+        }
+      });
   }
 
   // ── Stage 6: auto-execute if autonomy allows ─────────────────
