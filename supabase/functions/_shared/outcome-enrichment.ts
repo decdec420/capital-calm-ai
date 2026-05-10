@@ -22,10 +22,10 @@ export type LookaheadWindow = "15m" | "1h" | "4h";
 
 /** Canonical outcome of running the simulation. */
 export type SimulationResultLabel =
-  | "would_have_won"    // price moved favorably beyond the edge threshold
-  | "would_have_lost"   // price moved adversely beyond the edge threshold
+  | "would_have_won"    // price moved favorably for the given side
+  | "would_have_lost"   // price moved adversely for the given side
   | "no_clear_edge"     // price movement within the noise band
-  | "insufficient_data"; // Coinbase data unavailable for this time range
+  | "insufficient_data"; // Coinbase data unavailable or side unknown
 
 /**
  * Wendy's recommended learning action based on blocker + outcome.
@@ -53,21 +53,26 @@ export interface SimulationResult {
   /** Lookahead window used for this enrichment. */
   lookahead_window: LookaheadWindow;
   /**
-   * Hypothetical PnL as a fraction of entry.
-   * For a long bias: (exit - entry) / entry.
+   * Hypothetical PnL as a fraction of entry, direction-aware.
+   * Long:  (exit - entry) / entry.
+   * Short: (entry - exit) / entry.
    * Positive = favorable, negative = adverse.
    */
   hypothetical_pnl: number | null;
   /** Same as hypothetical_pnl — explicit alias for clarity. */
   hypothetical_return_pct: number | null;
   /**
-   * Max adverse excursion: worst intra-window drawdown from entry.
-   * (minLow - entry) / entry — always <= 0 for a long bias.
+   * Max adverse excursion: worst intra-window move against the position.
+   * Long:  (minLow  - entry) / entry  ≤ 0.
+   * Short: (entry   - maxHigh) / entry ≤ 0.
+   * Always ≤ 0.
    */
   max_adverse_excursion: number | null;
   /**
-   * Max favorable excursion: best intra-window gain from entry.
-   * (maxHigh - entry) / entry — always >= 0 for a long bias.
+   * Max favorable excursion: best intra-window move in favour of the position.
+   * Long:  (maxHigh - entry) / entry ≥ 0.
+   * Short: (entry   - minLow) / entry ≥ 0.
+   * Always ≥ 0.
    */
   max_favorable_excursion: number | null;
   /** Wendy's recommended learning action. */
@@ -76,6 +81,11 @@ export interface SimulationResult {
   enriched_at: string;
   /** Populated only when result_label = insufficient_data. */
   insufficient_data_reason: string | null;
+  /**
+   * The direction used to score this simulation.
+   * Null when side was unknown — metrics are not direction-adjusted.
+   */
+  simulated_side: "long" | "short" | null;
 }
 
 // ─── Candle type (matches market.ts) ─────────────────────────────────────────
@@ -188,9 +198,6 @@ const CB = "https://api.exchange.coinbase.com";
  * Uses public REST endpoint — no auth required.
  * Returns null if data is unavailable (network error, 4xx, empty response).
  * Never throws — callers treat null as insufficient_data.
- *
- * Security: this function is read-only. It cannot place orders, read account
- * data, or access any authenticated endpoint.
  */
 async function fetchHistoricalCandles(
   symbol: string,
@@ -229,7 +236,7 @@ async function fetchHistoricalCandles(
   }
 }
 
-// ─── Hypothetical metrics ─────────────────────────────────────────────────────
+// ─── Direction-aware hypothetical metrics ─────────────────────────────────────
 
 /**
  * Minimum price move (as fraction) to declare a win or loss.
@@ -241,23 +248,30 @@ const EDGE_THRESHOLD = 0.003;
 interface HypotheticalMetrics {
   entryPrice: number;
   exitPrice: number;
-  returnPct: number;    // (exit - entry) / entry
-  mae: number;          // max adverse excursion ≤ 0
-  mfe: number;          // max favorable excursion ≥ 0
+  /** Direction-adjusted return: positive = favorable, negative = adverse. */
+  returnPct: number;
+  /** Max adverse excursion ≤ 0 (worst move against the position). */
+  mae: number;
+  /** Max favorable excursion ≥ 0 (best move in favour of the position). */
+  mfe: number;
 }
 
 /**
- * Compute hypothetical long-bias metrics from candle data.
- * Uses first-candle open as entry, last-candle close as exit.
- * MAE/MFE scan all intra-window highs and lows.
+ * Compute hypothetical metrics from candle data, direction-aware.
  *
- * Long bias is the correct approximation for signals that were
- * blocked/vetoed in a trending or bullish regime. The direction
- * assumption is noted in the result so future PRs can refine with
- * explicit side data from the replay_packet.meta field.
+ * Long:
+ *   returnPct = (exit - entry) / entry
+ *   MFE       = (maxHigh - entry) / entry  ≥ 0
+ *   MAE       = (minLow  - entry) / entry  ≤ 0
+ *
+ * Short:
+ *   returnPct = (entry - exit) / entry
+ *   MFE       = (entry - minLow)  / entry  ≥ 0  (price fell — favorable)
+ *   MAE       = (entry - maxHigh) / entry  ≤ 0  (price rose — adverse)
  */
 function computeHypotheticalMetrics(
   candles: Candle[],
+  side: "long" | "short",
 ): HypotheticalMetrics | null {
   if (candles.length === 0) return null;
 
@@ -273,9 +287,20 @@ function computeHypotheticalMetrics(
     if (c.h > maxHigh) maxHigh = c.h;
   }
 
+  if (side === "short") {
+    return {
+      entryPrice,
+      exitPrice,
+      returnPct: (entryPrice - exitPrice) / entryPrice,
+      mae: (entryPrice - maxHigh) / entryPrice, // ≤ 0 when price rose (adverse)
+      mfe: (entryPrice - minLow)  / entryPrice, // ≥ 0 when price fell (favorable)
+    };
+  }
+
+  // long
   const returnPct = (exitPrice - entryPrice) / entryPrice;
-  const mae = (minLow - entryPrice) / entryPrice;   // ≤ 0
-  const mfe = (maxHigh - entryPrice) / entryPrice;  // ≥ 0
+  const mae = (minLow  - entryPrice) / entryPrice; // ≤ 0
+  const mfe = (maxHigh - entryPrice) / entryPrice; // ≥ 0
 
   return { entryPrice, exitPrice, returnPct, mae, mfe };
 }
@@ -295,16 +320,28 @@ export interface EnrichmentInput {
   decisionRanAt: string | null;
   /** How far forward to look for price data. */
   lookaheadWindow: LookaheadWindow;
+  /**
+   * Trade direction for the hypothetical. Required for correct scoring.
+   * When null: prices are fetched if possible but the result is marked
+   * insufficient_data (missing_side) — no direction-dependent learning
+   * actions (question_block / tune_threshold) are generated.
+   */
+  side: "long" | "short" | null;
 }
 
 /**
  * Enrich a single decision with forward price data.
  *
- * This is the core of PR #38. Given a blocked/vetoed/skipped decision,
- * fetch Coinbase candles starting at the decision time and compute:
- *   - What price would we have entered at?
- *   - What did price do in the lookahead window?
- *   - Should Wendy reinforce, question, or tune the threshold?
+ * Direction math:
+ *   Long  win  → price rises beyond threshold.
+ *   Short win  → price falls beyond threshold.
+ *   MFE/MAE always signed: MFE ≥ 0, MAE ≤ 0, from the position's perspective.
+ *
+ * Missing side:
+ *   If side is null, entry/exit prices are recorded where available but
+ *   result_label = "insufficient_data" with reason "missing_side".
+ *   recommended_learning_action = "ignore_insufficient_data".
+ *   No question_block or tune_threshold is generated without a known side.
  *
  * Safety: this function is pure analysis. It cannot place trades,
  * approve signals, or alter doctrine.
@@ -326,6 +363,7 @@ export async function enrichDecisionMemorySimulation(
     recommended_learning_action: "ignore_insufficient_data",
     enriched_at: enrichedAt,
     insufficient_data_reason: reason,
+    simulated_side: null,
   });
 
   // ── Guard: symbol required ────────────────────────────────────────────────
@@ -378,8 +416,28 @@ export async function enrichDecisionMemorySimulation(
     );
   }
 
-  // ── Compute hypothetical metrics ──────────────────────────────────────────
-  const metrics = computeHypotheticalMetrics(candles);
+  // ── Guard: side required for direction-aware scoring ──────────────────────
+  // Record prices but refuse to produce a directional outcome without side.
+  if (!input.side) {
+    return {
+      result_label: "insufficient_data",
+      simulated_entry_price: candles[0].o,
+      simulated_exit_price: candles[candles.length - 1].c,
+      lookahead_window: input.lookaheadWindow,
+      hypothetical_pnl: null,
+      hypothetical_return_pct: null,
+      max_adverse_excursion: null,
+      max_favorable_excursion: null,
+      recommended_learning_action: "ignore_insufficient_data",
+      enriched_at: enrichedAt,
+      insufficient_data_reason:
+        "missing_side — direction unknown, cannot score hypothetical outcome",
+      simulated_side: null,
+    };
+  }
+
+  // ── Compute direction-aware hypothetical metrics ──────────────────────────
+  const metrics = computeHypotheticalMetrics(candles, input.side);
   if (!metrics) {
     return insufficientResult("could not compute metrics — invalid candle data");
   }
@@ -409,6 +467,7 @@ export async function enrichDecisionMemorySimulation(
     recommended_learning_action: learningAction,
     enriched_at: enrichedAt,
     insufficient_data_reason: null,
+    simulated_side: input.side,
   };
 }
 
@@ -425,7 +484,6 @@ export async function enrichDecisionMemorySimulation(
  *   F — loss + highly overconfident (calDelta > 0.5)
  *
  * calDelta = confidence - realized (1=win, 0=loss).
- * Positive calDelta = overconfident; negative = underconfident.
  */
 export function deriveWendyGrade(
   outcome: "win" | "loss" | "breakeven",

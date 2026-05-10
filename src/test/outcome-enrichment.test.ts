@@ -25,9 +25,23 @@
 //  20. deriveWendyGrade edge cases.
 //  21. simulationSummary display helpers.
 //  22. isActionable and suggestsReview helpers.
+//  --- Direction-aware tests (PR #38 hardening) ---
+//  23. Long + price up → would_have_won.
+//  24. Long + price down → would_have_lost.
+//  25. Short + price down → would_have_won.
+//  26. Short + price up → would_have_lost.
+//  27. Short MFE: price fell → MFE ≥ 0.
+//  28. Short MAE: price rose → MAE ≤ 0.
+//  29. Long MFE: price rose → MFE ≥ 0.
+//  30. Long MAE: price fell → MAE ≤ 0.
+//  31. Missing side → insufficient_data (not question_block / tune_threshold).
+//  32. Missing side → prices recorded where candles available.
+//  33. Safety block + profitable short → reinforce_block.
+//  34. Safety block + profitable long → reinforce_block.
+//  35. simulated_side field reflects direction used.
 // ============================================================
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   classifyLearningAction,
   hasSafetyBlock,
@@ -71,8 +85,23 @@ function makeSimulationResult(
     recommended_learning_action: "question_block",
     enriched_at: "2026-05-10T14:00:00.000Z",
     insufficient_data_reason: null,
+    simulated_side: "long",
     ...overrides,
   };
+}
+
+/** Candle format: [time, low, high, open, close, volume] newest-first (Coinbase). */
+function mockFetch(candles: number[][]) {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => candles,
+  } as unknown as Response);
+}
+
+function oldDecisionTime(lookahead: LookaheadWindow = "1h"): string {
+  return new Date(
+    Date.now() - MIN_ENRICHMENT_AGE_SECONDS[lookahead] * 1000 - 60_000,
+  ).toISOString();
 }
 
 // ─── 1–2: classifyLearningAction — non-safety blocks ─────────────────────────
@@ -460,6 +489,7 @@ describe("enrichDecisionMemorySimulation — missing data guards", () => {
       blockerCodes: ["KILL_SWITCH_ACTIVE"],
       decisionRanAt: "2026-05-10T10:00:00.000Z",
       lookaheadWindow: "1h",
+      side: "long",
     });
     expect(result.result_label).toBe("insufficient_data");
     expect(result.insufficient_data_reason).toContain("no symbol");
@@ -472,6 +502,7 @@ describe("enrichDecisionMemorySimulation — missing data guards", () => {
       blockerCodes: ["COACH_PENALTY"],
       decisionRanAt: null,
       lookaheadWindow: "1h",
+      side: "long",
     });
     expect(result.result_label).toBe("insufficient_data");
     expect(result.insufficient_data_reason).toContain("no ranAt");
@@ -483,6 +514,7 @@ describe("enrichDecisionMemorySimulation — missing data guards", () => {
       blockerCodes: ["COACH_PENALTY"],
       decisionRanAt: "not-a-date",
       lookaheadWindow: "1h",
+      side: "long",
     });
     expect(result.result_label).toBe("insufficient_data");
     expect(result.insufficient_data_reason).toContain("invalid ranAt");
@@ -495,6 +527,7 @@ describe("enrichDecisionMemorySimulation — missing data guards", () => {
       blockerCodes: ["COACH_PENALTY"],
       decisionRanAt: new Date().toISOString(),
       lookaheadWindow: "1h",
+      side: "long",
     });
     expect(result.result_label).toBe("insufficient_data");
     expect(result.insufficient_data_reason).toContain("too recent");
@@ -515,21 +548,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746010800, 100_000, 101_000, 100_000, 101_000, 4.8], // older
     ];
 
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    // Decision time must be old enough (> 1h ago)
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).not.toBe("insufficient_data");
@@ -550,15 +576,12 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       json: async () => [],
     } as unknown as Response);
 
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
-
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("insufficient_data");
@@ -571,15 +594,12 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       status: 503,
     } as unknown as Response);
 
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
-
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("insufficient_data");
@@ -589,15 +609,12 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
   it("network error → insufficient_data (no throw)", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network down"));
 
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
-
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("insufficient_data");
@@ -610,20 +627,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746014400, 101_500, 102_500, 102_000, 102_000, 3.0],
       [1746010800, 99_800, 101_000, 100_000, 101_500, 4.0],
     ];
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("would_have_won");
@@ -636,20 +647,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746014400, 96_500, 100_200, 97_500, 97_000, 6.0],
       [1746010800, 99_000, 100_500, 100_000, 97_500, 5.0],
     ];
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("would_have_lost");
@@ -661,20 +666,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746014400, 101_000, 103_000, 103_000, 103_000, 3.5],
       [1746010800, 99_500, 101_500, 100_000, 101_000, 4.5],
     ];
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["LOW_CONFIDENCE"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("would_have_won");
@@ -687,20 +686,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746014400, 101_000, 105_000, 105_000, 105_000, 8.0],
       [1746010800, 100_000, 102_000, 100_000, 101_000, 5.0],
     ];
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["KILL_SWITCH_ACTIVE"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.result_label).toBe("would_have_won");
@@ -714,40 +707,28 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746014400, 101_000, 104_000, 104_000, 104_000, 6.0],
       [1746010800, 100_000, 101_500, 100_000, 101_000, 4.0],
     ];
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["DAILY_LOSS_CAP_REACHED"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.recommended_learning_action).toBe("reinforce_block");
   });
 
   it("enrichment does not create trades (no execution fields in result)", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [[1746010800, 100_000, 101_000, 100_000, 101_000, 4.0]],
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch([[1746010800, 100_000, 101_000, 100_000, 101_000, 4.0]]);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     // Structural proof: result has no execution fields
@@ -760,20 +741,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
   });
 
   it("enrichment does not approve signals (no approval fields in result)", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [[1746010800, 100_000, 102_000, 100_000, 102_000, 4.0]],
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch([[1746010800, 100_000, 102_000, 100_000, 102_000, 4.0]]);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["LOW_CONFIDENCE"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect(result.recommended_learning_action).toBe("tune_threshold");
@@ -785,20 +760,14 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
   });
 
   it("enrichment does not alter doctrine (no doctrine fields in result)", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [[1746010800, 100_000, 100_500, 100_000, 100_500, 3.0]],
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch([[1746010800, 100_000, 100_500, 100_000, 100_500, 3.0]]);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     expect("doctrinePatch" in result).toBe(false);
@@ -808,7 +777,7 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
     expect("updatedDoctrine" in result).toBe(false);
   });
 
-  it("MAE and MFE are computed when candles are available", async () => {
+  it("MAE and MFE are computed when candles are available (long)", async () => {
     // Entry: open of first candle = 100_000
     // min low across candles: 99_500 → MAE = (99500 - 100000) / 100000 = -0.005
     // max high across candles: 102_500 → MFE = (102500 - 100000) / 100000 = 0.025
@@ -816,26 +785,396 @@ describe("enrichDecisionMemorySimulation — Coinbase fetch (mocked)", () => {
       [1746014400, 100_800, 102_500, 102_000, 102_000, 3.0],
       [1746010800, 99_500, 101_000, 100_000, 100_800, 4.0],
     ];
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => mockCandles,
-    } as unknown as Response);
-
-    const decisionTime = new Date(
-      Date.now() - MIN_ENRICHMENT_AGE_SECONDS["1h"] * 1000 - 60_000,
-    ).toISOString();
+    mockFetch(mockCandles);
 
     const result = await enrichDecisionMemorySimulation({
       symbol: "BTC-USD",
       blockerCodes: ["COACH_PENALTY"],
-      decisionRanAt: decisionTime,
+      decisionRanAt: oldDecisionTime(),
       lookaheadWindow: "1h",
+      side: "long",
     });
 
     if (result.result_label !== "insufficient_data") {
       expect(result.max_adverse_excursion).toBeLessThan(0);
       expect(result.max_favorable_excursion).toBeGreaterThan(0);
     }
+  });
+});
+
+// ─── Direction-aware tests (PR #38 hardening) ────────────────────────────────
+
+describe("direction-aware enrichment — long signal", () => {
+  const OLD_FETCH = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = OLD_FETCH; });
+
+  it("long + price up → would_have_won", async () => {
+    // Entry 100_000, exit 103_000 → +3% for long
+    mockFetch([
+      [1746014400, 102_000, 104_000, 103_500, 103_000, 2.0],
+      [1746010800, 99_500, 101_000, 100_000, 102_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+    expect(result.result_label).toBe("would_have_won");
+    expect(result.hypothetical_return_pct).toBeGreaterThan(0);
+    expect(result.simulated_side).toBe("long");
+  });
+
+  it("long + price down → would_have_lost", async () => {
+    // Entry 100_000, exit 96_000 → -4% for long
+    mockFetch([
+      [1746014400, 95_500, 100_200, 97_500, 96_000, 5.0],
+      [1746010800, 98_000, 100_500, 100_000, 97_500, 4.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+    expect(result.result_label).toBe("would_have_lost");
+    expect(result.hypothetical_return_pct).toBeLessThan(0);
+    expect(result.simulated_side).toBe("long");
+  });
+
+  it("long MFE: max high above entry → MFE ≥ 0", async () => {
+    // Entry 100_000; maxHigh = 104_000 → MFE = 0.04
+    mockFetch([
+      [1746014400, 101_000, 104_000, 103_000, 103_000, 2.0],
+      [1746010800, 99_000, 101_500, 100_000, 101_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+    expect(result.max_favorable_excursion).not.toBeNull();
+    expect(result.max_favorable_excursion!).toBeGreaterThanOrEqual(0);
+    // maxHigh=104_000, entry=100_000 → (104000-100000)/100000 = 0.04
+    expect(result.max_favorable_excursion!).toBeCloseTo(0.04, 5);
+  });
+
+  it("long MAE: min low below entry → MAE ≤ 0", async () => {
+    // Entry 100_000; minLow = 98_000 → MAE = -0.02
+    mockFetch([
+      [1746014400, 99_000, 103_000, 102_000, 102_000, 2.0],
+      [1746010800, 98_000, 100_500, 100_000, 99_000, 4.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+    expect(result.max_adverse_excursion).not.toBeNull();
+    expect(result.max_adverse_excursion!).toBeLessThanOrEqual(0);
+    // minLow=98_000, entry=100_000 → (98000-100000)/100000 = -0.02
+    expect(result.max_adverse_excursion!).toBeCloseTo(-0.02, 5);
+  });
+});
+
+describe("direction-aware enrichment — short signal", () => {
+  const OLD_FETCH = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = OLD_FETCH; });
+
+  it("short + price down → would_have_won", async () => {
+    // Entry 100_000, exit 96_000 → (100000-96000)/100000 = +4% for short
+    mockFetch([
+      [1746014400, 95_500, 100_200, 97_500, 96_000, 5.0],
+      [1746010800, 98_000, 100_500, 100_000, 97_500, 4.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    expect(result.result_label).toBe("would_have_won");
+    expect(result.hypothetical_return_pct).toBeGreaterThan(0);
+    expect(result.simulated_side).toBe("short");
+  });
+
+  it("short + price up → would_have_lost", async () => {
+    // Entry 100_000, exit 103_000 → (100000-103000)/100000 = -3% for short
+    mockFetch([
+      [1746014400, 102_000, 104_000, 103_500, 103_000, 2.0],
+      [1746010800, 99_500, 101_000, 100_000, 102_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    expect(result.result_label).toBe("would_have_lost");
+    expect(result.hypothetical_return_pct).toBeLessThan(0);
+    expect(result.simulated_side).toBe("short");
+  });
+
+  it("short MFE: price fell below entry → MFE ≥ 0", async () => {
+    // Entry 100_000; minLow = 96_000 → MFE = (100000-96000)/100000 = 0.04
+    mockFetch([
+      [1746014400, 96_000, 100_200, 97_500, 96_500, 5.0],
+      [1746010800, 97_000, 100_500, 100_000, 97_000, 4.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    expect(result.max_favorable_excursion).not.toBeNull();
+    expect(result.max_favorable_excursion!).toBeGreaterThanOrEqual(0);
+    // minLow=96_000, entry=100_000 → (100000-96000)/100000 = 0.04
+    expect(result.max_favorable_excursion!).toBeCloseTo(0.04, 5);
+  });
+
+  it("short MAE: price rose above entry → MAE ≤ 0", async () => {
+    // Entry 100_000; maxHigh = 104_000 → MAE = (100000-104000)/100000 = -0.04
+    mockFetch([
+      [1746014400, 101_000, 104_000, 103_000, 102_000, 2.0],
+      [1746010800, 99_500, 101_500, 100_000, 101_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    expect(result.max_adverse_excursion).not.toBeNull();
+    expect(result.max_adverse_excursion!).toBeLessThanOrEqual(0);
+    // maxHigh=104_000, entry=100_000 → (100000-104000)/100000 = -0.04
+    expect(result.max_adverse_excursion!).toBeCloseTo(-0.04, 5);
+  });
+
+  it("same candles score opposite for long vs short", async () => {
+    // Price rose from 100_000 to 103_000 — long wins, short loses
+    const risingCandles: number[][] = [
+      [1746014400, 101_500, 104_000, 103_000, 103_000, 2.0],
+      [1746010800, 99_500, 101_000, 100_000, 102_000, 3.0],
+    ];
+
+    mockFetch(risingCandles);
+    const longResult = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+
+    mockFetch(risingCandles);
+    const shortResult = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+
+    expect(longResult.result_label).toBe("would_have_won");
+    expect(shortResult.result_label).toBe("would_have_lost");
+  });
+
+  it("safety block + profitable short → reinforce_block (safety invariant holds for shorts)", async () => {
+    // Price fell — short would have won, but safety block must still reinforce
+    mockFetch([
+      [1746014400, 94_000, 100_200, 97_000, 94_000, 6.0],
+      [1746010800, 97_000, 100_500, 100_000, 97_000, 4.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["KILL_SWITCH_ACTIVE"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    // Short would have won (price fell)
+    expect(result.result_label).toBe("would_have_won");
+    // But safety block is always reinforced
+    expect(result.recommended_learning_action).toBe("reinforce_block");
+    expect(result.recommended_learning_action).not.toBe("question_block");
+  });
+
+  it("DOCTRINE_BLOCK + profitable short → reinforce_block", async () => {
+    mockFetch([
+      [1746014400, 93_000, 100_100, 96_000, 93_000, 7.0],
+      [1746010800, 97_000, 100_400, 100_000, 97_000, 5.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["DOCTRINE_BLOCK"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    expect(result.result_label).toBe("would_have_won");
+    expect(result.recommended_learning_action).toBe("reinforce_block");
+  });
+});
+
+describe("direction-aware enrichment — missing side", () => {
+  const OLD_FETCH = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = OLD_FETCH; });
+
+  it("missing side → insufficient_data, not question_block", async () => {
+    // Profitable candles — but without side we cannot score direction
+    mockFetch([
+      [1746014400, 101_500, 104_000, 103_000, 103_000, 2.0],
+      [1746010800, 99_500, 101_000, 100_000, 102_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: null,
+    });
+    expect(result.result_label).toBe("insufficient_data");
+    expect(result.recommended_learning_action).toBe("ignore_insufficient_data");
+    expect(result.recommended_learning_action).not.toBe("question_block");
+    expect(result.recommended_learning_action).not.toBe("tune_threshold");
+  });
+
+  it("missing side → insufficient_data_reason contains 'missing_side'", async () => {
+    mockFetch([
+      [1746014400, 101_000, 103_000, 102_000, 102_000, 2.0],
+      [1746010800, 99_000, 101_000, 100_000, 101_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: null,
+    });
+    expect(result.insufficient_data_reason).toContain("missing_side");
+  });
+
+  it("missing side but candles available → entry/exit prices recorded", async () => {
+    // Even without side we record the raw prices for traceability
+    mockFetch([
+      [1746014400, 101_000, 103_000, 102_000, 102_000, 2.0],
+      [1746010800, 99_000, 101_000, 100_000, 101_000, 3.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: null,
+    });
+    // Prices are available (from candles) even though direction is unknown
+    expect(result.simulated_entry_price).toBeGreaterThan(0);
+    expect(result.simulated_exit_price).toBeGreaterThan(0);
+    // But direction-dependent metrics are null
+    expect(result.hypothetical_return_pct).toBeNull();
+    expect(result.max_adverse_excursion).toBeNull();
+    expect(result.max_favorable_excursion).toBeNull();
+    expect(result.simulated_side).toBeNull();
+  });
+
+  it("missing side → LOW_CONFIDENCE does not produce tune_threshold", async () => {
+    // Even with LOW_CONFIDENCE blocker, missing side must not produce tune_threshold
+    mockFetch([
+      [1746014400, 101_000, 105_000, 104_000, 104_000, 3.0],
+      [1746010800, 99_000, 101_500, 100_000, 101_000, 4.0],
+    ]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["LOW_CONFIDENCE"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: null,
+    });
+    expect(result.recommended_learning_action).not.toBe("tune_threshold");
+    expect(result.recommended_learning_action).toBe("ignore_insufficient_data");
+  });
+
+  it("missing side + no candles → prices also null (double insufficient_data)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    } as unknown as Response);
+
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: null,
+    });
+    expect(result.result_label).toBe("insufficient_data");
+    expect(result.simulated_entry_price).toBeNull();
+    expect(result.simulated_exit_price).toBeNull();
+  });
+});
+
+describe("simulated_side field", () => {
+  const OLD_FETCH = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = OLD_FETCH; });
+
+  it("long enrichment sets simulated_side = 'long'", async () => {
+    mockFetch([[1746010800, 100_000, 102_000, 100_000, 102_000, 3.0]]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+    expect(result.simulated_side).toBe("long");
+  });
+
+  it("short enrichment sets simulated_side = 'short'", async () => {
+    mockFetch([[1746010800, 97_000, 100_500, 100_000, 97_000, 3.0]]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "short",
+    });
+    expect(result.simulated_side).toBe("short");
+  });
+
+  it("missing side sets simulated_side = null", async () => {
+    mockFetch([[1746010800, 100_000, 102_000, 100_000, 102_000, 3.0]]);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: null,
+    });
+    expect(result.simulated_side).toBeNull();
+  });
+
+  it("insufficient_data (no candles) sets simulated_side = null", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response);
+    const result = await enrichDecisionMemorySimulation({
+      symbol: "BTC-USD",
+      blockerCodes: ["COACH_PENALTY"],
+      decisionRanAt: oldDecisionTime(),
+      lookaheadWindow: "1h",
+      side: "long",
+    });
+    expect(result.result_label).toBe("insufficient_data");
+    expect(result.simulated_side).toBeNull();
   });
 });
 
