@@ -313,23 +313,24 @@ export function computeTradingDecisionSnapshot(
   }
 
   // ── canTradeNow ───────────────────────────────────────────────────────────
+  const tradingPaused =
+    !!system?.tradingPausedUntil && Date.parse(system.tradingPausedUntil) > nowMs;
+
   // Critical blockers that prevent any trade regardless of mode:
   const hardBlocked =
     killSwitchEngaged ||
     !botRunning ||
+    tradingPaused ||
     !accountFloorClear ||
     !dailyLossCapClear ||
+    !maxTradesClear ||
     !doctrineOverlayClear ||
     !activeStrategyExists;
 
   // Live-mode-only hard blocks:
   const liveHardBlocked = isLiveMode && !coinbaseBrokerHealthy;
 
-  // Paper mode tolerates stale Brain Trust (degrades, doesn't block):
-  const degradedBlocked = false; // paper degrades, not blocks
-  void degradedBlocked; // reserved for future use
-
-  const canTradeNow = !hardBlocked && !liveHardBlocked && (isPaperMode || !liveHardBlocked);
+  const canTradeNow = !hardBlocked && !liveHardBlocked;
 
   // ── nextSafeAction ────────────────────────────────────────────────────────
   const nextSafeAction =

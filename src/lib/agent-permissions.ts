@@ -249,17 +249,22 @@ export function isAgentForbidden(agent: AgentId, action: string): boolean {
 }
 
 /**
- * Throws an AgentPermissionViolation error if the agent is forbidden from
- * performing the action. Use in edge functions and agent orchestration code
- * to enforce hard boundaries at runtime.
+ * Precondition guard: throws an AgentPermissionViolation error if the agent is
+ * forbidden from performing the action. Call before executing any sensitive
+ * operation to enforce hard boundaries at runtime.
+ *
+ * Naming convention: "assert agent CAN do X" — if it CAN'T, it throws.
  */
-export function assertAgentCannotDo(agent: AgentId, action: ForbiddenActionsFor<AgentId>): void {
+export function assertAgentCanDo(agent: AgentId, action: string): void {
   if (isAgentForbidden(agent, action)) {
     throw new Error(
       `[AgentPermissionViolation] ${AGENT_PERMISSIONS[agent].displayName} (${agent}) is forbidden from: ${action}`,
     );
   }
 }
+
+/** @deprecated Use assertAgentCanDo instead. */
+export const assertAgentCannotDo = assertAgentCanDo;
 
 /**
  * Returns the full permission record for an agent.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isAgentForbidden,
-  assertAgentCannotDo,
+  assertAgentCanDo,
   getAgentPermissions,
   ALL_AGENT_IDS,
   AGENT_PERMISSIONS,
@@ -81,13 +81,13 @@ describe("agent permission matrix", () => {
     }
   });
 
-  // ── assertAgentCannotDo throws on forbidden action ────────────────────────
+  // ── assertAgentCanDo throws when agent is forbidden ──────────────────────
 
-  it("assertAgentCannotDo throws for a forbidden action", () => {
-    expect(() => assertAgentCannotDo("taylor", "change_doctrine")).toThrow(
+  it("assertAgentCanDo throws for a forbidden action", () => {
+    expect(() => assertAgentCanDo("taylor", "change_doctrine")).toThrow(
       /AgentPermissionViolation/,
     );
-    expect(() => assertAgentCannotDo("brainTrust", "execute_trades")).toThrow(
+    expect(() => assertAgentCanDo("brainTrust", "execute_trades")).toThrow(
       /AgentPermissionViolation/,
     );
   });
