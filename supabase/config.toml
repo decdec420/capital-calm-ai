@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.broker-connection]
 verify_jwt = false
+
+[functions.process-decision-memory]
+verify_jwt = false
