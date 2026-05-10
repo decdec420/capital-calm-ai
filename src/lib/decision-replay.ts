@@ -51,6 +51,8 @@ export interface MarketReplaySlice {
   brainTrustAgeMinutes: number | null;
   /** Age of the engine snapshot at decision time (seconds). */
   snapshotAgeSeconds: number;
+  /** Hypothetical trade direction. Required for direction-aware outcome enrichment. */
+  side?: "long" | "short";
 }
 
 /**

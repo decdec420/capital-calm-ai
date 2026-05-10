@@ -125,6 +125,15 @@ Deno.serve(async (req) => {
         (replayPacket?.ranAt as string | null) ??
         (decision.created_at as string);
 
+      // Extract side from replay_packet — try meta.side first, then market.side.
+      // Null when the packet predates direction recording; enrichment will mark missing_side.
+      const rawSide =
+        (replayPacket?.meta?.side as string | null | undefined) ??
+        (replayPacket?.market?.side as string | null | undefined) ??
+        null;
+      const side: "long" | "short" | null =
+        rawSide === "long" || rawSide === "short" ? rawSide : null;
+
       let simulationId: string | null = null;
       let resultLabel = "insufficient_data";
       let learningAction = "ignore_insufficient_data";
@@ -199,6 +208,7 @@ Deno.serve(async (req) => {
           blockerCodes,
           decisionRanAt,
           lookaheadWindow: lookahead,
+          side,
         });
 
         resultLabel = enrichResult.result_label;
@@ -223,7 +233,9 @@ Deno.serve(async (req) => {
           enrichResult.result_label !== "insufficient_data" ||
           enrichResult.insufficient_data_reason?.startsWith("no symbol") ||
           enrichResult.insufficient_data_reason?.startsWith("no ranAt") ||
-          enrichResult.insufficient_data_reason?.startsWith("invalid ranAt");
+          enrichResult.insufficient_data_reason?.startsWith("invalid ranAt") ||
+          // missing_side is permanent — replay packet won't gain side retroactively
+          enrichResult.insufficient_data_reason?.startsWith("missing_side");
 
         if (shouldMarkLearned) {
           await admin
