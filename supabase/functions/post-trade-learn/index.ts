@@ -1,5 +1,6 @@
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
+import { buildReplayPacketOutcomePatch } from "../_shared/outcome-enrichment.ts";
 // ============================================================
 // post-trade-learn — automatic per-trade learning artifact
 // ------------------------------------------------------------
@@ -53,6 +54,7 @@ interface TradeRow {
 }
 
 interface SignalRow {
+  id: string;
   confidence: number | null;
   setup_score: number | null;
   regime: string | null;
@@ -61,6 +63,7 @@ interface SignalRow {
   proposed_entry: number | null;
   proposed_stop: number | null;
   proposed_target: number | null;
+  replay_packet: Record<string, unknown> | null;
 }
 
 function classifyOutcome(pnl: number | null): "win" | "loss" | "breakeven" {
@@ -792,7 +795,7 @@ if (req.method === "OPTIONS") {
     const { data: sigRow } = await admin
       .from("trade_signals")
       .select(
-        "confidence, setup_score, regime, ai_reasoning, ai_model, proposed_entry, proposed_stop, proposed_target",
+        "id, confidence, setup_score, regime, ai_reasoning, ai_model, proposed_entry, proposed_stop, proposed_target, replay_packet",
       )
       .eq("executed_trade_id", t.id)
       .maybeSingle();
@@ -911,6 +914,43 @@ if (req.method === "OPTIONS") {
           headers: { ...cors, "Content-Type": "application/json" },
         },
       );
+    }
+
+    // Patch trade_signals.replay_packet with post-trade outcome metadata.
+    // Only runs when the signal has a replay_packet (PR #35 signals).
+    // Patch is additive — never overwrites the original decision fields.
+    // Never stores credentials, API keys, or sensitive strategy internals.
+    if (sig?.id && sig.replay_packet) {
+      try {
+        const outcomePatch = buildReplayPacketOutcomePatch({
+          outcome,
+          confidence: sig.confidence,
+          pnl: t.pnl,
+          pnlPct: t.pnl_pct,
+          openedAt: t.opened_at,
+          closedAt: t.closed_at,
+          notes: t.notes,
+        });
+        const patchedPacket = { ...sig.replay_packet, ...outcomePatch };
+        await admin
+          .from("trade_signals")
+          .update({ replay_packet: patchedPacket })
+          .eq("id", sig.id);
+        log("info", "replay_packet_patched", {
+          fn: "post-trade-learn",
+          signalId: sig.id,
+          tradeId: t.id,
+          actualOutcome: outcomePatch.actualOutcome,
+          wendyGrade: outcomePatch.wendyGrade,
+        });
+      } catch (e) {
+        // Best-effort — never block the post-trade response on patch failure.
+        log("warn", "replay_packet_patch_failed", {
+          fn: "post-trade-learn",
+          signalId: sig.id,
+          err: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
 
     // Refresh rolling metrics on the strategy if we know which one.
