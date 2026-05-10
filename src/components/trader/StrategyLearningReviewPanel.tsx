@@ -33,6 +33,7 @@ import {
   Brain,
   CheckCircle2,
   Clock,
+  FlaskConical,
   Loader2,
   RefreshCw,
   Shield,
@@ -45,7 +46,10 @@ import {
   useStrategyLearningRecommendations,
   type StrategyLearningRecommendationRow,
 } from "@/hooks/useStrategyLearningRecommendations";
-import type { RecommendationType } from "@/lib/strategy-learning";
+import {
+  isExperimentEligible,
+  type RecommendationType,
+} from "@/lib/strategy-learning";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -207,11 +211,28 @@ function ReviewDialog({ row, mode, onClose, onConfirm }: ReviewDialogProps) {
 interface RecommendationCardProps {
   row: StrategyLearningRecommendationRow;
   onReview: (row: StrategyLearningRecommendationRow, mode: "accept" | "reject" | "defer") => void;
+  onCreateProposal: (row: StrategyLearningRecommendationRow) => Promise<void>;
+  proposalId: string | undefined;
 }
 
-function RecommendationCard({ row, onReview }: RecommendationCardProps) {
+function RecommendationCard({ row, onReview, onCreateProposal, proposalId }: RecommendationCardProps) {
   const isPending = row.status === "pending_review";
+  const isAccepted = row.status === "accepted";
   const safety = isSafetyBlock(row);
+  const eligible = isExperimentEligible({ recommendation_type: row.recommendation_type, reason_code: row.reason_code, status: row.status });
+  const [proposalBusy, setProposalBusy] = useState(false);
+
+  async function handleCreateProposal() {
+    setProposalBusy(true);
+    try {
+      await onCreateProposal(row);
+      toast.success("Experiment proposal created — visible in Strategy Lab.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create experiment proposal");
+    } finally {
+      setProposalBusy(false);
+    }
+  }
 
   return (
     <div
@@ -327,6 +348,51 @@ function RecommendationCard({ row, onReview }: RecommendationCardProps) {
           )}
         </div>
       )}
+
+      {/* Experiment proposal section — accepted recommendations only */}
+      {isAccepted && (
+        <div className="border-t border-border/50 pt-3 mt-1 space-y-2">
+          {eligible ? (
+            <>
+              {proposalId ? (
+                <div className="flex items-center gap-1.5 text-xs text-status-safe">
+                  <FlaskConical className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Experiment proposal already created.{" "}
+                    <span className="text-muted-foreground font-mono">{proposalId.slice(0, 8)}…</span>
+                    {" "}— visible in Strategy Lab.
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1.5"
+                    onClick={handleCreateProposal}
+                    disabled={proposalBusy}
+                  >
+                    {proposalBusy
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <FlaskConical className="h-3.5 w-3.5 text-primary" />}
+                    Create Experiment Proposal
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground leading-snug max-w-prose">
+                    Creating an experiment proposal does not change strategy behavior.
+                    It only queues a research task for the existing backtest/evaluation pipeline.
+                  </p>
+                </>
+              )}
+            </>
+          ) : (
+            <p className="text-[10px] text-muted-foreground leading-snug max-w-prose">
+              {safety
+                ? "Safety-block recommendations cannot create weakening experiments. They can only be acknowledged or reinforced."
+                : "This recommendation is not eligible for an experiment proposal because it reinforces a safety rule or has insufficient evidence."}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -334,7 +400,7 @@ function RecommendationCard({ row, onReview }: RecommendationCardProps) {
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function StrategyLearningReviewPanel() {
-  const { pending, reviewed, loading, error, refetch, accept, reject, defer } =
+  const { pending, reviewed, loading, error, refetch, accept, reject, defer, createExperimentProposal, proposalIds } =
     useStrategyLearningRecommendations();
 
   const [dialogRow, setDialogRow] = useState<StrategyLearningRecommendationRow | null>(null);
@@ -435,7 +501,13 @@ export function StrategyLearningReviewPanel() {
       {!loading && pending.length > 0 && (
         <div className="space-y-2">
           {pending.map((row) => (
-            <RecommendationCard key={row.id} row={row} onReview={openReview} />
+            <RecommendationCard
+              key={row.id}
+              row={row}
+              onReview={openReview}
+              onCreateProposal={createExperimentProposal}
+              proposalId={proposalIds.get(row.id)}
+            />
           ))}
         </div>
       )}
@@ -453,7 +525,13 @@ export function StrategyLearningReviewPanel() {
           {showReviewed && (
             <div className="space-y-2">
               {reviewed.map((row) => (
-                <RecommendationCard key={row.id} row={row} onReview={openReview} />
+                <RecommendationCard
+                  key={row.id}
+                  row={row}
+                  onReview={openReview}
+                  onCreateProposal={createExperimentProposal}
+                  proposalId={proposalIds.get(row.id)}
+                />
               ))}
             </div>
           )}

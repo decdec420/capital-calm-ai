@@ -7,6 +7,10 @@ import type {
   RecommendationStatus,
   SampleQuality,
 } from "@/lib/strategy-learning";
+import {
+  isExperimentEligible,
+  buildExperimentProposalInput,
+} from "@/lib/strategy-learning";
 
 // ─── Row shape ────────────────────────────────────────────────────────────────
 
@@ -74,6 +78,8 @@ export function useStrategyLearningRecommendations(filters: RecommendationFilter
   const [rows, setRows] = useState<StrategyLearningRecommendationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Map from recommendation id → experiment id (deduplication cache)
+  const [proposalIds, setProposalIds] = useState<Map<string, string>>(new Map());
 
   const refetch = useCallback(async () => {
     if (!user) return;
@@ -100,7 +106,18 @@ export function useStrategyLearningRecommendations(filters: RecommendationFilter
       .order("status", { ascending: true })   // "accepted","deferred","pending_review","rejected" — pending sorts last alphabetically
       .order("created_at", { ascending: false });
 
-    const { data, error: fetchErr } = await q;
+    const [{ data, error: fetchErr }, { data: expData }] = await Promise.all([
+      q,
+      // Fetch existing experiment proposals linked to strategy_learning recommendations
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any)
+        .from("experiments")
+        .select("id, source_recommendation_id")
+        .eq("user_id", user.id)
+        .eq("source", "strategy_learning")
+        .not("source_recommendation_id", "is", null),
+    ]);
+
     if (fetchErr) {
       setError(fetchErr.message);
     } else {
@@ -114,6 +131,16 @@ export function useStrategyLearningRecommendations(filters: RecommendationFilter
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         });
       setRows(sorted);
+
+      // Build deduplication map: recommendation_id → experiment_id
+      const pids = new Map<string, string>();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const exp of (expData ?? []) as any[]) {
+        if (exp.source_recommendation_id) {
+          pids.set(exp.source_recommendation_id, exp.id);
+        }
+      }
+      setProposalIds(pids);
     }
     setLoading(false);
   }, [user, filters.status, filters.symbol, filters.recommendation_type]);
@@ -176,6 +203,79 @@ export function useStrategyLearningRecommendations(filters: RecommendationFilter
     [reviewAction],
   );
 
+  // ── Create experiment proposal from an accepted eligible recommendation ──────
+  //
+  // Safety invariants:
+  //   - Only accepted recommendations can create proposals (status guard).
+  //   - Only eligible types (TUNE_THRESHOLD, QUESTION_BLOCKER, REVIEW_STRATEGY_FIT).
+  //   - Safety-block reason codes are BLOCKED.
+  //   - REINFORCE_BLOCKER and INSUFFICIENT_EVIDENCE are BLOCKED.
+  //   - Duplicate proposals are PREVENTED (one per recommendation).
+  //   - Proposal uses status='needs_review' — run-experiment cron NEVER auto-runs it.
+  //   - Does NOT mutate strategies, doctrine, signals, or positions.
+  //   - Does NOT create trades or call any broker endpoint.
+
+  const createExperimentProposal = useCallback(
+    async (rec: StrategyLearningRecommendationRow): Promise<string> => {
+      if (!user) throw new Error("Not signed in");
+
+      // Safety: only accepted eligible recommendations
+      if (!isExperimentEligible({ ...rec, status: rec.status })) {
+        throw new Error(
+          "This recommendation is not eligible for an experiment proposal.",
+        );
+      }
+
+      // Safety: deduplication — one proposal per recommendation
+      if (proposalIds.has(rec.id)) {
+        return proposalIds.get(rec.id)!;
+      }
+
+      const input = buildExperimentProposalInput({
+        id: rec.id,
+        user_id: user.id,
+        recommendation_type: rec.recommendation_type,
+        reason_code: rec.reason_code,
+        symbol: rec.symbol,
+        strategy_id: rec.strategy_id,
+        market_regime: rec.market_regime,
+        confidence: rec.confidence,
+        evidence_count: rec.evidence_count,
+        recommendation: rec.recommendation,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error: insErr } = await (supabase as any)
+        .from("experiments")
+        .insert({
+          user_id: input.user_id,
+          title: input.title,
+          parameter: input.parameter,
+          before_value: input.before_value,
+          after_value: input.after_value,
+          delta: input.delta,
+          hypothesis: input.hypothesis,
+          status: input.status,
+          proposed_by: input.proposed_by,
+          source: input.source,
+          source_recommendation_id: input.source_recommendation_id,
+          symbol: input.symbol,
+          strategy_id: input.strategy_id,
+          notes: input.notes,
+          needs_review: true,
+        })
+        .select("id")
+        .single();
+
+      if (insErr) throw new Error(insErr.message);
+      const expId: string = data.id;
+
+      setProposalIds((prev) => new Map(prev).set(rec.id, expId));
+      return expId;
+    },
+    [user, proposalIds],
+  );
+
   const pending = rows.filter((r) => r.status === "pending_review");
   const reviewed = rows.filter((r) => r.status !== "pending_review");
 
@@ -189,5 +289,7 @@ export function useStrategyLearningRecommendations(filters: RecommendationFilter
     accept,
     reject,
     defer,
+    createExperimentProposal,
+    proposalIds,
   };
 }
