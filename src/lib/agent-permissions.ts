@@ -255,7 +255,10 @@ export function isAgentForbidden(agent: AgentId, action: string): boolean {
  *
  * Naming convention: "assert agent CAN do X" — if it CAN'T, it throws.
  */
-export function assertAgentCanDo(agent: AgentId, action: string): void {
+export function assertAgentCanDo<A extends AgentId>(
+  agent: A,
+  action: ForbiddenActionsFor<A>
+): void {
   if (isAgentForbidden(agent, action)) {
     throw new Error(
       `[AgentPermissionViolation] ${AGENT_PERMISSIONS[agent].displayName} (${agent}) is forbidden from: ${action}`,
