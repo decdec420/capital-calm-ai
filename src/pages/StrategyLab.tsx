@@ -34,6 +34,7 @@ import { ScalingReadinessPanel } from "@/components/trader/ScalingReadinessPanel
 import { PipelineFlowBanner } from "@/components/trader/PipelineFlowBanner";
 import { StrategyGradeBadge } from "@/components/trader/StrategyGradeBadge";
 import { StrategyEvidenceScorecard } from "@/components/trader/StrategyEvidenceScorecard";
+import { StrategyLearningReviewPanel } from "@/components/trader/StrategyLearningReviewPanel";
 import { displayNameFor, autoSummaryFromVersion } from "@/lib/strategy-naming";
 import { cn } from "@/lib/utils";
 
@@ -346,6 +347,11 @@ export default function StrategyLab() {
           )}
         </div>
       )}
+
+      {/* Strategy Learning Recommendations — proposal-only review queue */}
+      <div className="panel p-5">
+        <StrategyLearningReviewPanel />
+      </div>
 
       <StrategyDialog
         open={newOpen}
