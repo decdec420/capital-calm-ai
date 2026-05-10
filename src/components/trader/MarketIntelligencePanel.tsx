@@ -4,13 +4,18 @@
 // Backed by public.market_intelligence (refreshed by cron every 4h).
 
 import { useMemo, useState } from "react";
-import { Brain, ChevronDown, RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Brain, ChevronDown, RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useMarketIntelligence, type MarketIntelligence } from "@/hooks/useMarketIntelligence";
 import { cn } from "@/lib/utils";
+import {
+  buildProvenanceTag,
+  formatDataAge,
+  MARKET_DATA_SLA,
+} from "@/lib/market-data-sla";
 
 const SYMBOL_ORDER = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
 const MOMENTUM_STALE_MINUTES = 75;
@@ -346,6 +351,61 @@ export function MarketIntelligencePanel({ symbol, className }: MarketIntelligenc
           })}
         </Tabs>
       )}
+
+      {/* Data provenance footer */}
+      {newest && (
+        <ProvenanceFooter generatedAt={newest.generatedAt} recentMomentumAt={newest.recentMomentumAt} />
+      )}
+    </div>
+  );
+}
+
+// ─── Provenance footer ────────────────────────────────────────────────────────
+
+function ProvenanceFooter({
+  generatedAt,
+  recentMomentumAt,
+}: {
+  generatedAt: string;
+  recentMomentumAt: string | null;
+}) {
+  const narrativeTag = buildProvenanceTag(
+    "brain_trust_narrative",
+    generatedAt,
+    "authenticated_api",
+  );
+  const momentumTag = buildProvenanceTag(
+    "brain_trust_momentum",
+    recentMomentumAt,
+    "authenticated_api",
+  );
+
+  const items = [
+    { label: "Narrative", tag: narrativeTag },
+    { label: "Momentum", tag: momentumTag },
+  ];
+
+  return (
+    <div className="border-t border-border/40 pt-2 flex flex-wrap gap-x-4 gap-y-1">
+      {items.map(({ label, tag }) => (
+        <div key={label} className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+          {tag.isStale && (
+            <AlertTriangle className="h-2.5 w-2.5 text-status-caution shrink-0" />
+          )}
+          <span>{label}:</span>
+          <span
+            className={cn(
+              "font-medium",
+              tag.isStale ? "text-status-caution" : "text-muted-foreground",
+            )}
+          >
+            {formatDataAge(tag.ageSeconds, tag.isStale)}
+          </span>
+          <span className="opacity-50">
+            · SLA {MARKET_DATA_SLA[tag.dataType].staleThresholdSeconds / 60}m
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
