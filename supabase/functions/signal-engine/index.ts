@@ -251,6 +251,13 @@ const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
 // Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
 const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
 
+// ─── Provenance constants ────────────────────────────────────────
+// Stable version tags for replay packet provenance. Never full prompt text.
+const TAYLOR_PROMPT_VERSION     = "signal-engine-v2";
+const RISK_MANAGER_PROMPT_VERSION = "risk-manager-v1";
+const TAYLOR_SCHEMA_VERSION     = "submit_decision-v1";
+const RISK_MANAGER_SCHEMA_VERSION = "submit_risk_decision-v1";
+
 // ─── Coach: per-(symbol, side) historical loss penalty ─────────
 // Looks at recent closed trades for this symbol+side. If win-rate is poor
 // over a meaningful sample, returns:
@@ -2939,9 +2946,15 @@ async function runTickForUser(
       profile: doctrineProfileLabel,
     },
     model: {
-      taylorModel: "google/gemini-3-flash-preview",
-      taylorPromptVersion: "signal-engine-v2",
-      riskManagerModel: "google/gemini-3-flash-preview",
+      taylorModel: TECHNICAL_ANALYST_MODEL,
+      taylorPromptVersion: TAYLOR_PROMPT_VERSION,
+      taylorSchemaVersion: TAYLOR_SCHEMA_VERSION,
+      taylorValidationStatus: "passed",
+      riskManagerModel: RISK_MANAGER_MODEL,
+      riskManagerPromptVersion: RISK_MANAGER_PROMPT_VERSION,
+      riskManagerSchemaVersion: RISK_MANAGER_SCHEMA_VERSION,
+      riskManagerValidationStatus: "passed",
+      taylorFallbackUsed: CB_STATE.state !== "closed",
       // No inputPacketHash here — candle data is large; omitted for perf.
     },
     gates: {
@@ -2984,7 +2997,7 @@ async function runTickForUser(
       size_usd: sizeUsd,
       size_pct: sizePct,
       ai_reasoning: decision.reasoning ?? "",
-      ai_model: "google/gemini-3-flash-preview",
+      ai_model: TECHNICAL_ANALYST_MODEL,
       strategy_id: strategyId,
       strategy_version: strategyVersion,
       direction_basis: directionBasis,
