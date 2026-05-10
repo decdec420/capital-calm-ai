@@ -353,6 +353,12 @@ export interface Experiment {
   strategyId?: string | null;
   autoResolved: boolean;
   needsReview: boolean;
+  /** Origin of this experiment: 'user' | 'copilot' | 'coach' | 'strategy_learning'. */
+  source?: string | null;
+  /** UUID of the strategy_learning_recommendations row that produced this experiment, when source='strategy_learning'. */
+  sourceRecommendationId?: string | null;
+  /** Symbol scope for this experiment (e.g. 'BTC-USD'). */
+  symbol?: string | null;
 }
 
 export interface Alert {
