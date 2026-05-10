@@ -59,6 +59,20 @@ export interface NonTradeReplayPacket {
   mode: string;
   blockerCodes: string[];
   reason: string;
+  /**
+   * Provenance of the AI call that produced or influenced this decision.
+   * Absent for purely deterministic / gate-only paths where no AI was called.
+   * Never contains credentials, API keys, or full prompt text.
+   */
+  provenance?: {
+    model: string;
+    promptId: string;
+    promptVersion: string;
+    schemaVersion: string;
+    validationStatus: "passed" | "failed" | "fallback" | "skipped";
+    fallbackUsed: boolean;
+    fallbackReason?: string;
+  };
   meta?: Record<string, unknown>;
 }
 

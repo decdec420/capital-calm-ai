@@ -69,6 +69,20 @@ export interface ModelReplaySlice {
   taylorPromptVersion: string;
   /** e.g. "anthropic/claude-sonnet-4-6" */
   riskManagerModel: string;
+  /** Prompt version for the Risk Manager call. */
+  riskManagerPromptVersion?: string;
+  /** Output schema version used to validate Taylor's response. */
+  taylorSchemaVersion?: string;
+  /** Output schema version used to validate Risk Manager's response. */
+  riskManagerSchemaVersion?: string;
+  /** Validation status for Taylor output: passed | failed | fallback | skipped. */
+  taylorValidationStatus?: "passed" | "failed" | "fallback" | "skipped";
+  /** Validation status for Risk Manager output. */
+  riskManagerValidationStatus?: "passed" | "failed" | "fallback" | "skipped";
+  /** Whether circuit breaker or AI fallback was used for Taylor. */
+  taylorFallbackUsed?: boolean;
+  /** Whether circuit breaker or AI fallback was used for Risk Manager. */
+  riskManagerFallbackUsed?: boolean;
   /** SHA-256 of the input packet (candles + context, not credentials). */
   inputPacketHash?: string;
 }

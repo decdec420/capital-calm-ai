@@ -69,6 +69,20 @@ export interface NonTradeReplayPacket {
   /** Human-readable summary of why this was not a trade. */
   reason: string;
   /**
+   * Provenance of the AI call that produced or influenced this decision.
+   * Absent for purely gate-only paths where no AI was called.
+   * Never contains credentials, API keys, or full prompt text.
+   */
+  provenance?: {
+    model: string;
+    promptId: string;
+    promptVersion: string;
+    schemaVersion: string;
+    validationStatus: "passed" | "failed" | "fallback" | "skipped";
+    fallbackUsed: boolean;
+    fallbackReason?: string;
+  };
+  /**
    * Optional structured context specific to the reason type.
    * Must never contain credentials or PII.
    */
@@ -136,6 +150,9 @@ export async function recordNonTrade(
 /**
  * Build a minimal NonTradeReplayPacket from available context.
  * Safe to call for any non-trade path.
+ *
+ * Pass provenance when an AI call was involved in producing this decision.
+ * Omit for purely gate-based / deterministic paths (no AI call).
  */
 export function buildNonTradePacket(params: {
   symbol: string | null;
@@ -145,6 +162,7 @@ export function buildNonTradePacket(params: {
   mode: "paper" | "live" | "research";
   blockerCodes: string[];
   reason: string;
+  provenance?: NonTradeReplayPacket["provenance"];
   meta?: Record<string, unknown>;
 }): NonTradeReplayPacket {
   return {
@@ -156,6 +174,7 @@ export function buildNonTradePacket(params: {
     mode: params.mode,
     blockerCodes: params.blockerCodes,
     reason: params.reason,
+    ...(params.provenance ? { provenance: params.provenance } : {}),
     ...(params.meta ? { meta: params.meta } : {}),
   };
 }
