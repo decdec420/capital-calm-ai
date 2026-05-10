@@ -105,12 +105,17 @@ async function processOneRow(
     input_snapshot: snapshot as unknown as Record<string, unknown>,
   }));
 
+  // ignoreDuplicates: if a concurrent run already inserted jobs for this
+  // (decision_memory_id, simulation_type), the unique constraint fires and we
+  // get back an empty array rather than an error. The concurrent runner owns
+  // those jobs and will mark used_for_learning when it finishes — we exit
+  // cleanly here and leave the flag untouched.
   const { data: insertedJobs, error: insertErr } = await admin
     .from("decision_memory_simulations")
-    .insert(jobInserts)
+    .insert(jobInserts, { ignoreDuplicates: true })
     .select("id, simulation_type");
 
-  if (insertErr || !insertedJobs || insertedJobs.length === 0) {
+  if (insertErr) {
     return {
       memoryId: row.id,
       userId: row.user_id,
@@ -118,7 +123,19 @@ async function processOneRow(
       jobsCompleted: 0,
       jobsFailed: 0,
       markedLearned: false,
-      error: `job insert failed: ${insertErr?.message ?? "no rows returned"}`,
+      error: `job insert failed: ${insertErr.message}`,
+    };
+  }
+
+  // All jobs were already inserted by a concurrent run — exit safely.
+  if (!insertedJobs || insertedJobs.length === 0) {
+    return {
+      memoryId: row.id,
+      userId: row.user_id,
+      jobsCreated: 0,
+      jobsCompleted: 0,
+      jobsFailed: 0,
+      markedLearned: false,
     };
   }
 
@@ -127,16 +144,31 @@ async function processOneRow(
   let failedCount = 0;
 
   for (const job of insertedJobs as Array<{ id: string; simulation_type: SimulationType }>) {
-    // Mark running
-    await admin
+    // Mark running — check error explicitly; .update() resolves instead of throwing.
+    // If this write fails the job stays 'queued' and the simulation must not proceed
+    // or a future invocation will re-run the same job producing a duplicate result.
+    const { error: runningErr } = await admin
       .from("decision_memory_simulations")
       .update({ status: "running", started_at: new Date().toISOString() })
       .eq("id", job.id);
 
+    if (runningErr) {
+      console.error(
+        `[process-decision-memory] failed to mark job ${job.id} running:`,
+        runningErr.message,
+      );
+      failedCount++;
+      continue;
+    }
+
     try {
       const result = runSimulation(job.simulation_type, snapshot);
 
-      await admin
+      // Check the update error explicitly — .update() resolves rather than
+      // throws on DB/RLS failures. If the result write fails we must count
+      // this as a failure so allSucceeded stays false and used_for_learning
+      // is NOT set on the parent row, keeping it in the retry queue.
+      const { error: resultErr } = await admin
         .from("decision_memory_simulations")
         .update({
           status: "completed",
@@ -146,7 +178,23 @@ async function processOneRow(
         })
         .eq("id", job.id);
 
-      completedCount++;
+      if (resultErr) {
+        console.error(
+          `[process-decision-memory] result write failed for job ${job.id}:`,
+          resultErr.message,
+        );
+        await admin
+          .from("decision_memory_simulations")
+          .update({
+            status: "failed",
+            error: `result write failed: ${resultErr.message}`,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+        failedCount++;
+      } else {
+        completedCount++;
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(

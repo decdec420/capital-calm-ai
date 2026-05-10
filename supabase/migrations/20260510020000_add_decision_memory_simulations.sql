@@ -42,10 +42,12 @@ CREATE TABLE public.decision_memory_simulations (
 
   -- Simulation type: which counterfactual scenario was modeled
   -- Valid values: TAKEN_IF_NOT_BLOCKED | SKIP_BASELINE
-  simulation_type      text        NOT NULL,
+  simulation_type      text        NOT NULL
+    CHECK (simulation_type IN ('TAKEN_IF_NOT_BLOCKED', 'SKIP_BASELINE')),
 
   -- Job lifecycle status
-  status               text        NOT NULL DEFAULT 'queued',
+  status               text        NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'running', 'completed', 'failed')),
   -- Valid values: queued | running | completed | failed
 
   -- Non-sensitive snapshot of the inputs used to run this simulation.
@@ -60,7 +62,8 @@ CREATE TABLE public.decision_memory_simulations (
 
   -- Summary score (0.0–1.0) derived from result, for easy sorting/filtering.
   -- NULL until completed.
-  score                numeric     NULL,
+  score                numeric     NULL
+    CHECK (score IS NULL OR (score >= 0 AND score <= 1)),
 
   -- Error message if status = 'failed'; NULL otherwise.
   error                text        NULL,
@@ -70,6 +73,15 @@ CREATE TABLE public.decision_memory_simulations (
   started_at           timestamptz NULL,
   completed_at         timestamptz NULL
 );
+
+-- ── Uniqueness constraint — prevents duplicate jobs from concurrent drains ────
+-- Two simultaneous invocations (cron + manual) both see used_for_learning=false
+-- and would insert the same (decision_memory_id, simulation_type) pair.
+-- This constraint makes the second insert a no-op (handled with ON CONFLICT
+-- DO NOTHING in the edge function) rather than silently creating duplicates.
+ALTER TABLE public.decision_memory_simulations
+  ADD CONSTRAINT decision_memory_simulations_unique_job
+  UNIQUE (decision_memory_id, simulation_type);
 
 -- ── Indexes ───────────────────────────────────────────────────────────────────
 
@@ -100,11 +112,22 @@ CREATE POLICY "decision_memory_simulations: owner can select"
 
 CREATE POLICY "decision_memory_simulations: owner can insert"
   ON public.decision_memory_simulations FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1 FROM public.decision_memory
+      WHERE id = decision_memory_id
+        AND user_id = auth.uid()
+    )
+  );
 
-CREATE POLICY "decision_memory_simulations: owner can update"
-  ON public.decision_memory_simulations FOR UPDATE
-  USING (auth.uid() = user_id);
+-- NOTE: No UPDATE policy for authenticated users.
+-- All lifecycle writes (queued→running→completed|failed) are performed by the
+-- process-decision-memory edge function using the service-role client, which
+-- bypasses RLS entirely. Granting UPDATE to authenticated users would allow
+-- them to overwrite status, result, score, or error fields directly via the
+-- public Supabase client, corrupting the research audit trail.
+-- NO UPDATE policy — service role handles all writes.
 
 -- NO DELETE policy — simulation results are permanent for audit and research
 -- integrity. Old rows can be archived but never silently dropped.
