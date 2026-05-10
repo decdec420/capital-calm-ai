@@ -187,7 +187,7 @@ async function processOneRow(
           .from("decision_memory_simulations")
           .update({
             status: "failed",
-            error: `result write failed: ${resultErr.message}`,
+            failure_reason: `result write failed: ${resultErr.message}`,
             completed_at: new Date().toISOString(),
           })
           .eq("id", job.id);
@@ -206,7 +206,7 @@ async function processOneRow(
         .from("decision_memory_simulations")
         .update({
           status: "failed",
-          error: errMsg,
+          failure_reason: errMsg,
           completed_at: new Date().toISOString(),
         })
         .eq("id", job.id);
