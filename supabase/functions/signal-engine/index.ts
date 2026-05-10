@@ -2328,6 +2328,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [fallbackGate.code],
         reason: fallbackGate.message,
+        meta: { side: null }, // AI did not provide a direction — do not guess
       }),
     }).catch(() => {});
     return {
@@ -2518,6 +2519,7 @@ async function runTickForUser(
         blockerCodes: ["COACH_PENALTY"],
         reason: `Coach penalty: raw conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
         meta: {
+          side,
           rawConfidence: rawConf,
           adjustedConfidence: conf,
           coachMultiplier: coachVerdict?.confidenceMultiplier ?? null,
@@ -2595,7 +2597,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: clamp.clampedBy.map((r) => r.code),
         reason: refusal.message,
-        meta: { proposedSizeUsd: clamp.sizeUsd, clampedBy: clamp.clampedBy.map((r) => r.code) },
+        meta: { side, proposedSizeUsd: clamp.sizeUsd, clampedBy: clamp.clampedBy.map((r) => r.code) },
       }),
     }).catch(() => {});
     await admin.from("journal_entries").insert({
@@ -2730,7 +2732,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [edgeGate.code],
         reason: edgeGate.message,
-        meta: { edgeToTp1Pct, minEdgePctRequired, roundTripCostPct: ROUND_TRIP_COST_PCT, costSource },
+        meta: { side, edgeToTp1Pct, minEdgePctRequired, roundTripCostPct: ROUND_TRIP_COST_PCT, costSource },
       }),
     }).catch(() => {});
     return {
@@ -2846,6 +2848,7 @@ async function runTickForUser(
           mode: isPaper ? "paper" : "live",
           blockerCodes: ["RISK_MANAGER_SKIP_TICK"],
           reason: riskVerdict.reason,
+          meta: { side },
         }),
       }).catch(() => {});
       return {
@@ -2921,6 +2924,7 @@ async function runTickForUser(
       brainTrustFresh: brainTrustAgeMinutes !== null && brainTrustAgeMinutes <= 120,
       brainTrustAgeMinutes,
       snapshotAgeSeconds: engineSnapshotAgeSeconds,
+      side, // direction-aware enrichment requires this
     },
     doctrine: {
       mode: isPaper ? "paper" : "live",
