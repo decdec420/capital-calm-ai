@@ -4,6 +4,7 @@
 // All existing logic preserved 100%.
 
 import { useState } from "react";
+import { LiveReadinessPanel } from "@/components/trader/LiveReadinessPanel";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { GuardrailRow } from "@/components/trader/GuardrailRow";
 import { StatusBadge } from "@/components/trader/StatusBadge";
@@ -282,6 +283,9 @@ export default function RiskCenter() {
       {portfolioRisk && (
         <PortfolioRiskPanel risk={portfolioRisk} mode={system?.mode ?? "unknown"} />
       )}
+
+      {/* Live readiness / broker permission audit */}
+      <LiveReadinessPanel />
 
       <DoctrineOverlayBanner />
       <PendingDoctrineChangesPanel />
