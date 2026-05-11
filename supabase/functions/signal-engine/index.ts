@@ -79,22 +79,9 @@ import {
   placeMarketBuy,
   type BrokerFill,
 } from "../_shared/broker.ts";
-import { probeCoinbaseAccounts } from "../_shared/coinbase-auth.ts";
 import { recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
-import {
-  buildDecisionReplayPacket,
-} from "../_shared/decision-replay.ts";
-import {
-  recordNonTrade,
-  buildNonTradePacket,
-} from "../_shared/decision-memory.ts";
-import {
-  computePortfolioRisk,
-  safePortfolioRiskSummary,
-  PORTFOLIO_RISK_CODES,
-} from "../_shared/portfolio-risk.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -256,13 +243,6 @@ const SYMBOLS = SYMBOL_WHITELIST;
 const TECHNICAL_ANALYST_MODEL = "google/gemini-3-flash-preview";
 // Risk Manager uses Sonnet — binary veto on trade proposals, low volume, high stakes.
 const RISK_MANAGER_MODEL = "anthropic/claude-sonnet-4-6";
-
-// ─── Provenance constants ────────────────────────────────────────
-// Stable version tags for replay packet provenance. Never full prompt text.
-const TAYLOR_PROMPT_VERSION     = "signal-engine-v2";
-const RISK_MANAGER_PROMPT_VERSION = "risk-manager-v1";
-const TAYLOR_SCHEMA_VERSION     = "submit_decision-v1";
-const RISK_MANAGER_SCHEMA_VERSION = "submit_risk_decision-v1";
 
 // ─── Coach: per-(symbol, side) historical loss penalty ─────────
 // Looks at recent closed trades for this symbol+side. If win-rate is poor
@@ -479,7 +459,10 @@ async function decideForSymbol(opts: {
 
   // Mean-reversion context — used to inject regime-specific instructions below.
   const isRangeFade = opts.regime.regime === "range";
+  const isTrendingFade = !!(opts.regime as { trendingRsiExtreme?: boolean }).trendingRsiExtreme && !isRangeFade;
   const regimeRsiNow = opts.regime.rsiNow;
+  const regimeRsiFast = (opts.regime as { rsiFast?: number }).rsiFast ?? regimeRsiNow;
+  const regimeRsiDivergence = !!(opts.regime as { rsiDivergence?: boolean }).rsiDivergence;
   const regimeEmaSlow = opts.regime.emaSlow;
   const rangeFadeDirection = regimeRsiNow >= 70 ? "short" : regimeRsiNow <= 30 ? "long" : "unclear";
 
@@ -576,6 +559,30 @@ ADDITIONAL SKIP CRITERIA for fades:
 - RSI is deepening further into overbought/oversold on 15m (momentum accelerating) → wait.
 - Strong news/macro event driving the move (dollar_bill.news_flag = "critical") → skip.
 ` : ""}
+${isTrendingFade ? `
+*** TRENDING EXTENSION FADE (SHORT SETUP) ***
+The market is TRENDING UP but RSI has extended to ${regimeRsiNow.toFixed(0)} — a level where
+momentum frequently exhausts for a measured pullback to the slow EMA.
+This is NOT a trend reversal. It is a SHORT trade targeting a 1-2 ATR pullback. Size conservatively.
+
+DIRECTION: SHORT only. You are fading the overextension — not calling a top.
+SIDE: short. Target: slow EMA (~$${regimeEmaSlow.toFixed(0)}). TP1 at the midpoint.
+
+FAST RSI (7-period): ${regimeRsiFast.toFixed(0)}.
+- ≥ 88: Very high extension. Strong fade signal. Add 0.05 to confidence.
+- 80-87: Good extension. Standard fade quality.
+- 75-79: Marginal — only proceed if RSI divergence confirms.
+- < 75: Do NOT fade. Not extended enough on the fast measure. SKIP.
+
+RSI DIVERGENCE: ${regimeRsiDivergence ? "✓ CONFIRMED — price higher high, RSI lower high. Momentum is waning. +0.05 confidence." : "✗ Not detected — rely on RSI level. Use conservative confidence only."}
+
+STOP: Just above the most recent 3-bar HIGH. Max 1.0% from entry (slightly wider than range fades — trending markets can spike before reversing).
+TARGET: Slow EMA ($${regimeEmaSlow.toFixed(0)}). Exit full position there. Do not hold past the mean.
+SIZING: 10-12% of equity max. This is counter-trend — half the size of a trend trade.
+
+MACRO OVERRIDE: If macro_bias is "strong_long" → SKIP. Do not fight a strong macro trend even if RSI is extended.
+If macro_bias is "lean_long" → proceed with reduced confidence (cap at 0.65).
+` : ""}
 5. KEY LEVEL QUALITY:
    From the Pattern Recognition Specialist:
    "${intel?.entry_quality_context ?? "No pattern context available — be conservative."}"
@@ -607,7 +614,7 @@ PAPER MODE — CALIBRATION PHASE:
 You are running in paper mode. Apply live entry standards — no real capital is
 at risk but every signal you generate trains the Trade Coach that will run
 with real money. Hold the same edge requirements you would in live trading.
-Confidence threshold is 0.55 (marginally below live's 0.65) to accumulate
+Confidence threshold is 0.45 (marginally below live's 0.65) to accumulate
 calibration data faster, but that is NOT a license to take weak setups.
 Require real regime alignment, clear structure, and a defined edge — every time.
 Reject chop, broken structure, and setups with no identifiable edge regardless of mode.
@@ -943,7 +950,7 @@ async function runTickForUser(
       .eq("user_id", userId),
     admin
       .from("trades")
-      .select("id,symbol,side,entry_price,size,unrealized_pnl")
+      .select("id,symbol,side,entry_price,size")
       .eq("user_id", userId)
       .eq("status", "open"),
     admin
@@ -1039,7 +1046,7 @@ async function runTickForUser(
   // separate. Default to paper when mode is not explicitly "live".
   const isPaper = ((sys as { mode?: string } | null)?.mode ?? "paper") !== "live";
   const MIN_SETUP_SCORE = isPaper ? 0.40 : 0.55;   // paper: 0.40, live: 0.55
-  const MIN_CONFIDENCE = isPaper ? 0.50 : 0.65;     // paper: 0.50, live: 0.65
+  const MIN_CONFIDENCE = isPaper ? 0.45 : 0.65;     // paper: 0.45, live: 0.65
 
   // Event mode / manual pause check — halts all symbols this tick.
   const pausedGate = getActiveEventModeGateFromSystem({
@@ -1052,22 +1059,6 @@ async function runTickForUser(
       perSymbol: [],
       chosenSymbol: null,
     });
-    recordNonTrade(admin, {
-      userId,
-      reasonCode: "DOCTRINE_BLOCK",
-      severity: "halt",
-      mode: isPaper ? "paper" : "live",
-      blockerCodes: [pausedGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: null,
-        regime: null,
-        setupScore: null,
-        confidence: null,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [pausedGate.code],
-        reason: pausedGate.message,
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "event_mode",
@@ -1076,64 +1067,6 @@ async function runTickForUser(
       perSymbol: [],
     };
   }
-
-  // ── Broker health probe — fires every tick, best-effort ──────────────
-  // Attempts to load Coinbase credentials and writes the result to
-  // broker_health so the UI banner and ops-sentinel can reflect real status.
-  // In paper mode (no live creds configured) we write 'not_connected'.
-  // Never throws — a probe failure must never abort the tick.
-  (async () => {
-    try {
-      const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME");
-      const envKeyPem  = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM");
-      const liveEnabledForProbe = !!(sys as { live_trading_enabled?: boolean }).live_trading_enabled;
-
-      if (!envKeyName || !envKeyPem) {
-        await admin.rpc("update_broker_health", {
-          p_user_id: userId,
-          p_status:  "not_connected",
-          p_key_name: null,
-          p_error:   liveEnabledForProbe
-            ? "COINBASE_API_KEY_NAME / COINBASE_API_KEY_PRIVATE_PEM not set in secrets"
-            : null,
-        });
-        return;
-      }
-
-      const probeResult = await probeCoinbaseAccounts(envKeyName, envKeyPem);
-
-      if (probeResult.ok) {
-        await admin.rpc("update_broker_health", {
-          p_user_id:  userId,
-          p_status:   "healthy",
-          p_key_name: envKeyName,
-          p_error:    null,
-        });
-      } else {
-        const isAuth = probeResult.status === 401 || probeResult.status === 403;
-        await admin.rpc("update_broker_health", {
-          p_user_id:  userId,
-          p_status:   isAuth ? "auth_failed" : "unknown",
-          p_key_name: envKeyName,
-          p_error:    `HTTP ${probeResult.status}: ${probeResult.error}`.slice(0, 200),
-        });
-      }
-    } catch (probeErr) {
-      log("warn", "broker_health_probe_failed", {
-        fn: "signal-engine",
-        userId,
-        err: String(probeErr),
-      });
-      try {
-        await admin.rpc("update_broker_health", {
-          p_user_id:  userId,
-          p_status:   "unknown",
-          p_key_name: null,
-          p_error:    String(probeErr).slice(0, 200),
-        });
-      } catch { /* truly best-effort */ }
-    }
-  })();
 
   // Correlation cap — count open trades across all whitelisted symbols.
   const totalOpenTrades = (openTrades ?? []).length;
@@ -1149,23 +1082,6 @@ async function runTickForUser(
       perSymbol: [],
       chosenSymbol: null,
     });
-    recordNonTrade(admin, {
-      userId,
-      reasonCode: "DOCTRINE_BLOCK",
-      severity: "halt",
-      mode: isPaper ? "paper" : "live",
-      blockerCodes: [corrGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: null,
-        regime: null,
-        setupScore: null,
-        confidence: null,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [corrGate.code],
-        reason: corrGate.message,
-        meta: { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS },
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "correlation_cap",
@@ -1202,23 +1118,6 @@ async function runTickForUser(
         perSymbol: [],
         chosenSymbol: null,
       });
-      recordNonTrade(admin, {
-        userId,
-        reasonCode: "DOCTRINE_BLOCK",
-        severity: "halt",
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [exposureGate.code],
-        replayPacket: buildNonTradePacket({
-          symbol: null,
-          regime: null,
-          setupScore: null,
-          confidence: null,
-          mode: isPaper ? "paper" : "live",
-          blockerCodes: [exposureGate.code],
-          reason: exposureGate.message,
-          meta: { bookNotional, equity, capPct: MAX_BOOK_EXPOSURE_PCT },
-        }),
-      }).catch(() => {});
       return {
         userId,
         tick: "book_exposure_cap",
@@ -1227,101 +1126,6 @@ async function runTickForUser(
         perSymbol: [],
       };
     }
-  }
-
-  // ── Portfolio risk gate ───────────────────────────────────────
-  // Evaluates portfolio-level exposure using the same pure logic as
-  // the frontend Risk Center (PR #48). Additive — does not replace
-  // the correlation cap or book exposure cap above.
-  //
-  // Paper mode: block codes → halt (consistent with existing gates).
-  // Live mode:  block codes → halt; unknown exposure → halt.
-  // Warn codes: captured in portfolioWarnGates for snapshot visibility
-  //             but never halt the tick on their own.
-  //
-  // Safety: no trade creation, no broker calls, no doctrine mutation.
-  const portfolioRisk = computePortfolioRisk({
-    openTrades: (openTrades ?? []).map((t: {
-      symbol: string;
-      entry_price?: number | string | null;
-      size?: number | string | null;
-      unrealized_pnl?: number | string | null;
-    }) => ({
-      symbol: t.symbol,
-      entry_price: t.entry_price ?? 0,
-      size: t.size ?? 0,
-      unrealized_pnl: t.unrealized_pnl ?? null,
-    })),
-    account: acct ? {
-      equity: acct.equity ?? 0,
-      start_of_day_equity: (acct as { start_of_day_equity?: number }).start_of_day_equity ?? acct.equity ?? 0,
-      daily_auto_execute_cap_usd: (acct as { daily_auto_execute_cap_usd?: number }).daily_auto_execute_cap_usd ?? 2,
-    } : null,
-    mode: isPaper ? "paper" : "live",
-  });
-
-  // Build gate reasons from portfolio risk codes.
-  const portfolioBlockGates: GateReason[] = portfolioRisk.blockCodes.map((code) =>
-    gate(
-      // Cast: portfolio codes are already in GATE_CODES (added PR #48).
-      code as Parameters<typeof gate>[0],
-      portfolioRisk.insufficientData && !isPaper ? "halt" : "block",
-      `Portfolio risk block: ${code}`,
-      { portfolioVerdict: portfolioRisk.verdict, code, mode: isPaper ? "paper" : "live" },
-    )
-  );
-  const portfolioWarnGates: GateReason[] = portfolioRisk.warningCodes.map((code) =>
-    gate(
-      code as Parameters<typeof gate>[0],
-      "warn",
-      `Portfolio risk warning: ${code}`,
-      { portfolioVerdict: portfolioRisk.verdict, code, mode: isPaper ? "paper" : "live" },
-    )
-  );
-
-  if (portfolioRisk.verdict === "block") {
-    const primaryCode = portfolioRisk.blockCodes[0];
-    const safeSummary = safePortfolioRiskSummary(portfolioRisk);
-    await persistSnapshot(admin, userId, {
-      gateReasons: portfolioBlockGates,
-      perSymbol: [],
-      chosenSymbol: null,
-    });
-    recordNonTrade(admin, {
-      userId,
-      reasonCode: "PORTFOLIO_RISK_BLOCK",
-      severity: "block",
-      mode: isPaper ? "paper" : "live",
-      sourceAgent: "risk",
-      blockerCodes: portfolioRisk.blockCodes,
-      replayPacket: buildNonTradePacket({
-        symbol: null,
-        regime: null,
-        setupScore: null,
-        confidence: null,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: portfolioRisk.blockCodes,
-        reason: `Portfolio risk blocked: ${primaryCode}`,
-        meta: {
-          portfolioRisk: safeSummary,
-          portfolioVerdict: portfolioRisk.verdict,
-          totalExposureUsd: portfolioRisk.totalExposureUsd,
-          openPositionCount: portfolioRisk.openPositionCount,
-          equityUsd: portfolioRisk.equityUsd,
-          blockCodes: portfolioRisk.blockCodes,
-          warningCodes: portfolioRisk.warningCodes,
-          insufficientData: portfolioRisk.insufficientData,
-          mode: isPaper ? "paper" : "live",
-        },
-      }),
-    }).catch(() => {});
-    return {
-      userId,
-      tick: "portfolio_risk_block",
-      gateReasons: portfolioBlockGates,
-      expiredCount,
-      perSymbol: [],
-    };
   }
 
   // ── Re-entry cooldown + stepped anti-tilt ─────────────────────
@@ -1375,23 +1179,6 @@ async function runTickForUser(
       perSymbol: [],
       chosenSymbol: null,
     });
-    recordNonTrade(admin, {
-      userId,
-      reasonCode: "COOLDOWN_ACTIVE",
-      severity: "halt",
-      mode: isPaper ? "paper" : "live",
-      blockerCodes: [tiltGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: null,
-        regime: null,
-        setupScore: null,
-        confidence: null,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [tiltGate.code],
-        reason: tiltGate.message,
-        meta: { consecutiveLosses, limit: consecutiveLossLimit, level: "hard_stop" },
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "anti_tilt_hard_stop",
@@ -1426,23 +1213,6 @@ async function runTickForUser(
         perSymbol: [],
         chosenSymbol: null,
       });
-      recordNonTrade(admin, {
-        userId,
-        reasonCode: "COOLDOWN_ACTIVE",
-        severity: "halt",
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [tiltGate.code],
-        replayPacket: buildNonTradePacket({
-          symbol: null,
-          regime: null,
-          setupScore: null,
-          confidence: null,
-          mode: isPaper ? "paper" : "live",
-          blockerCodes: [tiltGate.code],
-          reason: tiltGate.message,
-          meta: { consecutiveLosses, limit: consecutiveLossLimit, level: "cooldown", cooldownMin, remainMin },
-        }),
-      }).catch(() => {});
       return {
         userId,
         tick: "anti_tilt_cooldown",
@@ -1633,33 +1403,17 @@ async function runTickForUser(
   // If the overlay says LOCKOUT, halt new entries this tick. Existing
   // positions are still managed by the close/scale paths.
   if (doctrineOverlay.blockNewEntries) {
-    const overlayGate = gate(
-      GATE_CODES.DOCTRINE_OVERLAY_LOCKOUT,
-      "halt",
-      `Doctrine overlay halted entries: ${doctrineOverlay.reasons.join(", ") || doctrineOverlay.mode}`,
-      { overlay: doctrineOverlay },
-    );
     await persistSnapshot(admin, userId, {
-      gateReasons: [overlayGate],
+      gateReasons: [
+        gate(
+          GATE_CODES.DOCTRINE_OVERLAY_LOCKOUT,
+          "halt",
+          `Doctrine overlay halted entries: ${doctrineOverlay.reasons.join(", ") || doctrineOverlay.mode}`,
+          { overlay: doctrineOverlay },
+        ),
+      ],
       perSymbol: [],
     });
-    recordNonTrade(admin, {
-      userId,
-      reasonCode: "DOCTRINE_BLOCK",
-      severity: "halt",
-      mode: isPaper ? "paper" : "live",
-      blockerCodes: [overlayGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: null,
-        regime: null,
-        setupScore: null,
-        confidence: null,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [overlayGate.code],
-        reason: overlayGate.message,
-        meta: { overlayMode: doctrineOverlay.mode, overlayReasons: doctrineOverlay.reasons },
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "doctrine_overlay_lockout",
@@ -1937,33 +1691,6 @@ async function runTickForUser(
       perSymbol: perSymbolSnap,
       chosenSymbol: null,
     });
-    // Map the gate code to a canonical NonTradeReasonCode for learning queries.
-    const haltReasonCode = (() => {
-      switch (accountHalt.code) {
-        case GATE_CODES.KILL_SWITCH: return "KILL_SWITCH_ACTIVE" as const;
-        case GATE_CODES.DAILY_LOSS_CAP: return "DAILY_LOSS_CAP_REACHED" as const;
-        case GATE_CODES.BALANCE_FLOOR: return "ACCOUNT_FLOOR_BREACHED" as const;
-        case GATE_CODES.TRADE_COUNT_CAP: return "MAX_TRADES_REACHED" as const;
-        default: return "RISK_GATE_BLOCK" as const;
-      }
-    })();
-    recordNonTrade(admin, {
-      userId,
-      reasonCode: haltReasonCode,
-      severity: "halt",
-      mode: isPaper ? "paper" : "live",
-      blockerCodes: [accountHalt.code],
-      replayPacket: buildNonTradePacket({
-        symbol: null,
-        regime: null,
-        setupScore: null,
-        confidence: null,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [accountHalt.code],
-        reason: accountHalt.message,
-        meta: accountHalt.meta,
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "halted",
@@ -2041,9 +1768,7 @@ async function runTickForUser(
     });
 
     await persistSnapshot(admin, userId, {
-      // Include portfolio warn gates so the snapshot shows any portfolio
-      // warnings that were active even when all symbols were individually skipped.
-      gateReasons: [...portfolioWarnGates, ...gateReasons],
+      gateReasons,
       perSymbol,
       chosenSymbol: null,
     });
@@ -2055,42 +1780,6 @@ async function runTickForUser(
       summary: gateReasons.map((g) => g.message).join(" · "),
       tags: ["multi-symbol", "skip"],
     });
-
-    // Record one negative example per candidate so Strategy Lab can learn
-    // per-symbol: e.g. "BTC-USD was chop 47 times before this trend started."
-    for (const c of candidates) {
-      const symbolGate = c.lockGate ?? gateReasons.find((g) => g.meta && (g.meta as Record<string, unknown>).symbol === c.symbol);
-      const reasonCode = (() => {
-        const code = symbolGate?.code ?? "";
-        if (code === GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE || code === GATE_CODES.BRAIN_TRUST_REFRESH_FAILED || code === GATE_CODES.MISSING_MARKET_INTELLIGENCE) return "BRAIN_TRUST_STALE" as const;
-        if (code === GATE_CODES.NO_CANDLES || code === GATE_CODES.STALE_DATA) return "MARKET_DATA_STALE" as const;
-        if (code === GATE_CODES.REENTRY_COOLDOWN || code === GATE_CODES.ANTI_TILT_COOLDOWN) return "COOLDOWN_ACTIVE" as const;
-        if (code === GATE_CODES.NEWS_FLAG_CRITICAL) return "DOCTRINE_BLOCK" as const;
-        if (c.regime.setupScore < MIN_SETUP_SCORE) return "LOW_SETUP_SCORE" as const;
-        return "NO_TRADE_REGIME" as const;
-      })();
-      recordNonTrade(admin, {
-        userId,
-        symbol: c.symbol,
-        reasonCode,
-        severity: symbolGate?.severity === "halt" || symbolGate?.severity === "block" ? symbolGate.severity : "skip",
-        mode: isPaper ? "paper" : "live",
-        marketRegime: c.regime.regime,
-        setupScore: c.regime.setupScore,
-        confidence: c.regime.confidence,
-        blockerCodes: symbolGate ? [symbolGate.code] : [],
-        replayPacket: buildNonTradePacket({
-          symbol: c.symbol,
-          regime: c.regime.regime,
-          setupScore: c.regime.setupScore,
-          confidence: c.regime.confidence,
-          mode: isPaper ? "paper" : "live",
-          blockerCodes: symbolGate ? [symbolGate.code] : [],
-          reason: symbolGate?.message ?? `${c.symbol}: no qualifying setup (${c.regime.regime}, score=${c.regime.setupScore.toFixed(2)})`,
-        }),
-      }).catch(() => {});
-    }
-
     return {
       userId,
       tick: "skipped",
@@ -2357,27 +2046,6 @@ async function runTickForUser(
       perSymbol,
       chosenSymbol: winner.symbol,
     });
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      reasonCode: "AI_ERROR",
-      severity: "skip",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: winner.regime.confidence,
-      blockerCodes: [aiErr.code],
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: winner.regime.confidence,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [aiErr.code],
-        reason: aiErr.message,
-        meta: { error: aiResult.error },
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "ai_error",
@@ -2412,26 +2080,6 @@ async function runTickForUser(
       summary: decision.reasoning ?? "AI chose to skip.",
       tags: [winner.symbol, winner.regime.regime, winner.regime.volatility],
     });
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      reasonCode: "LOW_CONFIDENCE",
-      severity: "skip",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: winner.regime.confidence,
-      blockerCodes: [skipGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: winner.regime.confidence,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [skipGate.code],
-        reason: decision.reasoning ?? "AI chose to skip.",
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "skipped",
@@ -2478,27 +2126,6 @@ async function runTickForUser(
         "The AI proposed a trade but did not specify long or short. Silent default-long is disabled; the trade was dropped.",
       tags: [winner.symbol, "default-long-fallback", "blocked"],
     });
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      reasonCode: "DOCTRINE_BLOCK",
-      severity: "block",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: winner.regime.confidence,
-      blockerCodes: [fallbackGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: winner.regime.confidence,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [fallbackGate.code],
-        reason: fallbackGate.message,
-        meta: { side: null }, // AI did not provide a direction — do not guess
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "default_long_fallback_blocked",
@@ -2519,6 +2146,7 @@ async function runTickForUser(
     side,
     routerStrategies,
     routerPerformance,
+    winner.regime.rsiNow,
   );
 
   if (decision.decision === "propose_trade" && !routerDecision.strategy) {
@@ -2545,28 +2173,6 @@ async function runTickForUser(
       summary: `Engine had a signal but no approved strategy declares affinity for regime=${winner.regime.regime} with side=${side}. Add or unpause a matching strategy.`,
       tags: [winner.symbol, "no-strategy", winner.regime.regime, side],
     });
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      strategyId: null,
-      reasonCode: "NO_APPROVED_STRATEGY",
-      severity: "skip",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: winner.regime.confidence,
-      blockerCodes: [noStratGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: winner.regime.confidence,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [noStratGate.code],
-        reason: noStratGate.message,
-        meta: { side, candidates: routerDecision.candidates },
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "no_strategy_for_regime",
@@ -2664,40 +2270,6 @@ async function runTickForUser(
   // pushed a borderline signal below the threshold. Drop it here rather than
   // persisting a sub-threshold signal that the operator would reject anyway.
   if (conf < MIN_CONFIDENCE) {
-    // Previously a completely silent skip. Now recorded so Wendy and Strategy
-    // Lab can learn: "this symbol had edge but the coach saw a losing streak
-    // and killed the confidence before it reached the broker."
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      strategyId: strategyId ?? null,
-      reasonCode: "COACH_PENALTY",
-      severity: "skip",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: conf,
-      blockerCodes: ["COACH_PENALTY"],
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: conf,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: ["COACH_PENALTY"],
-        reason: `Coach penalty: raw conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
-        meta: {
-          side,
-          rawConfidence: rawConf,
-          adjustedConfidence: conf,
-          coachMultiplier: coachVerdict?.confidenceMultiplier ?? null,
-          coachSampleSize: coachVerdict?.sampleSize ?? null,
-          coachWinRate: coachVerdict?.winRate ?? null,
-          coachNetPnl: coachVerdict?.netPnlUsd ?? null,
-          minConfidenceThreshold: MIN_CONFIDENCE,
-        },
-      }),
-    }).catch(() => {});
     return {
       symbol: winner.symbol,
       outcome: "skipped",
@@ -2746,28 +2318,6 @@ async function runTickForUser(
       perSymbol,
       chosenSymbol: winner.symbol,
     });
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      strategyId: strategyId ?? null,
-      reasonCode: "DOCTRINE_BLOCK",
-      severity: refusal.severity === "halt" || refusal.severity === "block" ? refusal.severity : "block",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: conf,
-      blockerCodes: clamp.clampedBy.map((r) => r.code),
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: conf,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: clamp.clampedBy.map((r) => r.code),
-        reason: refusal.message,
-        meta: { side, proposedSizeUsd: clamp.sizeUsd, clampedBy: clamp.clampedBy.map((r) => r.code) },
-      }),
-    }).catch(() => {});
     await admin.from("journal_entries").insert({
       user_id: userId,
       kind: "skip",
@@ -2881,28 +2431,6 @@ async function runTickForUser(
       perSymbol,
       chosenSymbol: winner.symbol,
     });
-    recordNonTrade(admin, {
-      userId,
-      symbol: winner.symbol,
-      strategyId: strategyId ?? null,
-      reasonCode: "EDGE_BELOW_COSTS",
-      severity: "skip",
-      mode: isPaper ? "paper" : "live",
-      marketRegime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: conf,
-      blockerCodes: [edgeGate.code],
-      replayPacket: buildNonTradePacket({
-        symbol: winner.symbol,
-        regime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: conf,
-        mode: isPaper ? "paper" : "live",
-        blockerCodes: [edgeGate.code],
-        reason: edgeGate.message,
-        meta: { side, edgeToTp1Pct, minEdgePctRequired, roundTripCostPct: ROUND_TRIP_COST_PCT, costSource },
-      }),
-    }).catch(() => {});
     return {
       userId,
       tick: "edge_below_costs",
@@ -2957,28 +2485,6 @@ async function runTickForUser(
         perSymbol,
         chosenSymbol: winner.symbol,
       });
-      recordNonTrade(admin, {
-        userId,
-        symbol: winner.symbol,
-        strategyId: strategyId ?? null,
-        reasonCode: "RISK_MANAGER_VETO",
-        severity: "skip",
-        mode: isPaper ? "paper" : "live",
-        marketRegime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: conf,
-        blockerCodes: [vetoGate.code, "RISK_MANAGER_VETO"],
-        replayPacket: buildNonTradePacket({
-          symbol: winner.symbol,
-          regime: winner.regime.regime,
-          setupScore: winner.regime.setupScore,
-          confidence: conf,
-          mode: isPaper ? "paper" : "live",
-          blockerCodes: [vetoGate.code],
-          reason: `Risk Manager veto: ${riskVerdict.reason}`,
-          meta: { entry, stop, target, sizeUsd, side },
-        }),
-      }).catch(() => {});
       return {
         userId,
         tick: "risk_vetoed",
@@ -2993,32 +2499,10 @@ async function runTickForUser(
     // skip_tick: Bobby's AI was unreachable (network/parse error). This is NOT
     // a trade rejection — it's a transient infrastructure hiccup. We bail without
     // writing any signal row or journal entry so the next cron tick starts clean
-    // and gets a fresh evaluation. Now recorded in decision_memory so infra
-    // failures are visible to ops (was previously completely invisible).
+    // and gets a fresh evaluation. The distinction from veto matters: a veto
+    // permanently poisons the signal record; a skip_tick is invisible.
     if (riskVerdict.verdict === "skip_tick") {
       log("warn", "risk_manager_skip_tick", { fn: "signal-engine", userId, symbol: winner.symbol, reason: riskVerdict.reason });
-      recordNonTrade(admin, {
-        userId,
-        symbol: winner.symbol,
-        strategyId: strategyId ?? null,
-        reasonCode: "RISK_MANAGER_SKIP_TICK",
-        severity: "skip",
-        mode: isPaper ? "paper" : "live",
-        marketRegime: winner.regime.regime,
-        setupScore: winner.regime.setupScore,
-        confidence: conf,
-        blockerCodes: ["RISK_MANAGER_SKIP_TICK"],
-        replayPacket: buildNonTradePacket({
-          symbol: winner.symbol,
-          regime: winner.regime.regime,
-          setupScore: winner.regime.setupScore,
-          confidence: conf,
-          mode: isPaper ? "paper" : "live",
-          blockerCodes: ["RISK_MANAGER_SKIP_TICK"],
-          reason: riskVerdict.reason,
-          meta: { side },
-        }),
-      }).catch(() => {});
       return {
         userId,
         tick: "skipped",
@@ -3041,97 +2525,6 @@ async function runTickForUser(
 
 
   // ── Stage 5: INSERT signal row (FSM-traced) ──────────────────
-
-  // ── Build replay packet (non-blocking; placeholder id used pre-INSERT) ──
-  // The replay packet captures the full decision context so any future
-  // session can reconstruct exactly why this trade was proposed.
-  // Security: we store cap NUMBERS (not raw settings rows), model IDs
-  // (not API keys), and brief ages (not raw prompt text or credentials.
-  const tickRanAt = new Date().toISOString();
-  const brainTrustAgeMinutes = intel?.generated_at
-    ? Math.round((Date.now() - new Date(intel.generated_at).getTime()) / 60_000)
-    : null;
-  // The engine snapshot ranAt is already persisted in system_state;
-  // we compute age from the winner's perSymbol snapshot if available,
-  // otherwise from system_state.last_engine_snapshot.
-  const engineSnapshotRanAt = sys?.last_engine_snapshot?.ran_at ?? tickRanAt;
-  const engineSnapshotAgeSeconds = Math.round(
-    (Date.now() - new Date(engineSnapshotRanAt).getTime()) / 1_000,
-  );
-
-  // Collect all gate reasons seen during this per-symbol evaluation.
-  // The winner passed all halting gates, so we surface the non-blocking
-  // ones that were observed (warn/info/skip from prior checks).
-  const proposalGates: Array<{ code: string; severity: "halt" | "block" | "skip" | "warn" | "info"; message: string }> = [];
-  // Portfolio warn codes are surfaced here so replay packets and the snapshot
-  // include them even when the engine proceeds to a signal proposal.
-  for (const r of portfolioWarnGates) {
-    proposalGates.push({ code: r.code, severity: "warn", message: r.message });
-  }
-  for (const r of clamp.clampedBy) {
-    if (r.severity !== "halt" && r.severity !== "block") {
-      proposalGates.push({ code: r.code, severity: r.severity as "skip" | "warn" | "info", message: r.message });
-    }
-  }
-  if (riskVerdict && riskVerdict.verdict !== "veto" && riskVerdict.verdict !== "approve") {
-    proposalGates.push({ code: "RISK_MANAGER_REDUCED", severity: "warn", message: riskVerdict.reason });
-  }
-
-  // Resolve profile label for replay (sentinel/active/aggressive).
-  const doctrineProfileLabel = ((): "sentinel" | "active" | "aggressive" => {
-    const id = activeProfile.id ?? "";
-    if (id === "aggressive") return "aggressive";
-    if (id === "active") return "active";
-    return "sentinel";
-  })();
-
-  const replayPacketPayload = buildDecisionReplayPacket({
-    signalId: "pending", // will be updated after INSERT returns the real id
-    ranAt: tickRanAt,
-    market: {
-      symbol: winner.symbol,
-      regime: winner.regime.regime,
-      setupScore: winner.regime.setupScore,
-      confidence: conf,
-      volatility: winner.regime.volatility ?? "unknown",
-      brainTrustFresh: brainTrustAgeMinutes !== null && brainTrustAgeMinutes <= 120,
-      brainTrustAgeMinutes,
-      snapshotAgeSeconds: engineSnapshotAgeSeconds,
-      side, // direction-aware enrichment requires this
-    },
-    doctrine: {
-      mode: isPaper ? "paper" : "live",
-      dailyLossCapUsd: resolvedDoctrine.dailyLossUsd,
-      killSwitchFloorUsd: resolvedDoctrine.killSwitchFloorUsd,
-      maxTradesPerDay: resolvedDoctrine.maxTradesPerDay,
-      // maxOrderPct and maxOrderAbsCap from doctrine settings (safe cap numbers, not credentials)
-      maxOrderPct: settingsRow?.max_order_pct ?? 0.001,
-      maxOrderAbsCap: settingsRow?.max_order_abs_cap ?? 1,
-      dailyLossPct: resolvedDoctrine.dailyLossPct,
-      floorPct: resolvedDoctrine.floorPct,
-      profile: doctrineProfileLabel,
-    },
-    model: {
-      taylorModel: TECHNICAL_ANALYST_MODEL,
-      taylorPromptVersion: TAYLOR_PROMPT_VERSION,
-      taylorSchemaVersion: TAYLOR_SCHEMA_VERSION,
-      taylorValidationStatus: "passed",
-      riskManagerModel: RISK_MANAGER_MODEL,
-      riskManagerPromptVersion: RISK_MANAGER_PROMPT_VERSION,
-      riskManagerSchemaVersion: RISK_MANAGER_SCHEMA_VERSION,
-      riskManagerValidationStatus: "passed",
-      taylorFallbackUsed: CB_STATE.state !== "closed",
-      // No inputPacketHash here — candle data is large; omitted for perf.
-    },
-    gates: {
-      gates: proposalGates,
-      anyRefusal: false, // winner passed all halting gates
-      refusalCodes: [],
-    },
-    decision: "approved",
-    decisionReason: decision.reasoning ?? "AI proposed trade; all gates passed.",
-  });
-
   const proposedResult = transitionSignal("proposed", "proposed", {
     actor: "engine",
     reason: "AI proposed entry (synthetic origin)",
@@ -3163,7 +2556,7 @@ async function runTickForUser(
       size_usd: sizeUsd,
       size_pct: sizePct,
       ai_reasoning: decision.reasoning ?? "",
-      ai_model: TECHNICAL_ANALYST_MODEL,
+      ai_model: "google/gemini-3-flash-preview",
       strategy_id: strategyId,
       strategy_version: strategyVersion,
       direction_basis: directionBasis,
@@ -3212,9 +2605,6 @@ async function runTickForUser(
       // filters expires_at > NOW(), so stale signals from before a pause
       // window are automatically invisible on resume.
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-      // Replayable decision packet — non-sensitive metadata only.
-      // signalId is set to "pending" here; updated below with the real id.
-      replay_packet: replayPacketPayload,
     })
     .select()
     .single();
@@ -3239,23 +2629,6 @@ async function runTickForUser(
       expiredCount,
       perSymbol,
     };
-  }
-
-  // ── Patch replay packet with the real signal id ───────────────
-  // The packet was written with signalId="pending" at INSERT time because
-  // the DB-generated UUID wasn't known yet. Now that we have the real id
-  // we patch it in-place. Best-effort — a failure here never blocks the tick.
-  if (signalRow?.id) {
-    const patchedPacket = { ...replayPacketPayload, signalId: signalRow.id };
-    admin
-      .from("trade_signals")
-      .update({ replay_packet: patchedPacket })
-      .eq("id", signalRow.id)
-      .then(({ error: patchErr }) => {
-        if (patchErr) {
-          log("warn", "replay_packet_id_patch_failed", { fn: "signal-engine", signalId: signalRow.id, err: patchErr.message });
-        }
-      });
   }
 
   // ── Stage 6: auto-execute if autonomy allows ─────────────────

@@ -71,23 +71,42 @@ export function scoreFromPerformance(
   return avgPct * wr;
 }
 
+function getStratParam(s: RouterStrategy, key: string): number | undefined {
+  const p = s.params?.find((entry) => entry.key === key);
+  return p !== undefined ? Number(p.value) : undefined;
+}
+
 export function selectStrategy(
   regime: RegimeLabel,
   side: Side,
   strategies: RouterStrategy[],
   performance: RouterPerformance[] = [],
+  rsiNow?: number,
 ): RouterDecision {
   const perfById = new Map(performance.map((p) => [p.strategy_id, p]));
 
-  const eligible = strategies.filter(
-    (s) =>
-      s.status === "approved" &&
-      !s.auto_paused_at &&
-      Array.isArray(s.regime_affinity) &&
-      s.regime_affinity.includes(regime) &&
-      Array.isArray(s.side_capability) &&
-      s.side_capability.includes(side),
-  );
+  const eligible = strategies.filter((s) => {
+    if (s.status !== "approved") return false;
+    if (s.auto_paused_at) return false;
+    if (!Array.isArray(s.regime_affinity) || !s.regime_affinity.includes(regime)) return false;
+    if (!Array.isArray(s.side_capability) || !s.side_capability.includes(side)) return false;
+
+    if (rsiNow !== undefined) {
+      // RSI ceiling: trend-following strategies shouldn't enter when the move is
+      // already overextended. Prevents late longs at RSI 75+.
+      const rsiMax = getStratParam(s, "rsi_max");
+      if (rsiMax !== undefined && rsiNow > rsiMax) return false;
+
+      // Trending RSI short minimum: vwap-revert is only eligible for a
+      // trending_up/breakout fade when RSI is truly extended (≥75), not just elevated.
+      if ((regime === "trending_up" || regime === "breakout") && side === "short") {
+        const rsiTrendingMin = getStratParam(s, "rsi_trending_short_min");
+        if (rsiTrendingMin !== undefined && rsiNow < rsiTrendingMin) return false;
+      }
+    }
+
+    return true;
+  });
 
   if (eligible.length === 0) {
     return {

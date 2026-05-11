@@ -36,6 +36,9 @@ export interface RegimeResult {
   pullback: boolean;
   rsiNow: number;
   rsiPrev: number;
+  rsiFast: number;          // RSI(7) — faster mean-reversion timing (Connors dual-RSI)
+  rsiDivergence: boolean;   // price higher high + RSI lower high = momentum exhaustion signal
+  trendingRsiExtreme: boolean; // trending_up/breakout + rsiNow ≥ 75 = fade-the-extension signal
   emaFast: number;
   emaSlow: number;
   slowRising: boolean;
@@ -113,6 +116,9 @@ export function computeRegime(
     pullback: false,
     rsiNow: 50,
     rsiPrev: 50,
+    rsiFast: 50,
+    rsiDivergence: false,
+    trendingRsiExtreme: false,
     emaFast: 0,
     emaSlow: 0,
     slowRising: false,
@@ -172,12 +178,37 @@ export function computeRegime(
   const rsiNow = rsi(closes, rsiP);
   const rsiPrev = rsi(closes.slice(0, -1), rsiP);
 
+  // Fast RSI (period 7) for mean-reversion entry timing — Connors/Williams dual-RSI approach.
+  // Fast RSI identifies the extreme more crisply than the standard 14-period.
+  const rsiFast = rsi(closes, 7);
+
+  // RSI divergence: price makes a higher high over the last 3 bars but RSI makes a lower
+  // high — classic momentum exhaustion. Only meaningful in trending_up/breakout.
+  const rsiDivergence = (() => {
+    if (candles.length < 6) return false;
+    const recentHighs = candles.slice(-3).map((c) => c.h);
+    const priorHighs  = candles.slice(-6, -3).map((c) => c.h);
+    const priceHigherHigh = Math.max(...recentHighs) > Math.max(...priorHighs);
+    const rsiLowerHigh    = rsiNow < rsi(closes.slice(0, -3), rsiP);
+    return priceHigherHigh && rsiLowerHigh &&
+      (regime === "trending_up" || regime === "breakout");
+  })();
+
+  // Trend running hot: fade-the-extension signal. RSI ≥ 75 in a trending or breakout
+  // market means the move is overextended — a measured pullback to the slow EMA is probable.
+  const trendingRsiExtreme =
+    (regime === "trending_up" || regime === "breakout") && rsiNow >= 75;
+
   // Mean-reversion boost: range regime + RSI at extremes signals a high-quality
   // fade opportunity. Overbought (RSI ≥ 70) near resistance → short fade.
   // Oversold (RSI ≤ 30) near support → long fade. Without RSI extreme, no boost.
   const rsiOverbought = rsiNow >= 70;
   const rsiOversold = rsiNow <= 30;
   const rangeReversionBoost = regime === "range" && (rsiOverbought || rsiOversold) ? 0.15 : 0;
+
+  // Counter-trend fade boost: a trending market at RSI extreme is a valid (if smaller)
+  // short opportunity. Less boost than rangeReversionBoost — you're fighting the trend.
+  const trendingFadeBoost = trendingRsiExtreme ? 0.1 : 0;
 
   // Pullback detection (buy-the-dip inside an uptrend) — uses strategy params.
   const emaFastArr = ema(closes, fastP);
@@ -202,7 +233,8 @@ export function computeRegime(
         trendBoost +
         volBoost +
         pullbackBoost +
-        rangeReversionBoost,
+        rangeReversionBoost +
+        trendingFadeBoost,
     ),
   );
 
@@ -234,6 +266,9 @@ export function computeRegime(
     pullback,
     rsiNow,
     rsiPrev,
+    rsiFast,
+    rsiDivergence,
+    trendingRsiExtreme,
     emaFast,
     emaSlow,
     slowRising,
