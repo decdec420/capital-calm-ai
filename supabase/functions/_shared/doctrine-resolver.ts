@@ -66,16 +66,19 @@ export interface ResolvedDoctrine {
  */
 export const DOCTRINE_FALLBACK: DoctrineSettingsRow = {
   starting_equity_usd: null,
-  max_order_pct: 0.001,
-  max_order_abs_cap: 1,
-  max_order_abs_floor: 0.25,
-  daily_loss_pct: 0.02,
-  max_trades_per_day: 5,
-  floor_pct: 0.80,
-  floor_abs_min: 5,
+  // 25% of equity per order — auto-scales: $50 → $12.50, $200 → $50, $1k → $250.
+  max_order_pct: 0.25,
+  // High abs cap so max_order_pct does the work at any account size.
+  max_order_abs_cap: 1000,
+  max_order_abs_floor: 1.00,
+  daily_loss_pct: 0.05,
+  max_trades_per_day: 10,
+  // Kill-switch fires at 65% of starting equity (max 35% drawdown).
+  floor_pct: 0.65,
+  floor_abs_min: 8,
   consecutive_loss_limit: 4,
   loss_cooldown_minutes: 30,
-  risk_per_trade_pct: 0.01,
+  risk_per_trade_pct: 0.02,
   scan_interval_seconds: 300,
   max_correlated_positions: 3,
 };
