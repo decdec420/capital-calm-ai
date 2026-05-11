@@ -3,6 +3,9 @@
 // market context (regime + recent candles), and returns a 2-3 sentence brief.
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import { guardAiOutput, buildConservativeFallback, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
+import { buildAiProvenance, MODEL_REGISTRY } from "../_shared/ai-provenance.ts";
+import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
 
 
 Deno.serve(async (req) => {
@@ -134,9 +137,40 @@ ${(closedTrades ?? []).map((t: any) => `- ${t.side} ${t.symbol} ${t.outcome} ${t
     }
 
     const json = await aiResp.json();
-    const brief = json.choices?.[0]?.message?.content ?? "(no brief generated)";
+    const rawBrief: string = json.choices?.[0]?.message?.content ?? "(no brief generated)";
 
-    return new Response(JSON.stringify({ brief }), {
+    // Guard the AI text output before returning to client.
+    const guardResult = guardAiOutput(rawBrief, { decisionType: "market_brief" });
+    let brief: string;
+    let validationStatus: "passed" | "fallback";
+    let fallbackUsed: boolean;
+    let fallbackReason: string | undefined;
+
+    if (guardResult.decision === "reject") {
+      const fb = buildConservativeFallback(guardResult.reason);
+      brief = `(Brief unavailable — output validation failed. Check market data manually. ${sanitizeForStorage(guardResult.reason)})`;
+      validationStatus = "fallback";
+      fallbackUsed = true;
+      fallbackReason = fb.reason;
+      // Emit incident event — do not await (non-fatal)
+      emitAiGuardEvent(admin, userId, "market-brief", guardResult, "market_brief").catch(() => {});
+    } else {
+      brief = (guardResult.sanitizedOutput as string) ?? rawBrief;
+      validationStatus = "passed";
+      fallbackUsed = false;
+    }
+
+    const aiProvenance = buildAiProvenance({
+      decisionType: "market_brief",
+      provider: "lovable_gateway",
+      model: MODEL_REGISTRY.MARKET_BRIEF,
+      promptKey: "MARKET_BRIEF",
+      validationStatus,
+      fallbackUsed,
+      fallbackReason,
+    });
+
+    return new Response(JSON.stringify({ brief, aiProvenance }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {

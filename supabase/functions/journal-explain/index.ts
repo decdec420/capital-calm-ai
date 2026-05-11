@@ -2,6 +2,9 @@
 // journal entry and writes it back to the row.
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import { guardAiOutput, buildConservativeFallback, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
+import { buildAiProvenance, MODEL_REGISTRY } from "../_shared/ai-provenance.ts";
+import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
 
 
 Deno.serve(async (req) => {
@@ -107,11 +110,45 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
     }
 
     const json = await aiResp.json();
-    const explanation = json.choices?.[0]?.message?.content ?? "(no explanation)";
+    const rawExplanation: string = json.choices?.[0]?.message?.content ?? "(no explanation)";
 
-    await admin.from("journal_entries").update({ llm_explanation: explanation }).eq("id", entryId).eq("user_id", userId);
+    // Guard the AI text output before storing or returning.
+    const guardResult = guardAiOutput(rawExplanation, { decisionType: "journal_explain" });
+    let explanation: string;
+    let validationStatus: "passed" | "fallback";
+    let fallbackUsed: boolean;
+    let fallbackReason: string | undefined;
 
-    return new Response(JSON.stringify({ explanation }), {
+    if (guardResult.decision === "reject") {
+      const fb = buildConservativeFallback(guardResult.reason);
+      explanation = `(Explanation unavailable — output validation failed. Review the journal entry manually. ${sanitizeForStorage(guardResult.reason)})`;
+      validationStatus = "fallback";
+      fallbackUsed = true;
+      fallbackReason = fb.reason;
+      // Emit incident event — do not store raw rejected output
+      emitAiGuardEvent(admin, userId, "journal-explain", guardResult, "journal_explain").catch(() => {});
+    } else {
+      explanation = (guardResult.sanitizedOutput as string) ?? rawExplanation;
+      validationStatus = "passed";
+      fallbackUsed = false;
+    }
+
+    const aiProvenance = buildAiProvenance({
+      decisionType: "journal_explain",
+      provider: "lovable_gateway",
+      model: MODEL_REGISTRY.JOURNAL_EXPLAIN,
+      promptKey: "JOURNAL_EXPLAIN",
+      validationStatus,
+      fallbackUsed,
+      fallbackReason,
+    });
+
+    // Persist to journal_entries.llm_explanation only when safe (no rejected output stored raw).
+    if (!fallbackUsed) {
+      await admin.from("journal_entries").update({ llm_explanation: explanation }).eq("id", entryId).eq("user_id", userId);
+    }
+
+    return new Response(JSON.stringify({ explanation, aiProvenance }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {

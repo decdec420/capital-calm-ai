@@ -26,6 +26,8 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 import { log } from "../_shared/logger.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import { guardAiOutput, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
+import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
 
 
 // Flash for latency — Bobby runs every 60 seconds. He doesn't need deep
@@ -739,7 +741,15 @@ async function runJessicaForUser(
 
     if (toolCalls.length === 0) {
       jessicaCbSuccess();
-      finalDecision = assistantContent || "Sitting — no action warranted this tick.";
+      const rawDecision = assistantContent || "Sitting — no action warranted this tick.";
+      // Guard Bobby's final decision text before storing/logging.
+      const guardResult = guardAiOutput(rawDecision, { agentId: "bobby", decisionType: "bobby_orchestration" });
+      if (guardResult.decision === "reject") {
+        finalDecision = `(Decision summary unavailable — output validation failed. ${sanitizeForStorage(guardResult.reason)})`;
+        emitAiGuardEvent(admin, userId, "jessica", guardResult, "bobby_orchestration").catch(() => {});
+      } else {
+        finalDecision = (guardResult.sanitizedOutput as string) ?? rawDecision;
+      }
       break;
     }
 

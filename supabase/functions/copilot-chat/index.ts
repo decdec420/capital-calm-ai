@@ -15,6 +15,8 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { DESK_TOOLS, executeTool } from "../_shared/desk-tools.ts";
 import { buildEventModeContextInstruction } from "./event-mode-context.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import { guardAiOutput, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
+import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
 
 
 interface ChatMessage {
@@ -623,11 +625,20 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
         },
         async flush() {
           if (assistantBuffer.trim().length > 0) {
+            // Guard before persisting — never store raw rejected output.
+            const guardResult = guardAiOutput(assistantBuffer, { decisionType: "copilot_chat" });
+            let contentToStore: string;
+            if (guardResult.decision === "reject") {
+              contentToStore = `(Response unavailable — output validation failed. ${sanitizeForStorage(guardResult.reason)})`;
+              emitAiGuardEvent(rlAdmin, userId, "copilot-chat", guardResult, "copilot_chat").catch(() => {});
+            } else {
+              contentToStore = (guardResult.sanitizedOutput as string) ?? assistantBuffer;
+            }
             const { error } = await supabase.from("chat_messages").insert({
               conversation_id: conversationId,
               user_id: userId,
               role: "assistant",
-              content: assistantBuffer,
+              content: contentToStore,
             });
             if (error) console.error("persist assistant message failed", error);
           }

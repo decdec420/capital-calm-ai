@@ -25,7 +25,11 @@ export type AiDecisionType =
   | "experiment_proposal"      // propose-experiment: parameter hypothesis
   | "daily_brief"              // daily-brief: morning digest
   | "journal_explain"          // journal-explain: trade narrative
-  | "outcome_enrichment";      // outcome-enrichment: deterministic math
+  | "outcome_enrichment"       // outcome-enrichment: deterministic math
+  | "market_brief"             // market-brief: terse per-session trader brief
+  | "signal_explain"           // signal-explain: deep-dive signal rationale
+  | "copilot_chat"             // copilot-chat: Wags operator assistant turn
+  | "bobby_orchestration";     // jessica: Bobby autonomous desk tick
 
 // ── Provider / model registry ─────────────────────────────────────────────────
 
@@ -54,6 +58,11 @@ export const PROMPT_REGISTRY = {
   // Briefs + explain
   DAILY_BRIEF:          { id: "daily-brief",           version: "brief-v1"         },
   JOURNAL_EXPLAIN:      { id: "journal-explain",       version: "explain-v1"       },
+  // Lower-risk surfaces
+  MARKET_BRIEF:         { id: "market-brief",          version: "market-brief-v1"  },
+  SIGNAL_EXPLAIN:       { id: "signal-explain",        version: "explain-v1"       },
+  COPILOT_CHAT:         { id: "copilot-chat",          version: "wags-v1"          },
+  BOBBY_ORCHESTRATION:  { id: "bobby-orchestration",   version: "bobby-v1"         },
   // Deterministic
   OUTCOME_ENRICHMENT:   { id: "outcome-enrichment",    version: "none"             },
 } as const;
@@ -62,16 +71,20 @@ export type PromptKey = keyof typeof PROMPT_REGISTRY;
 
 /** Registered model identifiers per role (no credentials). */
 export const MODEL_REGISTRY = {
-  TAYLOR:           "google/gemini-3-flash-preview",
-  BOBBY:            "anthropic/claude-sonnet-4-6",
-  HALL:             "google/gemini-2.5-flash",
-  BILL:             "google/gemini-2.5-flash",
-  MAFEE:            "google/gemini-2.5-flash-lite",
-  WENDY:            "anthropic/claude-sonnet-4-6",
-  EXPERIMENT:       "google/gemini-3-flash-preview",
-  DAILY_BRIEF:      "google/gemini-2.5-flash",
-  JOURNAL_EXPLAIN:  "google/gemini-3-flash-preview",
-  NONE:             "none",
+  TAYLOR:              "google/gemini-3-flash-preview",
+  BOBBY:               "anthropic/claude-sonnet-4-6",
+  HALL:                "google/gemini-2.5-flash",
+  BILL:                "google/gemini-2.5-flash",
+  MAFEE:               "google/gemini-2.5-flash-lite",
+  WENDY:               "anthropic/claude-sonnet-4-6",
+  EXPERIMENT:          "google/gemini-3-flash-preview",
+  DAILY_BRIEF:         "google/gemini-2.5-flash",
+  JOURNAL_EXPLAIN:     "google/gemini-3-flash-preview",
+  MARKET_BRIEF:        "google/gemini-2.5-flash-lite",
+  SIGNAL_EXPLAIN:      "google/gemini-3-flash-preview",
+  WAGS:                "google/gemini-3-flash-preview",
+  BOBBY_ORCHESTRATION: "google/gemini-2.0-flash-001",
+  NONE:                "none",
 } as const;
 
 export type ModelKey = keyof typeof MODEL_REGISTRY;
@@ -86,6 +99,10 @@ export const SCHEMA_REGISTRY: Record<AiDecisionType, string> = {
   daily_brief:          "daily_brief-v1",
   journal_explain:      "journal_explain-v1",
   outcome_enrichment:   "none",
+  market_brief:         "market_brief-v1",
+  signal_explain:       "signal_explain-v1",
+  copilot_chat:         "copilot_chat-v1",
+  bobby_orchestration:  "none",
 };
 
 /** Validator name for each decision type (links to validation logic). */
@@ -98,6 +115,10 @@ export const VALIDATOR_REGISTRY: Record<AiDecisionType, string> = {
   daily_brief:          "parse-daily-brief",
   journal_explain:      "parse-journal-explain",
   outcome_enrichment:   "deterministic",
+  market_brief:         "parse-market-brief",
+  signal_explain:       "parse-signal-explain",
+  copilot_chat:         "parse-copilot-chat",
+  bobby_orchestration:  "deterministic",
 };
 
 // ── Provenance object ─────────────────────────────────────────────────────────
