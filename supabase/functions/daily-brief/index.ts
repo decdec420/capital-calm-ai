@@ -21,6 +21,15 @@
 import { SYMBOL_WHITELIST } from "../_shared/doctrine.ts";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import {
+  buildAiProvenance,
+  MODEL_REGISTRY,
+  type AiProvenance,
+} from "../_shared/ai-provenance.ts";
+import {
+  guardAiOutput,
+  sanitizeForStorage,
+} from "../_shared/ai-output-guard.ts";
 
 
 const BRIEF_MODEL = "google/gemini-2.5-flash";
@@ -33,6 +42,7 @@ interface BriefResult {
   sessionBias: "risk_on" | "risk_off" | "neutral" | "caution";
   keyLevels: Record<string, { support: number | null; resistance: number | null }>;
   watchSymbols: string[];
+  aiProvenance: AiProvenance;
   cautionFlags: string[];
   aiModel: string;
 }
@@ -226,7 +236,34 @@ ${cautionSet.size === 0 ? "- (none)" : Array.from(cautionSet).map((f) => `- ${f}
   }
 
   const json = await aiResp.json();
-  const briefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
+  const rawBriefText = json.choices?.[0]?.message?.content?.trim() ?? "(no brief generated)";
+
+  // Guard the AI text output before storing.
+  const guardResult = guardAiOutput(rawBriefText, { agentId: "hall", decisionType: "daily_brief" });
+  let briefText: string;
+  let validationStatus: "passed" | "fallback";
+  let fallbackUsed: boolean;
+  let fallbackReason: string | undefined;
+  if (guardResult.decision === "reject") {
+    briefText = `(Brief unavailable — AI output validation failed. Check market data manually. ${sanitizeForStorage(guardResult.reason)})`;
+    validationStatus = "fallback";
+    fallbackUsed = true;
+    fallbackReason = sanitizeForStorage(guardResult.reason);
+  } else {
+    briefText = (guardResult.sanitizedOutput as string) ?? rawBriefText;
+    validationStatus = "passed";
+    fallbackUsed = false;
+  }
+
+  const aiProvenance = buildAiProvenance({
+    decisionType: "daily_brief",
+    provider: "lovable_gateway",
+    model: MODEL_REGISTRY.DAILY_BRIEF,
+    promptKey: "DAILY_BRIEF",
+    validationStatus,
+    fallbackUsed,
+    fallbackReason,
+  });
 
   return {
     briefText,
@@ -235,6 +272,7 @@ ${cautionSet.size === 0 ? "- (none)" : Array.from(cautionSet).map((f) => `- ${f}
     watchSymbols,
     cautionFlags: Array.from(cautionSet),
     aiModel: BRIEF_MODEL,
+    aiProvenance,
   };
 }
 
@@ -255,6 +293,7 @@ async function upsertBrief(
         watch_symbols: result.watchSymbols,
         caution_flags: result.cautionFlags,
         ai_model: result.aiModel,
+        ai_provenance: result.aiProvenance,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,brief_date" },

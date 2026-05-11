@@ -1,6 +1,14 @@
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 import { buildReplayPacketOutcomePatch } from "../_shared/outcome-enrichment.ts";
+import {
+  buildAiProvenance,
+  MODEL_REGISTRY,
+} from "../_shared/ai-provenance.ts";
+import {
+  guardAiOutput,
+  sanitizeForStorage,
+} from "../_shared/ai-output-guard.ts";
 // ============================================================
 // post-trade-learn — automatic per-trade learning artifact
 // ------------------------------------------------------------
@@ -427,8 +435,57 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
   try {
     analysis = JSON.parse(args);
   } catch {
+    log("warn", "trade_coach_json_parse_failed", { fn: "post-trade-learn", tradeId: t.id });
     return;
   }
+
+  // Guard AI output before using any field from it.
+  const coachGuard = guardAiOutput(analysis, { agentId: "wendy", decisionType: "post_trade_learning" });
+  if (coachGuard.decision === "reject") {
+    log("warn", "trade_coach_output_rejected", {
+      fn: "post-trade-learn",
+      tradeId: t.id,
+      reason: coachGuard.reason,
+      unsafeIntents: coachGuard.unsafeIntents.length,
+      protectedActions: coachGuard.protectedActions.length,
+    });
+    // Do not store rejected output. Build provenance recording the failure and return.
+    const failedProvenance = buildAiProvenance({
+      decisionType: "post_trade_learning",
+      provider: "lovable_gateway",
+      model: MODEL_REGISTRY.WENDY,
+      promptKey: "WENDY_COACH",
+      validationStatus: "failed",
+      fallbackUsed: true,
+      fallbackReason: sanitizeForStorage(coachGuard.reason),
+    });
+    await admin.from("journal_entries").insert({
+      user_id: t.user_id,
+      kind: "learning",
+      title: `🎓 Coach: ${t.symbol} ${t.side.toUpperCase()} — validation failed (output rejected)`,
+      summary: "Trade coach output was rejected by the AI output guard. Conservative fallback applied.",
+      tags: ["trade-coach", t.symbol, "guard-rejected", "fallback"],
+      source: "trade-coach",
+      raw: {
+        tradeId: t.id,
+        source: "trade-coach",
+        aiModel: TRADE_COACH_MODEL,
+        grade: "C",
+        processVerdict: "unknown",
+        validationFailed: true,
+        ai_provenance: failedProvenance,
+      },
+    });
+    return;
+  }
+
+  const coachProvenance = buildAiProvenance({
+    decisionType: "post_trade_learning",
+    provider: "lovable_gateway",
+    model: MODEL_REGISTRY.WENDY,
+    promptKey: "WENDY_COACH",
+    validationStatus: "passed",
+  });
 
   const grade = String(analysis.entry_quality_grade ?? "C");
   const verdict = String(analysis.process_verdict ?? "");
@@ -520,6 +577,7 @@ BRAIN TRUST CONTEXT (snapshotted at signal creation — entry-time market condit
       experimentHypothesis: hasHypothesis ? hyp : null,
       experimentParameter: hasHypothesis ? param : null,
       experimentId: queuedExperimentId,
+      ai_provenance: coachProvenance,
     },
   });
 
