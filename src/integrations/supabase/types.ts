@@ -688,8 +688,6 @@ export type Database = {
           parameter: string
           priority: string
           proposed_by: string
-          source: string
-          source_recommendation_id: string | null
           status: string
           strategy_id: string | null
           symbol: string
@@ -712,8 +710,6 @@ export type Database = {
           parameter?: string
           priority?: string
           proposed_by?: string
-          source?: string
-          source_recommendation_id?: string | null
           status?: string
           strategy_id?: string | null
           symbol?: string
@@ -736,8 +732,6 @@ export type Database = {
           parameter?: string
           priority?: string
           proposed_by?: string
-          source?: string
-          source_recommendation_id?: string | null
           status?: string
           strategy_id?: string | null
           symbol?: string
