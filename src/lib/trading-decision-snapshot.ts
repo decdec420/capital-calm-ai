@@ -15,6 +15,13 @@
 import type { SystemState, EngineSnapshot, GateReason, StrategyVersion } from "./domain-types";
 import type { MarketIntelligence } from "@/hooks/useMarketIntelligence";
 import type { Alert } from "./domain-types";
+import {
+  computePortfolioRisk,
+  portfolioRiskCodeMessage,
+  PORTFOLIO_RISK_CODES,
+  type PortfolioRiskSummary,
+  type PortfolioRiskInput,
+} from "./portfolio-risk";
 
 // ─── Staleness thresholds ────────────────────────────────────────────────────
 
@@ -83,7 +90,12 @@ export interface TradingDecisionSnapshot {
   nextSafeAction: string;
   /** Timestamp this snapshot was computed (ISO). */
   computedAt: string;
+  /** Portfolio-level risk summary. Null only when portfolio risk was not provided as input. */
+  portfolioRisk: PortfolioRiskSummary | null;
 }
+
+// Re-export PortfolioRiskSummary so consumers only need one import.
+export type { PortfolioRiskSummary };
 
 // ─── Input shape ─────────────────────────────────────────────────────────────
 
@@ -92,6 +104,8 @@ export interface TradingDecisionSnapshotInput {
   marketIntelligence: MarketIntelligence[];
   strategies: StrategyVersion[];
   alerts: Alert[];
+  /** Portfolio risk inputs — open trades + account state. When omitted, portfolio risk is skipped. */
+  portfolioRiskInput?: PortfolioRiskInput;
   nowMs?: number;
 }
 
@@ -102,9 +116,9 @@ export function computeTradingDecisionSnapshot(
 ): TradingDecisionSnapshot {
   const { system, marketIntelligence, strategies, alerts } = input;
   const nowMs = input.nowMs ?? Date.now();
+  const mode = system?.mode ?? "unknown";
 
   // ── Mode ──────────────────────────────────────────────────────────────────
-  const mode = system?.mode ?? "unknown";
   const isLiveMode = mode === "live";
   const isPaperMode = mode === "paper" || mode === "research" || mode === "learning";
 
@@ -162,6 +176,11 @@ export function computeTradingDecisionSnapshot(
   const openIncidentBlocking = alerts.some(
     (a) => a.severity === "critical" && !("acknowledgedAt" in a && a.acknowledgedAt),
   );
+
+  // ── Portfolio risk ────────────────────────────────────────────────────────
+  const portfolioRisk: PortfolioRiskSummary | null = input.portfolioRiskInput
+    ? computePortfolioRisk({ ...input.portfolioRiskInput, mode, nowMs })
+    : null;
 
   // ── Transfer permission check ─────────────────────────────────────────────
   // If broker status is "disconnected" due to TRANSFER_PERMISSION_DETECTED we
@@ -313,6 +332,34 @@ export function computeTradingDecisionSnapshot(
     });
   }
 
+  // ── Portfolio risk blockers ───────────────────────────────────────────────
+  // Live mode: portfolio block codes are hard blockers that affect canTradeNow.
+  // Paper mode: portfolio block codes are shown as "medium" severity warnings —
+  //             they appear in the UI but do not prevent the bot from scanning.
+  //             Portfolio warn codes are "low" severity in both modes.
+  if (portfolioRisk) {
+    for (const code of portfolioRisk.blockCodes) {
+      blockers.push({
+        code,
+        severity: isLiveMode ? "high" : "medium",
+        message: portfolioRiskCodeMessage(code, portfolioRisk),
+        owner: "Portfolio Risk / Risk Center",
+        nextSafeAction: isLiveMode
+          ? "Reduce open exposure before opening new positions. Check Risk Center → Portfolio Risk."
+          : "Portfolio exposure is elevated. Review open positions in Risk Center → Portfolio Risk.",
+      });
+    }
+    for (const code of portfolioRisk.warningCodes) {
+      blockers.push({
+        code,
+        severity: "low",
+        message: portfolioRiskCodeMessage(code, portfolioRisk),
+        owner: "Portfolio Risk / Risk Center",
+        nextSafeAction: "Monitor exposure. Check Risk Center → Portfolio Risk for details.",
+      });
+    }
+  }
+
   // ── canTradeNow ───────────────────────────────────────────────────────────
   const tradingPaused =
     !!system?.tradingPausedUntil && Date.parse(system.tradingPausedUntil) > nowMs;
@@ -331,7 +378,12 @@ export function computeTradingDecisionSnapshot(
   // Live-mode-only hard blocks:
   const liveHardBlocked = isLiveMode && !coinbaseBrokerHealthy;
 
-  const canTradeNow = !hardBlocked && !liveHardBlocked;
+  // Portfolio hard blocks: in live mode, any portfolio block code prevents trading.
+  // In paper mode, portfolio blocks are surfaced as warnings only.
+  const portfolioLiveBlocked =
+    isLiveMode && portfolioRisk !== null && portfolioRisk.blockCodes.length > 0;
+
+  const canTradeNow = !hardBlocked && !liveHardBlocked && !portfolioLiveBlocked;
 
   // ── nextSafeAction ────────────────────────────────────────────────────────
   const nextSafeAction =
@@ -363,5 +415,6 @@ export function computeTradingDecisionSnapshot(
     blockers,
     nextSafeAction,
     computedAt: new Date(nowMs).toISOString(),
+    portfolioRisk,
   };
 }
