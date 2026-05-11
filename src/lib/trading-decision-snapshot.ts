@@ -308,7 +308,8 @@ export function computeTradingDecisionSnapshot(
       severity: "high",
       message: "There is an unacknowledged critical alert.",
       owner: "Hall / Operator",
-      nextSafeAction: "Review and acknowledge the critical alert in Alerts.",
+      nextSafeAction:
+        "Review the critical alert in Alerts. Full incident details and recovery status are visible in the Hall/Ops Timeline on the Company page.",
     });
   }
 

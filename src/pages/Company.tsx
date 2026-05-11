@@ -43,6 +43,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { OpsTimeline } from "@/components/hall/OpsTimeline";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -429,6 +430,9 @@ export default function Company() {
           <AgentCard key={agent.id} agent={agent} />
         ))}
       </div>
+
+      {/* Hall/Ops Incident Timeline */}
+      <OpsTimeline />
 
       {/* Status summary strip */}
       <div className="panel p-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground">
