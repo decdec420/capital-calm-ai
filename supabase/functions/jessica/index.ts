@@ -35,7 +35,7 @@ import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
 // output, decide what to do right now, and do it.
 // Pinned to a GA stable release (MED-1). Change only when intentionally
 // upgrading and verifying tool-call schema compatibility.
-const JESSICA_MODEL = "google/gemini-2.0-flash-001";
+const JESSICA_MODEL = "google/gemini-2.5-flash";
 // ─── AI gateway circuit breaker (MED-12) ─────────────────────────────────────
 // Jessica runs every 60 seconds. If the AI gateway is down, crashing every tick
 // wastes Deno cold-start budget and floods the error log. After 3 consecutive
