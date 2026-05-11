@@ -829,6 +829,55 @@ async function runJessicaForUser(
     console.error("[jessica] bobby_decision system_event failed (non-fatal):", e);
   }
 
+  // ── 7-day no-action alert (deduplicated to once per 24h) ─────────────
+  // If the most-recent system_event whose type is NOT 'bobby_decision' is
+  // more than 7 days old, Bobby has taken no real action in a week.
+  // Insert a warning alert so the operator knows the desk is stuck.
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: lastNonDecision } = await admin
+      .from("system_events")
+      .select("created_at")
+      .eq("user_id", userId)
+      .neq("event_type", "bobby_decision")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const lastActionAt = lastNonDecision?.created_at ?? null;
+    const isStale = !lastActionAt || lastActionAt < sevenDaysAgo;
+
+    if (isStale) {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const alertTitle = "Bobby: 7 days no action taken";
+      const { data: recentAlert } = await admin
+        .from("alerts")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("title", alertTitle)
+        .gte("created_at", oneDayAgo)
+        .limit(1)
+        .maybeSingle();
+
+      if (!recentAlert) {
+        const sinceDesc = lastActionAt
+          ? `Last non-decision event was at ${lastActionAt}.`
+          : "No non-decision system events have ever been recorded.";
+        await admin.from("alerts").insert({
+          user_id:  userId,
+          severity: "warning",
+          title:    alertTitle,
+          message:
+            `Bobby has been saying "No action" every tick for at least 7 days with no tool calls or desk actions recorded. ` +
+            sinceDesc +
+            ` This may indicate the bot is stuck, all gates are permanently blocking, or signals are never meeting entry criteria. Manual review recommended.`,
+        });
+      }
+    }
+  } catch (e) {
+    console.error("[jessica] 7-day no-action alert check failed (non-fatal):", e);
+  }
+
   log("info", "jessica_tick", { fn: "jessica", userId, actions: actionsLog.length, decision: finalDecision.slice(0, 100) });
 
   // Healthchecks.io heartbeat — set HEALTHCHECKS_JESSICA_URL env var to your
