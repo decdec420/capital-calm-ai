@@ -89,6 +89,11 @@ import {
   recordNonTrade,
   buildNonTradePacket,
 } from "../_shared/decision-memory.ts";
+import {
+  computePortfolioRisk,
+  safePortfolioRiskSummary,
+  PORTFOLIO_RISK_CODES,
+} from "../_shared/portfolio-risk.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -937,7 +942,7 @@ async function runTickForUser(
       .eq("user_id", userId),
     admin
       .from("trades")
-      .select("id,symbol,side,entry_price,size")
+      .select("id,symbol,side,entry_price,size,unrealized_pnl")
       .eq("user_id", userId)
       .eq("status", "open"),
     admin
@@ -1163,6 +1168,101 @@ async function runTickForUser(
         perSymbol: [],
       };
     }
+  }
+
+  // ── Portfolio risk gate ───────────────────────────────────────
+  // Evaluates portfolio-level exposure using the same pure logic as
+  // the frontend Risk Center (PR #48). Additive — does not replace
+  // the correlation cap or book exposure cap above.
+  //
+  // Paper mode: block codes → halt (consistent with existing gates).
+  // Live mode:  block codes → halt; unknown exposure → halt.
+  // Warn codes: captured in portfolioWarnGates for snapshot visibility
+  //             but never halt the tick on their own.
+  //
+  // Safety: no trade creation, no broker calls, no doctrine mutation.
+  const portfolioRisk = computePortfolioRisk({
+    openTrades: (openTrades ?? []).map((t: {
+      symbol: string;
+      entry_price?: number | string | null;
+      size?: number | string | null;
+      unrealized_pnl?: number | string | null;
+    }) => ({
+      symbol: t.symbol,
+      entry_price: t.entry_price ?? 0,
+      size: t.size ?? 0,
+      unrealized_pnl: t.unrealized_pnl ?? null,
+    })),
+    account: acct ? {
+      equity: acct.equity ?? 0,
+      start_of_day_equity: (acct as { start_of_day_equity?: number }).start_of_day_equity ?? acct.equity ?? 0,
+      daily_auto_execute_cap_usd: (acct as { daily_auto_execute_cap_usd?: number }).daily_auto_execute_cap_usd ?? 2,
+    } : null,
+    mode: isPaper ? "paper" : "live",
+  });
+
+  // Build gate reasons from portfolio risk codes.
+  const portfolioBlockGates: GateReason[] = portfolioRisk.blockCodes.map((code) =>
+    gate(
+      // Cast: portfolio codes are already in GATE_CODES (added PR #48).
+      code as Parameters<typeof gate>[0],
+      portfolioRisk.insufficientData && !isPaper ? "halt" : "block",
+      `Portfolio risk block: ${code}`,
+      { portfolioVerdict: portfolioRisk.verdict, code, mode: isPaper ? "paper" : "live" },
+    )
+  );
+  const portfolioWarnGates: GateReason[] = portfolioRisk.warningCodes.map((code) =>
+    gate(
+      code as Parameters<typeof gate>[0],
+      "warn",
+      `Portfolio risk warning: ${code}`,
+      { portfolioVerdict: portfolioRisk.verdict, code, mode: isPaper ? "paper" : "live" },
+    )
+  );
+
+  if (portfolioRisk.verdict === "block") {
+    const primaryCode = portfolioRisk.blockCodes[0];
+    const safeSummary = safePortfolioRiskSummary(portfolioRisk);
+    await persistSnapshot(admin, userId, {
+      gateReasons: portfolioBlockGates,
+      perSymbol: [],
+      chosenSymbol: null,
+    });
+    recordNonTrade(admin, {
+      userId,
+      reasonCode: "PORTFOLIO_RISK_BLOCK",
+      severity: "block",
+      mode: isPaper ? "paper" : "live",
+      sourceAgent: "risk",
+      blockerCodes: portfolioRisk.blockCodes,
+      replayPacket: buildNonTradePacket({
+        symbol: null,
+        regime: null,
+        setupScore: null,
+        confidence: null,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: portfolioRisk.blockCodes,
+        reason: `Portfolio risk blocked: ${primaryCode}`,
+        meta: {
+          portfolioRisk: safeSummary,
+          portfolioVerdict: portfolioRisk.verdict,
+          totalExposureUsd: portfolioRisk.totalExposureUsd,
+          openPositionCount: portfolioRisk.openPositionCount,
+          equityUsd: portfolioRisk.equityUsd,
+          blockCodes: portfolioRisk.blockCodes,
+          warningCodes: portfolioRisk.warningCodes,
+          insufficientData: portfolioRisk.insufficientData,
+          mode: isPaper ? "paper" : "live",
+        },
+      }),
+    }).catch(() => {});
+    return {
+      userId,
+      tick: "portfolio_risk_block",
+      gateReasons: portfolioBlockGates,
+      expiredCount,
+      perSymbol: [],
+    };
   }
 
   // ── Re-entry cooldown + stepped anti-tilt ─────────────────────
@@ -1882,7 +1982,9 @@ async function runTickForUser(
     });
 
     await persistSnapshot(admin, userId, {
-      gateReasons,
+      // Include portfolio warn gates so the snapshot shows any portfolio
+      // warnings that were active even when all symbols were individually skipped.
+      gateReasons: [...portfolioWarnGates, ...gateReasons],
       perSymbol,
       chosenSymbol: null,
     });
@@ -2902,6 +3004,11 @@ async function runTickForUser(
   // The winner passed all halting gates, so we surface the non-blocking
   // ones that were observed (warn/info/skip from prior checks).
   const proposalGates: Array<{ code: string; severity: "halt" | "block" | "skip" | "warn" | "info"; message: string }> = [];
+  // Portfolio warn codes are surfaced here so replay packets and the snapshot
+  // include them even when the engine proceeds to a signal proposal.
+  for (const r of portfolioWarnGates) {
+    proposalGates.push({ code: r.code, severity: "warn", message: r.message });
+  }
   for (const r of clamp.clampedBy) {
     if (r.severity !== "halt" && r.severity !== "block") {
       proposalGates.push({ code: r.code, severity: r.severity as "skip" | "warn" | "info", message: r.message });

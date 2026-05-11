@@ -41,6 +41,8 @@ export type NonTradeReasonCode =
   // AI veto paths
   | "RISK_MANAGER_VETO"        // Risk Manager (Bobby/Wags) explicitly vetoed the trade
   | "RISK_MANAGER_SKIP_TICK"   // Risk Manager unavailable — transient infra failure (was invisible)
+  // Portfolio risk blocks
+  | "PORTFOLIO_RISK_BLOCK"     // Portfolio-level risk gate blocked the decision (exposure/positions/unknown)
   // Operator action
   | "OPERATOR_REJECTED";       // Operator rejected a pending proposal (also in trade_signals)
 
@@ -102,6 +104,8 @@ export interface RecordNonTradeParams {
   setupScore?: number | null;
   blockerCodes?: string[];
   replayPacket?: NonTradeReplayPacket | null;
+  /** Override source_agent. Defaults to "signal_engine". */
+  sourceAgent?: string;
 }
 
 /**
@@ -124,7 +128,7 @@ export async function recordNonTrade(
       symbol: params.symbol ?? null,
       strategy_id: params.strategyId ?? null,
       event_type: "non_trade",
-      source_agent: "signal_engine",
+      source_agent: params.sourceAgent ?? "signal_engine",
       reason_code: params.reasonCode,
       severity: params.severity,
       mode: params.mode,
