@@ -4,6 +4,9 @@
 // don't burn credits re-explaining.
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import { guardAiOutput, buildConservativeFallback, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
+import { buildAiProvenance, MODEL_REGISTRY } from "../_shared/ai-provenance.ts";
+import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
 
 
 Deno.serve(async (req) => {
@@ -132,17 +135,50 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
     }
 
     const json = await aiResp.json();
-    const explanation = json.choices?.[0]?.message?.content ?? "(no explanation)";
+    const rawExplanation: string = json.choices?.[0]?.message?.content ?? "(no explanation)";
 
-    // Persist to context_snapshot.deep_explanation so it's free next time.
-    const newCtx = { ...ctx, deep_explanation: explanation, deep_explanation_at: new Date().toISOString() };
-    await admin
-      .from("trade_signals")
-      .update({ context_snapshot: newCtx })
-      .eq("id", signalId)
-      .eq("user_id", userId);
+    // Guard the AI text output before storing or returning.
+    const guardResult = guardAiOutput(rawExplanation, { decisionType: "signal_explain" });
+    let explanation: string;
+    let validationStatus: "passed" | "fallback";
+    let fallbackUsed: boolean;
+    let fallbackReason: string | undefined;
 
-    return new Response(JSON.stringify({ explanation, cached: false }), {
+    if (guardResult.decision === "reject") {
+      const fb = buildConservativeFallback(guardResult.reason);
+      explanation = `(Explanation unavailable — output validation failed. Review signal data manually. ${sanitizeForStorage(guardResult.reason)})`;
+      validationStatus = "fallback";
+      fallbackUsed = true;
+      fallbackReason = fb.reason;
+      // Emit incident event — do not store raw rejected output
+      emitAiGuardEvent(admin, userId, "signal-explain", guardResult, "signal_explain").catch(() => {});
+    } else {
+      explanation = (guardResult.sanitizedOutput as string) ?? rawExplanation;
+      validationStatus = "passed";
+      fallbackUsed = false;
+    }
+
+    const aiProvenance = buildAiProvenance({
+      decisionType: "signal_explain",
+      provider: "lovable_gateway",
+      model: MODEL_REGISTRY.SIGNAL_EXPLAIN,
+      promptKey: "SIGNAL_EXPLAIN",
+      validationStatus,
+      fallbackUsed,
+      fallbackReason,
+    });
+
+    // Persist to context_snapshot.deep_explanation only when safe (no rejected output stored raw).
+    if (!fallbackUsed) {
+      const newCtx = { ...ctx, deep_explanation: explanation, deep_explanation_at: new Date().toISOString() };
+      await admin
+        .from("trade_signals")
+        .update({ context_snapshot: newCtx })
+        .eq("id", signalId)
+        .eq("user_id", userId);
+    }
+
+    return new Response(JSON.stringify({ explanation, cached: false, aiProvenance }), {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   } catch (e) {
