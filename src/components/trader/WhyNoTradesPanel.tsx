@@ -13,6 +13,7 @@ import { useRelativeTime } from "@/hooks/useRelativeTime";
 import {
   Activity,
   AlertTriangle,
+  BarChart2,
   Bot,
   Brain,
   CheckCircle2,
@@ -28,7 +29,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import type { BlockerEntry } from "@/lib/trading-decision-snapshot";
+import type { BlockerEntry, PortfolioRiskSummary } from "@/lib/trading-decision-snapshot";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -126,6 +127,72 @@ function BlockerCard({ blocker }: { blocker: BlockerEntry }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── portfolio risk section ───────────────────────────────────────────────────
+
+function PortfolioRiskSection({ risk }: { risk: PortfolioRiskSummary }) {
+  const verdictLabel =
+    risk.verdict === "block" ? "Blocked" : risk.verdict === "warn" ? "Warning" : "Clear";
+
+  return (
+    <Section title="Portfolio Risk" defaultOpen={risk.verdict !== "clear"}>
+      <Row
+        icon={<BarChart2 className="h-3.5 w-3.5" />}
+        label="Verdict"
+        value={verdictLabel}
+        ok={risk.verdict === "clear"}
+        unknown={risk.insufficientData && risk.verdict === "clear"}
+        linkTo="/risk"
+      />
+      <Row
+        icon={<Activity className="h-3.5 w-3.5" />}
+        label="Open positions"
+        value={String(risk.openPositionCount)}
+        ok={risk.openPositionCount < 2}
+        unknown={false}
+        linkTo="/risk"
+      />
+      {risk.equityUsd !== null && (
+        <Row
+          icon={<ShieldAlert className="h-3.5 w-3.5" />}
+          label="Total exposure"
+          value={
+            risk.equityUsd > 0
+              ? `$${risk.totalExposureUsd.toFixed(2)} (${((risk.totalExposureUsd / risk.equityUsd) * 100).toFixed(1)}%)`
+              : `$${risk.totalExposureUsd.toFixed(2)}`
+          }
+          ok={risk.totalExposureUsd / (risk.equityUsd || 1) < 0.3}
+          linkTo="/risk"
+        />
+      )}
+      {risk.correlatedExposure
+        .filter((g) => g.activeSymbols.length > 0)
+        .map((g) => (
+          <Row
+            key={g.group}
+            icon={<Database className="h-3.5 w-3.5" />}
+            label={`${g.group} (${g.activeSymbols.join(", ")})`}
+            value={`$${g.totalNotionalUsd.toFixed(2)}`}
+            ok={risk.equityUsd === null || g.totalNotionalUsd / (risk.equityUsd || 1) < 0.25}
+            linkTo="/risk"
+          />
+        ))}
+      {risk.drawdownPct !== null && (
+        <Row
+          icon={<Clock className="h-3.5 w-3.5" />}
+          label="Intra-day drawdown"
+          value={`${(risk.drawdownPct * 100).toFixed(2)}%`}
+          ok={risk.drawdownPct >= -0.03}
+        />
+      )}
+      {risk.insufficientData && (
+        <div className="text-[10px] text-muted-foreground px-1 py-0.5">
+          Account state unavailable — exposure data incomplete.
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -279,6 +346,11 @@ export function WhyNoTradesPanel() {
             linkTo="/risk"
           />
         </Section>
+
+        {/* Portfolio risk section */}
+        {snapshot.portfolioRisk && (
+          <PortfolioRiskSection risk={snapshot.portfolioRisk} />
+        )}
 
         {/* Connectivity section */}
         <Section title="Connectivity" defaultOpen={false}>

@@ -24,19 +24,166 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, ShieldAlert, ShieldCheck, Trash2, Users2, X, Zap } from "lucide-react";
+import { BarChart2, Plus, ShieldAlert, ShieldCheck, Trash2, Users2, X, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useGuardrails, type NewGuardrailInput } from "@/hooks/useGuardrails";
 import { useSystemState } from "@/hooks/useSystemState";
+import { useTradingDecisionSnapshot } from "@/hooks/useTradingDecisionSnapshot";
 import type { RiskGuardrail, RiskLevel } from "@/lib/domain-types";
+import type { PortfolioRiskSummary } from "@/lib/portfolio-risk";
+import {
+  MAX_TOTAL_EXPOSURE_PCT_WARN,
+  MAX_TOTAL_EXPOSURE_PCT_BLOCK,
+  MAX_SYMBOL_EXPOSURE_PCT_BLOCK,
+  CORRELATED_EXPOSURE_PCT_BLOCK,
+  MAX_OPEN_POSITIONS_BLOCK,
+} from "@/lib/portfolio-risk";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 type GuardrailFilter = "all" | "blocked" | "caution";
 
+// ─── Portfolio Risk Panel ─────────────────────────────────────────────────────
+
+function PortfolioRiskPanel({ risk, mode }: { risk: PortfolioRiskSummary; mode: string }) {
+  const isLive = mode === "live";
+  const verdictTone =
+    risk.verdict === "block"
+      ? "text-status-blocked"
+      : risk.verdict === "warn"
+        ? "text-status-caution"
+        : "text-status-safe";
+  const verdictLabel =
+    risk.verdict === "block" ? "Blocked" : risk.verdict === "warn" ? "Warning" : "Clear";
+
+  const equityUsd = risk.equityUsd ?? 0;
+  const pct = (n: number, d = equityUsd) =>
+    d > 0 ? ` (${((n / d) * 100).toFixed(1)}%)` : "";
+
+  return (
+    <div className="panel p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <BarChart2 className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">Portfolio Risk</span>
+        </div>
+        <span className={cn("text-xs font-semibold", verdictTone)}>{verdictLabel}</span>
+      </div>
+
+      {risk.insufficientData && (
+        <p className="text-xs text-muted-foreground italic">
+          Account state unavailable — exposure data incomplete.
+          {isLive && " Live mode: new entries blocked."}
+        </p>
+      )}
+
+      {/* Exposure summary */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="space-y-0.5">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total exposure</div>
+          <div className={cn("font-medium", risk.totalExposureUsd / (equityUsd || 1) >= MAX_TOTAL_EXPOSURE_PCT_BLOCK ? "text-status-blocked" : risk.totalExposureUsd / (equityUsd || 1) >= MAX_TOTAL_EXPOSURE_PCT_WARN ? "text-status-caution" : "text-foreground")}>
+            ${risk.totalExposureUsd.toFixed(2)}{pct(risk.totalExposureUsd)}
+          </div>
+        </div>
+        <div className="space-y-0.5">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Open positions</div>
+          <div className={cn("font-medium", risk.openPositionCount >= MAX_OPEN_POSITIONS_BLOCK ? "text-status-blocked" : risk.openPositionCount >= 2 ? "text-status-caution" : "text-foreground")}>
+            {risk.openPositionCount}
+          </div>
+        </div>
+        {risk.equityUsd !== null && (
+          <div className="space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Equity</div>
+            <div className="font-medium text-foreground">${risk.equityUsd.toFixed(2)}</div>
+          </div>
+        )}
+        {risk.drawdownPct !== null && (
+          <div className="space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Intra-day drawdown</div>
+            <div className={cn("font-medium", risk.drawdownPct < -0.03 ? "text-status-caution" : "text-foreground")}>
+              {(risk.drawdownPct * 100).toFixed(2)}%
+            </div>
+          </div>
+        )}
+        {risk.dailyRiskBudgetRemaining !== null && (
+          <div className="space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Daily budget remaining</div>
+            <div className="font-medium text-foreground">${risk.dailyRiskBudgetRemaining.toFixed(2)}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Exposure by symbol */}
+      {risk.exposureBySymbol.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">By symbol</div>
+          {risk.exposureBySymbol.map((sym) => {
+            const symPct = equityUsd > 0 ? sym.notionalUsd / equityUsd : 0;
+            return (
+              <div key={sym.symbol} className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground font-mono">{sym.symbol}</span>
+                <div className="flex items-center gap-2">
+                  <span className={cn("font-medium tabular-nums", symPct >= MAX_SYMBOL_EXPOSURE_PCT_BLOCK ? "text-status-blocked" : symPct >= 0.2 ? "text-status-caution" : "text-foreground")}>
+                    ${sym.notionalUsd.toFixed(2)}{pct(sym.notionalUsd)}
+                  </span>
+                  <span className="text-muted-foreground">× {sym.openPositionCount}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Correlated group exposure */}
+      {risk.correlatedExposure.filter((g) => g.activeSymbols.length > 0).map((g) => {
+        const grpPct = equityUsd > 0 ? g.totalNotionalUsd / equityUsd : 0;
+        return (
+          <div key={g.group} className="space-y-1">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Correlated: {g.group}
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">{g.activeSymbols.join(", ")}</span>
+              <span className={cn("font-medium tabular-nums", grpPct >= CORRELATED_EXPOSURE_PCT_BLOCK ? "text-status-blocked" : grpPct >= 0.25 ? "text-status-caution" : "text-foreground")}>
+                ${g.totalNotionalUsd.toFixed(2)}{pct(g.totalNotionalUsd)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Warning / block codes */}
+      {(risk.warningCodes.length > 0 || risk.blockCodes.length > 0) && (
+        <div className="space-y-1 border-t border-border/50 pt-2">
+          {risk.blockCodes.map((code) => (
+            <div key={code} className="flex items-start gap-1.5 text-xs text-status-blocked">
+              <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{code.replace("PORTFOLIO_", "")}</span>
+            </div>
+          ))}
+          {risk.warningCodes.map((code) => (
+            <div key={code} className="flex items-start gap-1.5 text-xs text-status-caution">
+              <ShieldAlert className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{code.replace("PORTFOLIO_", "")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Paper vs live explanation */}
+      <div className="border-t border-border/50 pt-2 text-[10px] text-muted-foreground">
+        {isLive
+          ? "Live mode: portfolio blocks hard-prevent new entries. Unknown exposure blocks all entries."
+          : "Paper mode: portfolio blocks show as warnings — bot continues scanning but exposure is elevated."}
+      </div>
+    </div>
+  );
+}
+
 export default function RiskCenter() {
   const { guardrails, loading, create, update, remove } = useGuardrails();
   const { data: system, update: updateSystem } = useSystemState();
+  const { snapshot: decisionSnapshot } = useTradingDecisionSnapshot();
   const [newOpen, setNewOpen] = useState(false);
   const [editing, setEditing] = useState<RiskGuardrail | null>(null);
   const [killOpen, setKillOpen] = useState(false);
@@ -46,6 +193,7 @@ export default function RiskCenter() {
   const caution = guardrails.filter((g) => g.level === "caution").length;
   const snapshot = system?.lastEngineSnapshot ?? null;
   const lastGateReasons = snapshot?.gateReasons ?? [];
+  const portfolioRisk = decisionSnapshot?.portfolioRisk ?? null;
 
   const filtered = filter === "all" ? guardrails : guardrails.filter((g) => g.level === filter);
 
@@ -129,6 +277,11 @@ export default function RiskCenter() {
           <GateReasonList reasons={lastGateReasons} />
         )}
       </div>
+
+      {/* Portfolio risk */}
+      {portfolioRisk && (
+        <PortfolioRiskPanel risk={portfolioRisk} mode={system?.mode ?? "unknown"} />
+      )}
 
       <DoctrineOverlayBanner />
       <PendingDoctrineChangesPanel />

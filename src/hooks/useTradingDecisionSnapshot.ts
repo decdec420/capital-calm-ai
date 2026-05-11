@@ -3,6 +3,8 @@ import { useSystemState } from "@/hooks/useSystemState";
 import { useMarketIntelligence } from "@/hooks/useMarketIntelligence";
 import { useStrategies } from "@/hooks/useStrategies";
 import { useAlerts } from "@/hooks/useAlerts";
+import { useTrades } from "@/hooks/useTrades";
+import { useAccountState } from "@/hooks/useAccountState";
 import {
   computeTradingDecisionSnapshot,
   type TradingDecisionSnapshot,
@@ -10,7 +12,7 @@ import {
 
 /**
  * Computes the canonical TradingDecisionSnapshot from existing hooks.
- * Does not add new DB queries — composed entirely from already-fetched data.
+ * Includes portfolio-level risk from open trades + account state.
  */
 export function useTradingDecisionSnapshot(): {
   snapshot: TradingDecisionSnapshot | null;
@@ -20,8 +22,11 @@ export function useTradingDecisionSnapshot(): {
   const { data: marketIntelligence, loading: miLoading } = useMarketIntelligence();
   const { strategies, loading: stratLoading } = useStrategies();
   const { alerts, loading: alertsLoading } = useAlerts();
+  const { open: openTrades, loading: tradesLoading } = useTrades();
+  const { data: account, loading: accountLoading } = useAccountState();
 
-  const loading = sysLoading || miLoading || stratLoading || alertsLoading;
+  const loading =
+    sysLoading || miLoading || stratLoading || alertsLoading || tradesLoading || accountLoading;
 
   const snapshot = useMemo(() => {
     if (loading && !system) return null;
@@ -30,8 +35,13 @@ export function useTradingDecisionSnapshot(): {
       marketIntelligence: marketIntelligence ?? [],
       strategies: strategies ?? [],
       alerts: alerts ?? [],
+      portfolioRiskInput: {
+        openTrades: openTrades ?? [],
+        account: account ?? null,
+        mode: system?.mode ?? "unknown",
+      },
     });
-  }, [system, marketIntelligence, strategies, alerts, loading]);
+  }, [system, marketIntelligence, strategies, alerts, openTrades, account, loading]);
 
   return { snapshot, loading };
 }
