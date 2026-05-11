@@ -16,6 +16,8 @@
 // ============================================================
 
 import type { LearningAction, SimulationResult } from "./outcome-enrichment.ts";
+import { buildDeterministicProvenance } from "./ai-provenance.ts";
+import type { AiProvenance } from "./ai-provenance.ts";
 
 export type RecommendationType =
   | "REINFORCE_BLOCKER"
@@ -245,6 +247,7 @@ export interface StrategyLearningRecommendation {
   sample_quality: SampleQuality;
   supporting_simulation_ids: string[];
   status: RecommendationStatus;
+  ai_provenance: AiProvenance;
 }
 
 export function buildRecommendation(group: EvidenceGroup): StrategyLearningRecommendation {
@@ -265,6 +268,7 @@ export function buildRecommendation(group: EvidenceGroup): StrategyLearningRecom
     sample_quality: quality,
     supporting_simulation_ids: group.rows.map((r) => r.id),
     status: "pending_review",
+    ai_provenance: buildDeterministicProvenance({ decisionType: "strategy_learning" }),
   };
 }
 

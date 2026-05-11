@@ -16,6 +16,16 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { fetchCandles, type Candle } from "../_shared/market.ts";
 import { log } from "../_shared/logger.ts";
+import {
+  buildAiProvenance,
+  applyGuardToProvenance,
+  MODEL_REGISTRY,
+  type AiProvenance,
+} from "../_shared/ai-provenance.ts";
+import {
+  guardAiOutput,
+  sanitizeForStorage,
+} from "../_shared/ai-output-guard.ts";
 
 // Tiered Brain Trust freshness — each expert has its own cadence so the desk
 // feels live without burning gateway credits on near-identical reads.
@@ -267,11 +277,24 @@ async function callExpert(
     const d = await resp.json();
     const args = d.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) return null;
+    let parsed: Record<string, unknown>;
     try {
-      return JSON.parse(args);
+      parsed = JSON.parse(args);
     } catch {
       return null;
     }
+    const guardResult = guardAiOutput(parsed, { agentId: "brainTrust", decisionType: "market_intelligence" });
+    if (guardResult.decision === "reject") {
+      log("warn", "expert_output_rejected", {
+        fn: "market-intelligence",
+        expert: toolName,
+        reason: guardResult.reason,
+        unsafeIntents: guardResult.unsafeIntents.length,
+        protectedActions: guardResult.protectedActions.length,
+      });
+      return null;
+    }
+    return (guardResult.sanitizedOutput ?? parsed) as Record<string, unknown>;
   } catch (e) {
     const durationMs = Date.now() - aiCallStart;
     log("error", "expert_ai_threw", { fn: "market-intelligence", expert: toolName, err: String(e), durationMs });
@@ -836,6 +859,19 @@ async function runIntelligenceForSymbol(
     : null;
   if (canRunMafee) ran.push(patternResult ? "Mafee" : "Mafee(failed)");
 
+  // Build provenance for this Brain Trust run. Carries forward on partial runs.
+  const anyAiRan = runHall || runBill || canRunMafee;
+  const anyAiSucceeded = !!(macroResult || cryptoResult || patternResult);
+  const brainTrustProvenance: AiProvenance = buildAiProvenance({
+    decisionType: "market_intelligence",
+    provider: "lovable_gateway",
+    model: runHall ? MODEL_REGISTRY.HALL : (runBill ? MODEL_REGISTRY.BILL : MODEL_REGISTRY.MAFEE),
+    promptKey: "HALL_MACRO",
+    validationStatus: anyAiRan ? (anyAiSucceeded ? "passed" : "fallback") : "skipped",
+    fallbackUsed: anyAiRan && !anyAiSucceeded,
+    fallbackReason: anyAiRan && !anyAiSucceeded ? "All Brain Trust experts failed or were rejected" : undefined,
+  });
+
   log("info", "brain_trust_ran", {
     fn: "market-intelligence",
     symbol,
@@ -949,6 +985,7 @@ async function runIntelligenceForSymbol(
     candle_count_1h: candles1h.length || (prev?.candle_count_1h ?? 0),
     candle_count_4h: candles6h.length || (prev?.candle_count_4h ?? 0),
     candle_count_1d: candles1d.length || (prev?.candle_count_1d ?? 0),
+    ai_provenance: brainTrustProvenance,
   };
 
   const { data: upsertData, error } = await admin
