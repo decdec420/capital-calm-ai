@@ -79,6 +79,7 @@ import {
   placeMarketBuy,
   type BrokerFill,
 } from "../_shared/broker.ts";
+import { probeCoinbaseAccounts } from "../_shared/coinbase-auth.ts";
 import { recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
@@ -1075,6 +1076,64 @@ async function runTickForUser(
       perSymbol: [],
     };
   }
+
+  // ── Broker health probe — fires every tick, best-effort ──────────────
+  // Attempts to load Coinbase credentials and writes the result to
+  // broker_health so the UI banner and ops-sentinel can reflect real status.
+  // In paper mode (no live creds configured) we write 'not_connected'.
+  // Never throws — a probe failure must never abort the tick.
+  (async () => {
+    try {
+      const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME");
+      const envKeyPem  = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM");
+      const liveEnabledForProbe = !!(sys as { live_trading_enabled?: boolean }).live_trading_enabled;
+
+      if (!envKeyName || !envKeyPem) {
+        await admin.rpc("update_broker_health", {
+          p_user_id: userId,
+          p_status:  "not_connected",
+          p_key_name: null,
+          p_error:   liveEnabledForProbe
+            ? "COINBASE_API_KEY_NAME / COINBASE_API_KEY_PRIVATE_PEM not set in secrets"
+            : null,
+        });
+        return;
+      }
+
+      const probeResult = await probeCoinbaseAccounts(envKeyName, envKeyPem);
+
+      if (probeResult.ok) {
+        await admin.rpc("update_broker_health", {
+          p_user_id:  userId,
+          p_status:   "healthy",
+          p_key_name: envKeyName,
+          p_error:    null,
+        });
+      } else {
+        const isAuth = probeResult.status === 401 || probeResult.status === 403;
+        await admin.rpc("update_broker_health", {
+          p_user_id:  userId,
+          p_status:   isAuth ? "auth_failed" : "unknown",
+          p_key_name: envKeyName,
+          p_error:    `HTTP ${probeResult.status}: ${probeResult.error}`.slice(0, 200),
+        });
+      }
+    } catch (probeErr) {
+      log("warn", "broker_health_probe_failed", {
+        fn: "signal-engine",
+        userId,
+        err: String(probeErr),
+      });
+      try {
+        await admin.rpc("update_broker_health", {
+          p_user_id:  userId,
+          p_status:   "unknown",
+          p_key_name: null,
+          p_error:    String(probeErr).slice(0, 200),
+        });
+      } catch { /* truly best-effort */ }
+    }
+  })();
 
   // Correlation cap — count open trades across all whitelisted symbols.
   const totalOpenTrades = (openTrades ?? []).length;
