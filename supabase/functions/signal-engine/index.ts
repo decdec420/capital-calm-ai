@@ -79,6 +79,7 @@ import {
   placeMarketBuy,
   type BrokerFill,
 } from "../_shared/broker.ts";
+import { probeCoinbaseAccounts } from "../_shared/coinbase-auth.ts";
 import { recordFill } from "../_shared/fills.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
