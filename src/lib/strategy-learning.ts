@@ -478,7 +478,7 @@ export function buildExperimentProposalInput(rec: {
   confidence: number;
   evidence_count: number;
   recommendation: string;
-  status?: RecommendationStatus;
+  status?: string;
 }): ExperimentProposalInput {
   const paramFamily = reasonCodeToParameterFamily(rec.reason_code);
   const scope = [rec.symbol, rec.market_regime].filter(Boolean).join(" / ") || "all symbols";
