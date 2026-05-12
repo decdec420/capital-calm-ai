@@ -1040,56 +1040,82 @@ async function runIntelligenceForSymbol(
       const isBullish = bias === "strong_long" || bias === "lean_long";
       const isBearish = bias === "lean_short" || bias === "strong_short";
       const hallPriority = bias === "strong_long" || bias === "strong_short" ? "high" : "normal";
-      warRoomPosts.push({
-        from: "hall",
-        subject: `${symbol}: ${bias.replace(/_/g, " ")} — ${(upsertPayload.market_phase as string).replace(/_/g, " ")}`,
-        body: [
-          upsertPayload.macro_summary || "No macro summary generated.",
-          upsertPayload.nearest_support != null ? `Support: $${Number(upsertPayload.nearest_support).toLocaleString()}` : null,
-          upsertPayload.nearest_resistance != null ? `Resistance: $${Number(upsertPayload.nearest_resistance).toLocaleString()}` : null,
-          upsertPayload.key_level_notes || null,
-          isBullish ? `Hall read: bias is ${bias.replace(/_/g, " ")} — trend structure ${(upsertPayload.trend_structure as string).replace(/_/g, " ")}.` : null,
-          isBearish ? `Hall read: leaning ${bias.replace(/_/g, " ")} — watch for distribution.` : null,
-        ].filter(Boolean).join("\n"),
-        priority: hallPriority,
-      });
+      // Triage: only post when bias or phase changes vs prior row, or priority is high
+      const prevBias = (prev?.macro_bias as string | null) ?? null;
+      const prevPhase = (prev?.market_phase as string | null) ?? null;
+      const hallInteresting =
+        hallPriority === "high" ||
+        prevBias !== bias ||
+        prevPhase !== (upsertPayload.market_phase as string);
+      if (hallInteresting) {
+        warRoomPosts.push({
+          from: "hall",
+          subject: `${symbol}: ${bias.replace(/_/g, " ")} — ${(upsertPayload.market_phase as string).replace(/_/g, " ")}`,
+          body: [
+            upsertPayload.macro_summary || "No macro summary generated.",
+            upsertPayload.nearest_support != null ? `Support: $${Number(upsertPayload.nearest_support).toLocaleString()}` : null,
+            upsertPayload.nearest_resistance != null ? `Resistance: $${Number(upsertPayload.nearest_resistance).toLocaleString()}` : null,
+            upsertPayload.key_level_notes || null,
+            isBullish ? `Hall read: bias is ${bias.replace(/_/g, " ")} — trend structure ${(upsertPayload.trend_structure as string).replace(/_/g, " ")}.` : null,
+            isBearish ? `Hall read: leaning ${bias.replace(/_/g, " ")} — watch for distribution.` : null,
+          ].filter(Boolean).join("\n"),
+          priority: hallPriority,
+        });
+      }
     }
 
     if (runBill && cryptoResult) {
       const funding = upsertPayload.funding_rate_signal as string;
       const fg = upsertPayload.fear_greed_score != null ? Number(upsertPayload.fear_greed_score) : null;
       const isExtreme = funding === "crowded_long" || funding === "crowded_short" || (fg != null && (fg >= 80 || fg <= 20));
-      warRoomPosts.push({
-        from: "dollar_bill",
-        subject: `${symbol}: funding ${funding.replace(/_/g, " ")}${fg != null ? ` · F&G ${fg}` : ""}`,
-        body: [
-          upsertPayload.sentiment_summary || "No sentiment summary generated.",
-          `Funding rate signal: ${funding.replace(/_/g, " ")}${upsertPayload.funding_rate_pct != null ? ` (${(Number(upsertPayload.funding_rate_pct) * 100).toFixed(4)}%)` : ""}.`,
-          fg != null ? `Fear & Greed: ${fg}/100 — ${upsertPayload.fear_greed_label || "unlabeled"}.` : null,
-          isExtreme ? `⚠️ EXTREME reading — contrarian signal. Bobby, keep this in mind for sizing.` : null,
-          `Environment: ${(upsertPayload.environment_rating as string).replace(/_/g, " ")}.`,
-        ].filter(Boolean).join("\n"),
-        priority: isExtreme ? "high" : "normal",
-      });
+      // Triage: only post on extreme readings or when funding signal flips
+      const prevFunding = (prev?.funding_rate_signal as string | null) ?? null;
+      const billInteresting = isExtreme || (prevFunding !== null && prevFunding !== funding);
+      if (billInteresting) {
+        warRoomPosts.push({
+          from: "dollar_bill",
+          subject: `${symbol}: funding ${funding.replace(/_/g, " ")}${fg != null ? ` · F&G ${fg}` : ""}`,
+          body: [
+            upsertPayload.sentiment_summary || "No sentiment summary generated.",
+            `Funding rate signal: ${funding.replace(/_/g, " ")}${upsertPayload.funding_rate_pct != null ? ` (${(Number(upsertPayload.funding_rate_pct) * 100).toFixed(4)}%)` : ""}.`,
+            fg != null ? `Fear & Greed: ${fg}/100 — ${upsertPayload.fear_greed_label || "unlabeled"}.` : null,
+            isExtreme ? `⚠️ EXTREME reading — contrarian signal. Bobby, keep this in mind for sizing.` : null,
+            `Environment: ${(upsertPayload.environment_rating as string).replace(/_/g, " ")}.`,
+          ].filter(Boolean).join("\n"),
+          priority: isExtreme ? "high" : "normal",
+        });
+      }
     }
 
     if (canRunMafee && patternResult) {
       const momentum1h = upsertPayload.recent_momentum_1h as string | null;
       const momentum4h = upsertPayload.recent_momentum_4h as string | null;
       const hasMomentum = momentum1h === "up" || momentum1h === "down";
-      warRoomPosts.push({
-        from: "mafee",
-        subject: `${symbol}: ${upsertPayload.pattern_context ? "pattern identified" : "no clear pattern"} · 1h ${momentum1h ?? "n/a"} 4h ${momentum4h ?? "n/a"}`,
-        body: [
-          upsertPayload.pattern_context || "No pattern context available.",
-          upsertPayload.entry_quality_context || null,
-          momentum1h ? `1h momentum: ${momentum1h}` : null,
-          momentum4h ? `4h momentum: ${momentum4h}` : null,
-          upsertPayload.recent_momentum_notes || null,
-          hasMomentum ? `Mafee read: momentum aligns ${momentum1h} on 1h — worth a look if regime clears.` : null,
-        ].filter(Boolean).join("\n"),
-        priority: hasMomentum ? "normal" : "low",
-      });
+      // Triage: only post on momentum flips or when pattern context newly appears/disappears
+      const prevMom1h = (prev?.recent_momentum_1h as string | null) ?? null;
+      const prevMom4h = (prev?.recent_momentum_4h as string | null) ?? null;
+      const prevPattern = (prev?.pattern_context as string | null) ?? null;
+      const newPattern = (upsertPayload.pattern_context as string | null) ?? null;
+      const momentumFlipped =
+        (prevMom1h !== null && prevMom1h !== momentum1h) ||
+        (prevMom4h !== null && prevMom4h !== momentum4h);
+      const patternChanged = Boolean(prevPattern) !== Boolean(newPattern);
+      const mafeeInteresting = momentumFlipped || patternChanged;
+      if (mafeeInteresting) {
+        warRoomPosts.push({
+          from: "mafee",
+          subject: `${symbol}: ${newPattern ? "pattern identified" : "no clear pattern"} · 1h ${momentum1h ?? "n/a"} 4h ${momentum4h ?? "n/a"}`,
+          body: [
+            newPattern || "No pattern context available.",
+            upsertPayload.entry_quality_context || null,
+            momentum1h ? `1h momentum: ${momentum1h}` : null,
+            momentum4h ? `4h momentum: ${momentum4h}` : null,
+            upsertPayload.recent_momentum_notes || null,
+            hasMomentum ? `Mafee read: momentum aligns ${momentum1h} on 1h — worth a look if regime clears.` : null,
+          ].filter(Boolean).join("\n"),
+          priority: hasMomentum ? "normal" : "low",
+        });
+      }
     }
 
     // Write all War Room posts

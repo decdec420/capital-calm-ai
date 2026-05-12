@@ -1,51 +1,58 @@
-## Root cause
+# War Room triage & restructure
 
-The "Brain Trust" agent card on the Overview is **permanently** flagged stale within ~60s of every engine tick, even though the system is healthy. Live DB confirms briefs are ~1 minute old (fresh) and the engine snapshot is also recent — yet the UI says "Context stale — refresh."
+## The problem in one paragraph
 
-The bug is a single-line threshold mismatch in `src/components/trader/AgentStatusRow.tsx`:
+War Room is currently used as a logbook where every Brain Trust tick writes 3 messages (one each from Hall, Dollar Bill, Mafee) per symbol, even when nothing changed. 88% of the 19K rows are routine "normal" intel from Mafee/Dollar Bill running on cron. The actual state those messages describe (momentum, funding, support/resistance, fear & greed, etc.) is *already* persisted in the `market_intelligence` table, which is upserted in the same code path. The messages are a duplicate. Meanwhile, the genuinely useful signal — Bobby directives, Spyros reviews, Hall regime shifts, extreme readings — gets buried in the noise.
 
-```ts
-// line 140
-const snapshotStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null);
-```
+Your hospital triage analogy fits exactly:
+- **Vitals (routine intel):** belong on a chart that gets overwritten, not a new note every tick → `market_intelligence` table.
+- **Notable events (regime change, extreme reading, directive, review):** belong in the War Room log forever → `war_room_messages`.
 
-`isStale()` in `src/hooks/useRelativeTime.ts` defaults to **60 000 ms (60 seconds)**. But:
+## What changes
 
-- `signal-engine` cron runs every **~2 minutes** (visible in the edge logs: 06:48, 06:50, 06:52)
-- The Market Intelligence panel even tells the user "refreshes every ~2 min"
-- `SymbolStrip.tsx` already uses `isStale(ts, 5 * 60 * 1000)` — 5 minutes — for the same `ranAt` value
+### 1. Stop the noise at the source (`market-intelligence` edge function)
 
-So the Brain Trust card flips to "stale" roughly 60 seconds after every engine tick and only flips back for a few seconds at the next tick. It's not a backend problem — the data is fine. The threshold is just wrong for the cron cadence.
+In `supabase/functions/market-intelligence/index.ts` (lines ~1043–1112), only post to `war_room_messages` when the message carries new information. Concretely:
 
-## Secondary observation (not part of this fix, just context)
+- **Hall:** post only when `macro_bias` or `market_phase` *changes vs. previous row*, OR priority is `high` (strong_long / strong_short). Otherwise: silent — the state is in `market_intelligence` already.
+- **Dollar Bill:** post only on extreme readings (`crowded_long`, `crowded_short`, F&G ≥80 or ≤20) OR when `funding_rate_signal` flips. Drop routine "neutral" posts entirely.
+- **Mafee:** post only when momentum direction flips (1h or 4h up↔down) OR pattern context newly appears/disappears. Drop the "no clear pattern, low priority" posts.
 
-The Brain Trust card is keyed off `snapshot.ranAt` (engine snapshot) rather than `market_intelligence.recent_momentum_at` (the actual Brain Trust output). They're correlated but conceptually different. The Market Intelligence panel uses `recent_momentum_at` with a 75-min threshold and is showing healthy. Switching the Brain Trust card to read from the same source would be more accurate, but it's a larger change and not required to stop the false alarm.
+Expected volume drop: ~95% (from ~170/hr to ~5–10/hr, only when something actually shifts).
 
-## The fix
+### 2. Backfill cleanup (one-time)
 
-Change one line in `src/components/trader/AgentStatusRow.tsx`:
+Delete the existing routine noise so the table reflects the new policy retroactively. Keep everything high-signal forever, as you chose:
 
-```ts
-// before
-const snapshotStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null);
+Delete rows where **all** of these are true:
+- `message_type = 'intel'`
+- `priority IN ('normal', 'low')`
+- `from_agent IN ('mafee', 'dollar_bill', 'hall')`
+- `acted_on = false`
+- `created_at < now() - interval '24 hours'` (keep last 24h of context for debugging)
 
-// after — match SymbolStrip's threshold and the engine's 2-min cadence
-const SNAPSHOT_STALE_MS = 5 * 60 * 1000; // 5 minutes; engine cron is ~2 min
-const snapshotStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null, SNAPSHOT_STALE_MS);
-```
+This will drop roughly 17,000 rows. The remaining ~2,000 rows are: all Bobby directives, the Spyros review, every `high`-priority Hall/Bill post, anything ever acted on, and the last day of routine posts as a transition buffer.
 
-That's it. No backend changes, no migration, no edge function changes.
+### 3. Ongoing retention: forever for signal, nightly sweep for stragglers
 
-## Validation
+Add a daily cron (`pg_cron`, 04:00 UTC) that re-applies the same delete rule but with a `created_at < now() - interval '7 days'` cutoff. This catches any future "normal" intel that slips through (e.g. from a code regression), but keeps a week-long debug window. **High-priority items, directives, reviews, and `acted_on` messages are never deleted** — that's your "forever" answer.
 
-After the change:
-- With a snapshot <5 min old → Brain Trust shows the regime label and "active" status (green).
-- Only flips to "alert / Context stale — refresh" if the engine actually misses 2+ ticks in a row, which is the real failure case worth surfacing.
-- Visible immediately on `/` — no refresh of the page required beyond Vite HMR.
+### 4. War Room becomes what its name implies
 
-## Scope guard
+After this, opening War Room shows the actual *events* — "Hall flipped bearish on SOL", "Bill flagged crowded_long on ETH", "Bobby directed Wendy to pause" — not a wall of vitals readouts. The dashboards that need current vitals already read from `market_intelligence`, so the UI doesn't lose anything.
 
-Touches one file, one line of logic. Does not change:
-- `useRelativeTime.ts` default (other callers depend on 60s)
-- Any backend behavior or cron cadence
-- The Market Intelligence panel's own freshness rules
+## Technical details
+
+**Files to change:**
+- `supabase/functions/market-intelligence/index.ts` — add a `wasInteresting()` gate before each of the three `warRoomPosts.push(...)` calls. Compare `upsertPayload` against `prev` (already loaded in the function as `prev`) to detect actual changes.
+- New migration: `pg_cron` job + helper SQL function `prune_war_room_routine_intel(cutoff_interval)` for the nightly sweep + immediate one-time call with `interval '24 hours'` to do the backfill cleanup.
+
+**No schema changes** — existing columns (`priority`, `message_type`, `from_agent`, `acted_on`) already encode everything needed.
+
+**No agent code other than `market-intelligence` needs to change.** Bobby, Spyros, Katrina, Jessica, post-trade-learn already post only on real events, not on a cron.
+
+**Disk impact:** combined with the indexes added earlier today, the table goes from 22 MB / 19K rows growing at 4K/day, to ~2 MB / 2K rows growing at ~100/day. Effectively zero disk IO from this table going forward.
+
+## Risk & rollback
+
+Low risk. The deleted rows are duplicates of state held in `market_intelligence`. If anything ever needs the historical noise back, it can be reconstructed from the `market_intelligence` table's update history (or just not — that's the point). Rollback is reverting the `market-intelligence` function file; the deleted rows are gone, but they weren't carrying unique information.
