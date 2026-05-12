@@ -1970,6 +1970,13 @@ export type Database = {
       check_jessica_heartbeat: { Args: never; Returns: undefined }
       delete_broker_secrets: { Args: never; Returns: undefined }
       get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }
+      get_coinbase_broker_credentials: {
+        Args: never
+        Returns: {
+          api_key_name: string
+          api_key_private_pem: string
+        }[]
+      }
       get_daily_brief_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
