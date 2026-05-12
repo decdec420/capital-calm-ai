@@ -555,20 +555,15 @@ async function runMarkToMarket(
   }
 
   // 4. Per-user equity roll: cash += realizedDelta, equity = cash + Σunrealized.
+  // Uses an atomic SQL function to avoid the read-modify-write race that can
+  // occur when two concurrent MTM ticks overlap and one overwrites the other.
   for (const [userId, change] of perUserChanges.entries()) {
     if (change.realizedDelta === 0 && change.unrealized === 0) continue;
-    const { data: acct } = await admin
-      .from("account_state")
-      .select("cash,equity")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (!acct) continue;
-    const newCash = Number(acct.cash ?? 0) + change.realizedDelta;
-    const newEquity = newCash + change.unrealized;
-    await admin
-      .from("account_state")
-      .update({ cash: newCash, equity: newEquity })
-      .eq("user_id", userId);
+    await admin.rpc("update_account_pnl", {
+      p_user_id: userId,
+      p_realized_delta: change.realizedDelta,
+      p_unrealized_total: change.unrealized,
+    });
   }
 
   // 5. Dead-man's-switch heartbeat on every active system_state.

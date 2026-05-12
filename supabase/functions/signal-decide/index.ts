@@ -26,6 +26,7 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import {
   getBrokerCredentials,
   placeMarketBuy,
+  placeMarketSell,
 } from "../_shared/broker.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import type { DecisionReplayPacket } from "../_shared/decision-replay.ts";
@@ -151,7 +152,7 @@ if (req.method === "OPTIONS") {
           }
         : null;
 
-      await admin
+      const { data: rejRow } = await admin
         .from("trade_signals")
         .update({
           status: "rejected",
@@ -162,7 +163,16 @@ if (req.method === "OPTIONS") {
           lifecycle_transitions: transitions,
           ...(rejectedPacket ? { replay_packet: rejectedPacket } : {}),
         })
-        .eq("id", signalId);
+        .eq("id", signalId)
+        .eq("status", "pending")
+        .select("id");
+
+      if (!rejRow || rejRow.length === 0) {
+        return new Response(
+          JSON.stringify({ error: `Signal already ${sig.status} — cannot reject.`, code: "RACE_LOST" }),
+          { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
+        );
+      }
 
       await admin.from("journal_entries").insert({
         user_id: userId,
@@ -190,7 +200,7 @@ if (req.method === "OPTIONS") {
     // always allowed (declining a signal doesn't read the gate state).
     const { data: sysRow } = await admin
       .from("system_state")
-      .select("last_engine_snapshot, live_trading_enabled")
+      .select("last_engine_snapshot, live_trading_enabled, kill_switch_engaged, bot")
       .eq("user_id", userId)
       .maybeSingle();
     const snap = sysRow?.last_engine_snapshot ?? null;
@@ -210,6 +220,35 @@ if (req.method === "OPTIONS") {
           status: 409,
           headers: { ...cors, "Content-Type": "application/json" },
         },
+      );
+    }
+
+    // ── GATE RE-CHECK at approval time ───────────────────────────────────────
+    // Conditions can change between signal generation and operator approval.
+    // Re-run critical halt gates before touching the broker.
+    if (sysRow?.kill_switch_engaged) {
+      return new Response(
+        JSON.stringify({ error: "Kill-switch is engaged — approval refused.", code: "KILL_SWITCH" }),
+        { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+    if (sysRow?.bot === "halted" || sysRow?.bot === "paused") {
+      return new Response(
+        JSON.stringify({ error: `Bot is ${sysRow.bot} — approval refused.`, code: "BOT_NOT_RUNNING" }),
+        { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+    // Same-symbol open position check (another trade may have opened since signal was generated).
+    const { count: openSameSymbol } = await admin
+      .from("trades")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("symbol", sig.symbol)
+      .eq("status", "open");
+    if (openSameSymbol && openSameSymbol > 0) {
+      return new Response(
+        JSON.stringify({ error: `${sig.symbol}: position already open — approval refused.`, code: "OPEN_POSITION" }),
+        { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
       );
     }
 
@@ -329,6 +368,23 @@ if (req.method === "OPTIONS") {
 
     if (tradeErr) {
       console.error("trade insert failed", tradeErr);
+      // If we already placed a live broker order, attempt a compensating sell
+      // so the position doesn't sit unrecorded on Coinbase.
+      if (liveEnabled && brokerOrderId) {
+        console.error(
+          "[signal-decide] ALERT: Broker fill succeeded but trade insert failed — attempting compensation sell.",
+        );
+        try {
+          const creds = await getBrokerCredentials(admin);
+          await placeMarketSell(creds, sig.symbol, size.toFixed(8), `${signalId}-compensate`);
+          console.log("[signal-decide] Compensation sell placed. Position is now flat.");
+        } catch (compErr) {
+          console.error(
+            "[signal-decide] CRITICAL: Compensation sell also failed. Manual reconciliation required.",
+            compErr,
+          );
+        }
+      }
       return new Response(JSON.stringify({ error: tradeErr.message }), {
         status: 500,
         headers: { ...cors, "Content-Type": "application/json" },
@@ -362,7 +418,9 @@ if (req.method === "OPTIONS") {
         }
       : null;
 
-    await admin
+    // Optimistic lock: only update if status is still "pending".
+    // If another concurrent request already executed this signal, 0 rows are returned.
+    const { data: execRow } = await admin
       .from("trade_signals")
       .update({
         status: "executed",
@@ -374,7 +432,19 @@ if (req.method === "OPTIONS") {
         lifecycle_transitions: nextTransitions,
         ...(approvedPacket ? { replay_packet: approvedPacket } : {}),
       })
-      .eq("id", signalId);
+      .eq("id", signalId)
+      .eq("status", "pending")
+      .select("id");
+
+    if (!execRow || execRow.length === 0) {
+      // Lost the race — delete the trade row we just inserted (broker order was
+      // idempotent via clientOrderId=signalId, so Coinbase only filled once).
+      await admin.from("trades").delete().eq("id", tradeRow.id);
+      return new Response(
+        JSON.stringify({ error: "Signal already executed by a concurrent request.", code: "RACE_LOST" }),
+        { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
 
     await admin.from("journal_entries").insert({
       user_id: userId,
