@@ -2151,6 +2151,26 @@ async function runTickForUser(
       perSymbol,
       chosenSymbol: winner.symbol,
     });
+    recordNonTrade(admin, {
+      userId,
+      symbol: winner.symbol,
+      reasonCode: "AI_ERROR",
+      severity: "skip",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: winner.regime.confidence,
+      blockerCodes: [GATE_CODES.AI_ERROR],
+      replayPacket: buildNonTradePacket({
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        setupScore: winner.regime.setupScore,
+        confidence: winner.regime.confidence,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.AI_ERROR],
+        reason: aiResult.error,
+      }),
+    });
     return {
       userId,
       tick: "ai_error",
@@ -2268,6 +2288,26 @@ async function runTickForUser(
       summary:
         "The AI proposed a trade but did not specify long or short. Silent default-long is disabled; the trade was dropped.",
       tags: [winner.symbol, "default-long-fallback", "blocked"],
+    });
+    recordNonTrade(admin, {
+      userId,
+      symbol: winner.symbol,
+      reasonCode: "AI_ERROR",
+      severity: "skip",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: typeof decision.confidence === "number" ? decision.confidence : null,
+      blockerCodes: [GATE_CODES.DEFAULT_LONG_FALLBACK_BLOCKED],
+      replayPacket: buildNonTradePacket({
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        setupScore: winner.regime.setupScore,
+        confidence: typeof decision.confidence === "number" ? decision.confidence : null,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.DEFAULT_LONG_FALLBACK_BLOCKED],
+        reason: fallbackGate.message,
+      }),
     });
     return {
       userId,
@@ -2489,6 +2529,28 @@ async function runTickForUser(
       summary: refusal.message,
       tags: [winner.symbol, "doctrine", refusal.code],
     });
+    recordNonTrade(admin, {
+      userId,
+      symbol: winner.symbol,
+      strategyId: strategyId ?? null,
+      reasonCode: "DOCTRINE_BLOCK",
+      severity: "halt",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: conf,
+      blockerCodes: [refusal.code],
+      replayPacket: buildNonTradePacket({
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        setupScore: winner.regime.setupScore,
+        confidence: conf,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [refusal.code],
+        reason: refusal.message,
+        meta: { side, entry, clampedBy: clamp.clampedBy.map((r) => r.code) },
+      }),
+    });
     return {
       userId,
       tick: "doctrine_refused",
@@ -2594,6 +2656,28 @@ async function runTickForUser(
       gateReasons: [edgeGate],
       perSymbol,
       chosenSymbol: winner.symbol,
+    });
+    recordNonTrade(admin, {
+      userId,
+      symbol: winner.symbol,
+      strategyId: strategyId ?? null,
+      reasonCode: "DOCTRINE_BLOCK",
+      severity: "skip",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: conf,
+      blockerCodes: [GATE_CODES.EDGE_BELOW_COSTS],
+      replayPacket: buildNonTradePacket({
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        setupScore: winner.regime.setupScore,
+        confidence: conf,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.EDGE_BELOW_COSTS],
+        reason: edgeGate.message,
+        meta: { side, entry, edgeToTp1Pct, minEdgePctRequired, costSource },
+      }),
     });
     return {
       userId,
