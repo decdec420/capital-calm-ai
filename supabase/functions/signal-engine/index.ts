@@ -989,7 +989,7 @@ async function runTickForUser(
       .eq("user_id", userId)
       .eq("status", "active")
       .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
-      .in("target_agent", ["taylor", "all"])
+      .in("target_agent", ["taylor", "wags", "all"])
       .order("priority", { ascending: false })
       .limit(5),
   ]);
