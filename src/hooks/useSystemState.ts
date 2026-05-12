@@ -31,7 +31,7 @@ function mapRow(r: any): SystemState {
     bot: r.bot as BotStatus,
     brokerConnection: r.broker_connection as ConnectionState,
     dataFeed: r.data_feed as ConnectionState,
-    killSwitchEngaged: r.kill_switch_engaged,
+    killSwitchEngaged: !!r.kill_switch_engaged,
     liveTradingEnabled: r.live_trading_enabled,
     uptimeHours: Number(r.uptime_hours),
     lastHeartbeat: r.last_heartbeat,

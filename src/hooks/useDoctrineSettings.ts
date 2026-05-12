@@ -70,6 +70,9 @@ export function useDoctrineSettings(): UseDoctrineSettingsResult {
   // Realtime so DoctrineEditSheet sees changes immediately + cron activations.
   // Delegated to shared subscription manager (HIGH-6).
   useTableChanges("doctrine_settings", refetch);
+  // Also watch pending_doctrine_changes so "loosen" proposals appear in the UI
+  // without requiring a manual refetch.
+  useTableChanges("pending_doctrine_changes", refetch);
 
   const equity = account?.equity ?? 0;
   const resolved = useMemo(() => resolveDoctrine(settings, equity), [settings, equity]);
