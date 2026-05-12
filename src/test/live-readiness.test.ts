@@ -294,6 +294,7 @@ describe("Critical incidents", () => {
       category: "system",
       title: "System failure",
       message: "Engine down",
+      timestamp: new Date(NOW_MS).toISOString(),
       triggeredAt: new Date(NOW_MS).toISOString(),
       acknowledgedAt: null,
       resolvedAt: null,

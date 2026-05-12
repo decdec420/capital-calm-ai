@@ -41,13 +41,17 @@ function makeResult(
 ): SimulationResult {
   return {
     result_label,
+    simulated_entry_price: 50000,
+    simulated_exit_price: result_label === "would_have_won" ? 51250 : 49400,
+    lookahead_window: "1h",
+    hypothetical_pnl: result_label === "would_have_won" ? 0.025 : -0.012,
+    hypothetical_return_pct: result_label === "would_have_won" ? 0.025 : -0.012,
+    max_adverse_excursion: result_label === "would_have_won" ? -0.004 : -0.018,
+    max_favorable_excursion: result_label === "would_have_won" ? 0.03 : 0.006,
     recommended_learning_action,
-    price_change_pct: result_label === "would_have_won" ? 2.5 : -1.2,
-    confidence: 0.8,
-    direction: "long",
-    setup_score: 0.7,
-    outcome_horizon_minutes: 60,
-    metadata: {},
+    enriched_at: new Date().toISOString(),
+    insufficient_data_reason: result_label === "insufficient_data" ? "missing_data" : null,
+    simulated_side: "long",
   };
 }
 

@@ -211,7 +211,7 @@ function ReviewDialog({ row, mode, onClose, onConfirm }: ReviewDialogProps) {
 interface RecommendationCardProps {
   row: StrategyLearningRecommendationRow;
   onReview: (row: StrategyLearningRecommendationRow, mode: "accept" | "reject" | "defer") => void;
-  onCreateProposal: (row: StrategyLearningRecommendationRow) => Promise<void>;
+  onCreateProposal: (row: StrategyLearningRecommendationRow) => Promise<string | void>;
   proposalId: string | undefined;
 }
 

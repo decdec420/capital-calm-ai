@@ -37,22 +37,18 @@ import type { SimulationResult } from "@/lib/outcome-enrichment";
 
 function makeEvidenceRow(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
   const result: SimulationResult = {
-    sim_id: "sim-1",
-    decision_memory_id: "dm-1",
-    user_id: "user-1",
-    symbol: "BTC-USD",
-    strategy_id: "strat-1",
-    regime: "trending_up",
-    reason_code: "RSI_OVERBOUGHT",
-    outcome_direction: "bearish",
-    result_label: "validated_blocker",
-    recommended_learning_action: "REINFORCE_BLOCKER",
-    confidence_at_block: 0.7,
-    realized_move_pct: -2.5,
-    hours_observed: 4,
-    candles_observed: 16,
-    forward_high_pct: 0.5,
-    forward_low_pct: -3.0,
+    result_label: "would_have_lost",
+    simulated_entry_price: 50000,
+    simulated_exit_price: 48500,
+    lookahead_window: "4h",
+    hypothetical_pnl: -0.03,
+    hypothetical_return_pct: -0.03,
+    max_adverse_excursion: -0.04,
+    max_favorable_excursion: 0.01,
+    recommended_learning_action: "reinforce_block",
+    enriched_at: new Date().toISOString(),
+    insufficient_data_reason: null,
+    simulated_side: "long",
   };
   return {
     id: "row-1",
@@ -77,15 +73,13 @@ function makeEvidenceGroup(overrides: Partial<EvidenceGroup> = {}): EvidenceGrou
       strategy_id: "strat-1",
       market_regime: "trending_up",
       reason_code: "RSI_OVERBOUGHT",
-      learning_action: "REINFORCE_BLOCKER",
+      blocker_codes: ["RSI_OVERBOUGHT"],
+      recommended_learning_action: "reinforce_block",
     },
     rows,
     totalActionable: 1,
-    validatedBlockerCount: 1,
-    questionedBlockerCount: 0,
-    tuneThresholdCount: 0,
-    reviewFitCount: 0,
-    insufficientCount: 0,
+    wouldHaveWon: 0,
+    wouldHaveLost: 1,
     ...overrides,
   };
 }
@@ -278,7 +272,7 @@ describe("process-strategy-learning deterministic provenance", () => {
   it("all recommendations from buildAllRecommendations carry deterministic provenance", () => {
     const groups = [
       makeEvidenceGroup(),
-      makeEvidenceGroup({ key: { user_id: "user-1", symbol: "ETH-USD", strategy_id: "strat-2", market_regime: "ranging", reason_code: "MACD_BEARISH", learning_action: "REINFORCE_BLOCKER" } }),
+      makeEvidenceGroup({ key: { user_id: "user-1", symbol: "ETH-USD", strategy_id: "strat-2", market_regime: "ranging", reason_code: "MACD_BEARISH", blocker_codes: ["MACD_BEARISH"], recommended_learning_action: "reinforce_block" } }),
     ];
     const recs = buildAllRecommendations(groups);
     for (const rec of recs) {

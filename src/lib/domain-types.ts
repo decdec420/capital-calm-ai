@@ -111,6 +111,10 @@ export interface EngineSnapshot {
   gateReasons: GateReason[];
   perSymbol: SnapshotPerSymbol[];
   chosenSymbol: string | null;
+  /** Legacy/test snapshots may include aggregate signal metadata. */
+  setupScore?: number;
+  proposedTrades?: unknown[];
+  signalCount?: number;
 }
 
 export type JournalKind = "research" | "trade" | "learning" | "skip" | "daily" | "postmortem";
@@ -364,9 +368,16 @@ export interface Experiment {
 export interface Alert {
   id: string;
   severity: AlertSeverity;
+  category?: string;
   title: string;
   message: string;
   timestamp: string;
+  triggeredAt?: string;
+  acknowledgedAt?: string | null;
+  resolvedAt?: string | null;
+  source?: string;
+  details?: Record<string, unknown> | null;
+  agentId?: string | null;
 }
 
 export interface AIInsight {

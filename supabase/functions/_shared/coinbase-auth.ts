@@ -77,7 +77,12 @@ export function normalizeCoinbasePrivateKeyPem(input: string): string {
   );
 }
 
-export async function signCoinbaseJwt(keyName: string, privatePem: string): Promise<string> {
+export async function signCoinbaseJwt(
+  keyName: string,
+  privatePem: string,
+  requestMethod?: string,
+  requestPath?: string,
+): Promise<string> {
   const privateKey = await crypto.subtle.importKey(
     "pkcs8",
     pemToDer(privatePem),
@@ -91,14 +96,16 @@ export async function signCoinbaseJwt(keyName: string, privatePem: string): Prom
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  const header = { alg: "ES256", kid: keyName, typ: "JWT" };
-  const payload = {
-    iss: "coinbase-cloud",
+  const header = { alg: "ES256", kid: keyName, nonce, typ: "JWT" };
+  const payload: Record<string, string | number> = {
+    iss: "cdp",
     sub: keyName,
     nbf: now,
-    exp: now + 60,
-    nonce,
+    exp: now + 120,
   };
+  if (requestMethod && requestPath) {
+    payload.uri = `${requestMethod.toUpperCase()} api.coinbase.com${requestPath}`;
+  }
 
   const sigInput = `${encodeB64url(header)}.${encodeB64url(payload)}`;
   const sigBytes = await crypto.subtle.sign(
@@ -120,8 +127,9 @@ export async function probeCoinbaseAccounts(
   privatePem: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   try {
-    const jwt = await signCoinbaseJwt(keyName, privatePem);
-    const r = await fetch(`${CB_BASE}/api/v3/brokerage/accounts?limit=1`, {
+    const requestPath = "/api/v3/brokerage/accounts?limit=1";
+    const jwt = await signCoinbaseJwt(keyName, privatePem, "GET", requestPath);
+    const r = await fetch(`${CB_BASE}${requestPath}`, {
       headers: { Authorization: `Bearer ${jwt}` },
     });
 

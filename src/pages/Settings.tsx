@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { SectionHeader } from "@/components/trader/SectionHeader";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { ProfileEditor } from "@/components/trader/ProfileEditor";
@@ -44,6 +44,7 @@ export default function Settings() {
   const [armConfirmOpen, setArmConfirmOpen] = useState(false);
   const [capUsd, setCapUsd] = useState<string | null>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signOut } = useAuth();
 
   // Lazily initialise capUsd from the live account data on first render.
@@ -248,7 +249,7 @@ export default function Settings() {
       )}
 
       <Section id="brokers" title="Broker connection">
-        <BrokerConnectionCard />
+        <BrokerConnectionCard autoOpen={new URLSearchParams(location.search).get("broker") === "reconnect"} />
       </Section>
 
       <Section title="Data sources">

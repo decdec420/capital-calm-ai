@@ -182,7 +182,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     try {
       // Fetch incidents and system_events in parallel
       const [incidentRes, eventRes] = await Promise.all([
-        supabase
+        (supabase as any)
           .from("incidents")
           .select(
             "id,incident_id,severity,status,ops_review_status,source_event_type," +
@@ -239,7 +239,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     async (incidentId: string, newStatus: OpsReviewStatus): Promise<void> => {
       if (!user) throw new Error("Not signed in");
 
-      const { error: rpcError } = await supabase.rpc("update_incident_ops_status", {
+      const { error: rpcError } = await (supabase as any).rpc("update_incident_ops_status", {
         p_incident_id: incidentId,
         p_ops_status: newStatus,
       });

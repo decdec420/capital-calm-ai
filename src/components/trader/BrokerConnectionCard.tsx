@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/trader/StatusBadge";
 import { BrokerConnectDialog } from "@/components/trader/BrokerConnectDialog";
@@ -8,13 +8,17 @@ import { toast } from "sonner";
 import { useRelativeTime } from "@/hooks/useRelativeTime";
 import { Wifi, WifiOff, AlertTriangle, Loader2, RotateCw, Trash2 } from "lucide-react";
 
-export function BrokerConnectionCard() {
+export function BrokerConnectionCard({ autoOpen = false }: { autoOpen?: boolean }) {
   const { health, loading } = useBrokerHealth();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [probing, setProbing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
 
   const lastSuccess = useRelativeTime(health.lastSuccessAt ? new Date(health.lastSuccessAt).getTime() : null);
+
+  useEffect(() => {
+    if (autoOpen) setDialogOpen(true);
+  }, [autoOpen]);
 
   const onProbe = async () => {
     setProbing(true);

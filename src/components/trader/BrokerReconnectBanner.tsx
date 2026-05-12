@@ -36,7 +36,7 @@ export function BrokerReconnectBanner() {
             Coinbase rejected the stored credentials — live trading and market reads are blocked until you reconnect.
           </span>
         </div>
-        <Button size="sm" onClick={() => navigate("/settings#brokers")}>
+        <Button size="sm" onClick={() => navigate("/settings?broker=reconnect#brokers")}>
           Reconnect
         </Button>
         <Button size="sm" variant="ghost" onClick={onDismiss} aria-label="Dismiss for 1 hour">
