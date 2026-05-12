@@ -10,6 +10,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
+import { MODEL_REGISTRY } from "../_shared/ai-provenance.ts";
 
 
 
@@ -106,7 +107,7 @@ async function proposeForSymbol(
     method: "POST",
     headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "google/gemini-3-flash-preview",
+      model: MODEL_REGISTRY.EXPERIMENT,
       messages: [
         { role: "system", content: `You are the Trader OS R&D Copilot proposing a tweak for ${symbol}. One knob at a time. Hypothesis must be specific to this symbol's behavior.` },
         { role: "user", content: `Propose ONE parameter to test for ${symbol}:\n${JSON.stringify(contextPacket, null, 2)}` },

@@ -27,7 +27,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { log } from "../_shared/logger.ts";
 import { corsHeaders, makeCorsHeaders } from "../_shared/cors.ts";
 
-const CHUCK_MODEL = "anthropic/claude-sonnet-4-6";
+const CHUCK_MODEL = "google/gemini-3-flash-preview";
 
 const CHUCK_SYSTEM = `You are Chuck Rhoades, U.S. Attorney for the Southern District of New York, now serving as the independent compliance officer for Axe Capital's autonomous trading desk.
 

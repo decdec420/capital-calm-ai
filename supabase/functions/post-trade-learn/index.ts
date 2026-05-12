@@ -34,7 +34,7 @@ import {
 
 // Trade Coach uses Sonnet — grades entries A-D and writes actionable lessons.
 // Runs at most 2×/day (daily trade cap). Quality of feedback matters here.
-const TRADE_COACH_MODEL = "anthropic/claude-sonnet-4-6";
+const TRADE_COACH_MODEL = "google/gemini-3.1-pro-preview";
 
 interface TradeRow {
   id: string;

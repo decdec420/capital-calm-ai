@@ -9,8 +9,14 @@ import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 
 
 Deno.serve(async (req) => {
-    const cors = makeCorsHeaders(req);
-if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  const cors = makeCorsHeaders(req);
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -105,10 +111,3 @@ if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
     return json({ error: e instanceof Error ? e.message : "unknown error" }, 500);
   }
 });
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...cors, "Content-Type": "application/json" },
-  });
-}
