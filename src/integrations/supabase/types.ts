@@ -450,6 +450,7 @@ export type Database = {
       daily_briefs: {
         Row: {
           ai_model: string
+          ai_provenance: Json | null
           brief_date: string
           brief_text: string
           caution_flags: string[]
@@ -463,6 +464,7 @@ export type Database = {
         }
         Insert: {
           ai_model?: string
+          ai_provenance?: Json | null
           brief_date: string
           brief_text?: string
           caution_flags?: string[]
@@ -476,6 +478,7 @@ export type Database = {
         }
         Update: {
           ai_model?: string
+          ai_provenance?: Json | null
           brief_date?: string
           brief_text?: string
           caution_flags?: string[]
@@ -545,6 +548,74 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      decision_memory_simulations: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          decision_memory_id: string
+          failure_reason: string | null
+          id: string
+          input_snapshot: Json
+          lookahead_window: string
+          result: Json | null
+          score: number | null
+          simulation_type: string
+          started_at: string | null
+          status: string
+          strategy_id: string | null
+          symbol: string | null
+          updated_at: string
+          used_for_strategy_learning: boolean
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          decision_memory_id: string
+          failure_reason?: string | null
+          id?: string
+          input_snapshot?: Json
+          lookahead_window?: string
+          result?: Json | null
+          score?: number | null
+          simulation_type?: string
+          started_at?: string | null
+          status?: string
+          strategy_id?: string | null
+          symbol?: string | null
+          updated_at?: string
+          used_for_strategy_learning?: boolean
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          decision_memory_id?: string
+          failure_reason?: string | null
+          id?: string
+          input_snapshot?: Json
+          lookahead_window?: string
+          result?: Json | null
+          score?: number | null
+          simulation_type?: string
+          started_at?: string | null
+          status?: string
+          strategy_id?: string | null
+          symbol?: string | null
+          updated_at?: string
+          used_for_strategy_learning?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "decision_memory_simulations_decision_memory_id_fkey"
+            columns: ["decision_memory_id"]
+            isOneToOne: false
+            referencedRelation: "decision_memory"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       doctrine_settings: {
         Row: {
@@ -745,6 +816,8 @@ export type Database = {
           parameter: string
           priority: string
           proposed_by: string
+          source: string
+          source_recommendation_id: string | null
           status: string
           strategy_id: string | null
           symbol: string
@@ -767,6 +840,8 @@ export type Database = {
           parameter?: string
           priority?: string
           proposed_by?: string
+          source?: string
+          source_recommendation_id?: string | null
           status?: string
           strategy_id?: string | null
           symbol?: string
@@ -789,6 +864,8 @@ export type Database = {
           parameter?: string
           priority?: string
           proposed_by?: string
+          source?: string
+          source_recommendation_id?: string | null
           status?: string
           strategy_id?: string | null
           symbol?: string
@@ -796,7 +873,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "experiments_source_recommendation_id_fkey"
+            columns: ["source_recommendation_id"]
+            isOneToOne: false
+            referencedRelation: "strategy_learning_recommendations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       guardrails: {
         Row: {
@@ -840,6 +925,99 @@ export type Database = {
           updated_at?: string
           user_id?: string
           utilization?: number
+        }
+        Relationships: []
+      }
+      incidents: {
+        Row: {
+          actions_taken: string[]
+          affected_agent: string
+          affected_system: string
+          affected_workflow: string
+          created_at: string
+          detected_at: string
+          evidence: Json
+          follow_up_recommendation: string
+          hall_version: string
+          id: string
+          incident_id: string
+          money_at_risk: boolean
+          ops_review_status: string
+          paper_or_live_mode: string
+          recovery_result: string
+          recurrence_count: number
+          related_events: Json
+          resolved_at: string | null
+          root_cause: string
+          safe_to_trade_status: string
+          severity: string
+          source_event_type: string | null
+          status: string
+          symptoms: string[]
+          trading_blocked: boolean
+          updated_at: string
+          user_attention_required: boolean
+          user_id: string
+        }
+        Insert: {
+          actions_taken?: string[]
+          affected_agent: string
+          affected_system: string
+          affected_workflow?: string
+          created_at?: string
+          detected_at?: string
+          evidence?: Json
+          follow_up_recommendation?: string
+          hall_version?: string
+          id?: string
+          incident_id: string
+          money_at_risk?: boolean
+          ops_review_status?: string
+          paper_or_live_mode?: string
+          recovery_result?: string
+          recurrence_count?: number
+          related_events?: Json
+          resolved_at?: string | null
+          root_cause?: string
+          safe_to_trade_status?: string
+          severity: string
+          source_event_type?: string | null
+          status?: string
+          symptoms?: string[]
+          trading_blocked?: boolean
+          updated_at?: string
+          user_attention_required?: boolean
+          user_id: string
+        }
+        Update: {
+          actions_taken?: string[]
+          affected_agent?: string
+          affected_system?: string
+          affected_workflow?: string
+          created_at?: string
+          detected_at?: string
+          evidence?: Json
+          follow_up_recommendation?: string
+          hall_version?: string
+          id?: string
+          incident_id?: string
+          money_at_risk?: boolean
+          ops_review_status?: string
+          paper_or_live_mode?: string
+          recovery_result?: string
+          recurrence_count?: number
+          related_events?: Json
+          resolved_at?: string | null
+          root_cause?: string
+          safe_to_trade_status?: string
+          severity?: string
+          source_event_type?: string | null
+          status?: string
+          symptoms?: string[]
+          trading_blocked?: boolean
+          updated_at?: string
+          user_attention_required?: boolean
+          user_id?: string
         }
         Relationships: []
       }
@@ -1220,6 +1398,69 @@ export type Database = {
           },
         ]
       }
+      strategy_learning_recommendations: {
+        Row: {
+          ai_provenance: Json | null
+          confidence: number
+          created_at: string
+          decision: string | null
+          evidence_count: number
+          id: string
+          market_regime: string | null
+          reason_code: string
+          recommendation: string
+          recommendation_type: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sample_quality: string
+          status: string
+          strategy_id: string | null
+          supporting_simulation_ids: string[]
+          symbol: string | null
+          user_id: string
+        }
+        Insert: {
+          ai_provenance?: Json | null
+          confidence?: number
+          created_at?: string
+          decision?: string | null
+          evidence_count?: number
+          id?: string
+          market_regime?: string | null
+          reason_code: string
+          recommendation: string
+          recommendation_type: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sample_quality?: string
+          status?: string
+          strategy_id?: string | null
+          supporting_simulation_ids?: string[]
+          symbol?: string | null
+          user_id: string
+        }
+        Update: {
+          ai_provenance?: Json | null
+          confidence?: number
+          created_at?: string
+          decision?: string | null
+          evidence_count?: number
+          id?: string
+          market_regime?: string | null
+          reason_code?: string
+          recommendation?: string
+          recommendation_type?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sample_quality?: string
+          status?: string
+          strategy_id?: string | null
+          supporting_simulation_ids?: string[]
+          symbol?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       strategy_reviews: {
         Row: {
           ai_model: string | null
@@ -1547,6 +1788,7 @@ export type Database = {
           proposed_target: number | null
           regime: string
           rejected_reason: string | null
+          replay_packet: Json | null
           setup_score: number
           side: string
           size_pct: number
@@ -1583,6 +1825,7 @@ export type Database = {
           proposed_target?: number | null
           regime?: string
           rejected_reason?: string | null
+          replay_packet?: Json | null
           setup_score?: number
           side: string
           size_pct?: number
@@ -1619,6 +1862,7 @@ export type Database = {
           proposed_target?: number | null
           regime?: string
           rejected_reason?: string | null
+          replay_packet?: Json | null
           setup_score?: number
           side?: string
           size_pct?: number
@@ -1838,6 +2082,36 @@ export type Database = {
         }
         Relationships: []
       }
+      ops_incidents_timeline: {
+        Row: {
+          actions_taken: string[] | null
+          affected_agent: string | null
+          affected_system: string | null
+          affected_workflow: string | null
+          created_at: string | null
+          evidence: Json | null
+          follow_up_recommendation: string | null
+          hall_status: string | null
+          human_id: string | null
+          id: string | null
+          mode: string | null
+          money_at_risk: boolean | null
+          ops_status: string | null
+          recovery_result: string | null
+          resolved_at: string | null
+          root_cause: string | null
+          severity: string | null
+          source: string | null
+          source_event_type: string | null
+          source_id: string | null
+          tags: string[] | null
+          trading_blocked: boolean | null
+          updated_at: string | null
+          user_attention_required: boolean | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
       strategy_performance_ci_v: {
         Row: {
           avg_pnl: number | null
@@ -1978,14 +2252,19 @@ export type Database = {
         }[]
       }
       get_daily_brief_cron_token: { Args: never; Returns: string }
+      get_enrich_simulations_cron_token: { Args: never; Returns: string }
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
+      get_hall_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_katrina_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
       get_post_trade_learn_token: { Args: never; Returns: string }
+      get_process_decision_memory_cron_token: { Args: never; Returns: string }
+      get_process_strategy_learning_cron_token: { Args: never; Returns: string }
       get_rollover_day_cron_token: { Args: never; Returns: string }
       get_signal_engine_cron_token: { Args: never; Returns: string }
+      get_strategy_learning_cron_token: { Args: never; Returns: string }
       notify_telegram: {
         Args: {
           p_event_type: string
@@ -2004,6 +2283,10 @@ export type Database = {
           p_status: string
           p_user_id: string
         }
+        Returns: undefined
+      }
+      update_incident_ops_status: {
+        Args: { p_incident_id: string; p_ops_status: string }
         Returns: undefined
       }
       upsert_broker_secret: {
