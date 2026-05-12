@@ -31,18 +31,21 @@ type StoredCoinbaseCredentials = {
 };
 
 async function getStoredCoinbaseCredentials(admin: ReturnType<typeof createClient>): Promise<StoredCoinbaseCredentials> {
-  const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME")?.trim();
-  const envKeyPem = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM")?.trim();
-  if (envKeyName && envKeyPem) {
-    return { api_key_name: envKeyName, api_key_private_pem: envKeyPem };
-  }
-
   const { data, error } = await admin.rpc("get_coinbase_broker_credentials");
   if (error) throw new Error(`Vault read failed: ${error.message}`);
   const row = Array.isArray(data) ? data[0] : data;
+  if (row?.api_key_name && row?.api_key_private_pem) {
+    return {
+      api_key_name: row.api_key_name,
+      api_key_private_pem: row.api_key_private_pem,
+    };
+  }
+
+  const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME")?.trim();
+  const envKeyPem = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM")?.trim();
   return {
-    api_key_name: row?.api_key_name ?? null,
-    api_key_private_pem: row?.api_key_private_pem ?? null,
+    api_key_name: envKeyName || null,
+    api_key_private_pem: envKeyPem || null,
   };
 }
 
