@@ -309,7 +309,7 @@ export async function fetchCandles(
       await sleep(backoffMs);
     }
     try {
-      const r = await fetch(url);
+      const r = await fetch(url, { signal: AbortSignal.timeout(15_000) });
       if (r.status === 429 || r.status >= 500) {
         lastError = new Error(`HTTP ${r.status}`);
         continue; // retryable
@@ -365,11 +365,11 @@ export async function fetchTicker(
     timeframe: "ticker",
   };
   try {
-    let r = await fetch(`${CB}/products/${symbol}/ticker`);
+    let r = await fetch(`${CB}/products/${symbol}/ticker`, { signal: AbortSignal.timeout(10_000) });
     if (r.status === 429) {
       console.warn(`[market] Coinbase rate-limited on ${symbol} ticker — retrying in ~1s`);
       await sleep(1000);
-      r = await fetch(`${CB}/products/${symbol}/ticker`);
+      r = await fetch(`${CB}/products/${symbol}/ticker`, { signal: AbortSignal.timeout(10_000) });
     }
     if (!r.ok) {
       ctx.tracker?.recordFailure(key, `HTTP ${r.status}`);

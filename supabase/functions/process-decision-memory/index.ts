@@ -116,6 +116,22 @@ async function processOneRow(
     .select("id, simulation_type");
 
   if (insertErr) {
+    const errMsg = insertErr.message ?? "";
+    // Surface table-not-found as a system_event so pg_cron failures are visible in the dashboard
+    if (errMsg.includes("relation") && errMsg.includes("does not exist")) {
+      admin.from("system_events").insert({
+        user_id: row.user_id,
+        event_type: "learning_pipeline_schema_missing",
+        actor: "process_decision_memory",
+        payload: {
+          missing_table: "decision_memory_simulations",
+          error: errMsg,
+          note: "Apply pending migrations to fix: 20260511120000_catch_up_missing_schema.sql",
+        },
+      }).then(({ error: evtErr }: { error: { message: string } | null }) => {
+        if (evtErr) console.warn("[process-decision-memory] system_event insert failed:", evtErr.message);
+      });
+    }
     return {
       memoryId: row.id,
       userId: row.user_id,
@@ -123,7 +139,7 @@ async function processOneRow(
       jobsCompleted: 0,
       jobsFailed: 0,
       markedLearned: false,
-      error: `job insert failed: ${insertErr.message}`,
+      error: `job insert failed: ${errMsg}`,
     };
   }
 
@@ -308,8 +324,10 @@ Deno.serve(async (req: Request) => {
     const authHeader = req.headers.get("Authorization") ?? "";
     let userIds: string[] = [];
 
-    // Cron token auth
-    const { data: cronTokenData } = await admin.rpc("get_signal_engine_cron_token");
+    // Cron token auth — uses its own vault token, not signal-engine's
+    const { data: cronTokenData } = await admin
+      .rpc("get_process_decision_memory_cron_token")
+      .catch(() => ({ data: null }));
     const cronToken = (cronTokenData as string | null) ?? null;
     const isCron = !!(cronToken && authHeader === `Bearer ${cronToken}`);
 
