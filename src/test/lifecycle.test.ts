@@ -4,7 +4,9 @@ import {
   transitionTrade,
   transitionStrategy,
   appendTransition,
+  computeNewTrailingStop,
   evaluateTradeInCandle,
+  regimeFlippedAgainstTrade,
 } from "../../supabase/functions/_shared/lifecycle";
 
 describe("signal FSM", () => {
@@ -164,5 +166,156 @@ describe("evaluateTradeInCandle", () => {
       candle: { high: 106, low: 95, close: 105 },
     });
     expect(out.type).toBe("stop_hit");
+  });
+});
+
+describe("regimeFlippedAgainstTrade", () => {
+  it("long in trending_down is flipped", () => {
+    expect(regimeFlippedAgainstTrade("long", "trending_down")).toBe(true);
+  });
+  it("long in chop is flipped", () => {
+    expect(regimeFlippedAgainstTrade("long", "chop")).toBe(true);
+  });
+  it("long in trending_up is aligned", () => {
+    expect(regimeFlippedAgainstTrade("long", "trending_up")).toBe(false);
+  });
+  it("long in breakout is aligned", () => {
+    expect(regimeFlippedAgainstTrade("long", "breakout")).toBe(false);
+  });
+  it("short in trending_up is flipped", () => {
+    expect(regimeFlippedAgainstTrade("short", "trending_up")).toBe(true);
+  });
+  it("short in breakout is flipped", () => {
+    expect(regimeFlippedAgainstTrade("short", "breakout")).toBe(true);
+  });
+  it("short in trending_down is aligned", () => {
+    expect(regimeFlippedAgainstTrade("short", "trending_down")).toBe(false);
+  });
+  it("null regime returns false", () => {
+    expect(regimeFlippedAgainstTrade("long", null)).toBe(false);
+    expect(regimeFlippedAgainstTrade("short", null)).toBe(false);
+  });
+});
+
+describe("computeNewTrailingStop", () => {
+  // entry=$150, risk=$1.50 (TP1=$151.50), activation=1.5R=$152.25
+
+  it("returns null when candle.high is below activation threshold", () => {
+    expect(computeNewTrailingStop("long", 150, 1.5, 150, 152.0, 149.5)).toBeNull();
+  });
+
+  it("activates and returns new stop above current", () => {
+    // high=$152.50 → trail = $152.50 - $0.75 = $151.75
+    expect(computeNewTrailingStop("long", 150, 1.5, 150, 152.5, 151.0)).toBeCloseTo(151.75, 3);
+  });
+
+  it("returns null when trail candidate would not advance (never moves down)", () => {
+    // currentStop already $151.75; high=$152.40, candidate=$151.65 < $151.75 → no change
+    expect(computeNewTrailingStop("long", 150, 1.5, 151.75, 152.4, 151.5)).toBeNull();
+  });
+
+  it("advances when price moves to a new high", () => {
+    // currentStop $151.75, high=$153 → $153 - $0.75 = $152.25
+    expect(computeNewTrailingStop("long", 150, 1.5, 151.75, 153.0, 152.0)).toBeCloseTo(152.25, 3);
+  });
+
+  it("short side activates below entry", () => {
+    // entry=$100, risk=$2, activation=$97, low=$96.5 → candidate=$97.5
+    expect(computeNewTrailingStop("short", 100, 2, 100, 100.5, 96.5)).toBeCloseTo(97.5, 3);
+  });
+
+  it("returns null for zero riskPerUnit", () => {
+    expect(computeNewTrailingStop("long", 100, 0, 100, 110, 99)).toBeNull();
+  });
+});
+
+describe("evaluateTradeInCandle — regime_exit and trailing stop", () => {
+  const runnerBase = {
+    side: "long" as const,
+    entryPrice: 150,
+    stopPrice: 150,  // breakeven post-TP1
+    tp1Price: 151.5,
+    tp2Price: 154,
+    originalSize: 1,
+    remainingSize: 0.5,
+    tp1Filled: true,
+  };
+
+  it("regime_exit fires in runner phase when regime flips against long", () => {
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      candle: { high: 151, low: 150.2, close: 150.8 },
+      currentRegime: "trending_down",
+    });
+    expect(r.type).toBe("regime_exit");
+    if (r.type === "regime_exit") {
+      expect(r.fillPrice).toBe(150.8); // candle close
+      expect(r.closedQty).toBe(0.5);
+    }
+  });
+
+  it("regime_exit does NOT fire before TP1 (runner phase not started)", () => {
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      tp1Filled: false,
+      stopPrice: 148.5,
+      remainingSize: 1,
+      candle: { high: 151, low: 149, close: 150.5 },
+      currentRegime: "trending_down",
+    });
+    expect(r.type).toBe("hold");
+  });
+
+  it("regime_exit does not fire when regime is aligned", () => {
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      candle: { high: 151, low: 150.2, close: 150.8 },
+      currentRegime: "trending_up",
+    });
+    expect(r.type).toBe("hold");
+  });
+
+  it("stop takes priority over regime_exit when both triggered same candle", () => {
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      stopPrice: 150,
+      candle: { high: 151, low: 149.9, close: 150.5 },
+      currentRegime: "trending_down",
+    });
+    expect(r.type).toBe("stop_hit");
+    if (r.type === "stop_hit") expect(r.fillPrice).toBe(150);
+  });
+
+  it("trailing stop activates and returns newTrailingStop in hold", () => {
+    // high=$152.50 → trail=$151.75, low=$151.90 not hit → hold
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      candle: { high: 152.5, low: 151.9, close: 152.2 },
+      currentRegime: "trending_up",
+    });
+    expect(r.type).toBe("hold");
+    if (r.type === "hold") expect(r.newTrailingStop).toBeCloseTo(151.75, 3);
+  });
+
+  it("trailing stop hit in same candle (wick-and-reverse) → stop_hit at trail price", () => {
+    // high=$153 → trail=$152.25, but candle.low=$151 < $152.25 → stop_hit at $152.25
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      candle: { high: 153, low: 151, close: 151.5 },
+      currentRegime: "trending_up",
+    });
+    expect(r.type).toBe("stop_hit");
+    if (r.type === "stop_hit") expect(r.fillPrice).toBeCloseTo(152.25, 3);
+  });
+
+  it("no trail action when candle.high is below trail activation", () => {
+    // activation at $152.25, candle.high=$152.0 → no trail
+    const r = evaluateTradeInCandle({
+      ...runnerBase,
+      candle: { high: 152.0, low: 151.5, close: 151.8 },
+      currentRegime: "trending_up",
+    });
+    expect(r.type).toBe("hold");
+    if (r.type === "hold") expect(r.newTrailingStop).toBeUndefined();
   });
 });

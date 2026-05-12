@@ -199,14 +199,16 @@ describe("evaluateTradeInCandle — degenerate inputs", () => {
     expect(out.type).toBe("hold");
   });
 
-  it("holds when tp2Price is null after tp1Filled", () => {
+  it("holds when tp2Price is null after tp1Filled (candle below trail activation)", () => {
+    // Trail activates at entry(100) + 1.5×risk(5) = 107.5. Candle.high=106 stays below,
+    // so no trailing logic fires — just verifying null tp2Price doesn't crash.
     const out = evaluateTradeInCandle({
       ...longBase,
       tp1Filled: true,
       tp2Price: null,
       stopPrice: 100,
       remainingSize: 0.5,
-      candle: { high: 115, low: 101, close: 114 },
+      candle: { high: 106, low: 101, close: 105 },
     });
     expect(out.type).toBe("hold");
   });

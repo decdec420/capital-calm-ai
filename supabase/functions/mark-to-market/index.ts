@@ -187,7 +187,24 @@ async function runMarkToMarket(
     }),
   );
 
-  // 2b. Determine which users have live_trading_enabled.
+  // 2b. Batch-fetch current regime from market_intelligence for every active
+  //     (user_id, symbol) pair. Used by the regime-flip exit in the runner
+  //     phase — no extra per-trade DB round-trips needed.
+  const regimeMap = new Map<string, string | null>(); // key: `${userId}|${symbol}`
+  {
+    const uids = [...new Set(trades.map((t) => t.user_id))];
+    const syms = [...new Set(trades.map((t) => t.symbol))];
+    const { data: miRows } = await admin
+      .from("market_intelligence")
+      .select("user_id, symbol, regime")
+      .in("user_id", uids)
+      .in("symbol", syms);
+    for (const row of (miRows ?? []) as Array<{ user_id: string; symbol: string; regime: string | null }>) {
+      if (row.regime) regimeMap.set(`${row.user_id}|${row.symbol}`, row.regime);
+    }
+  }
+
+  // 2d. Determine which users have live_trading_enabled.
   //     Broker credentials are loaded once if any live user has open trades.
   const uniqueUserIds = Array.from(new Set(trades.map((t) => t.user_id)));
   const { data: sysRows } = await admin
@@ -230,6 +247,7 @@ async function runMarkToMarket(
     const sideMult = t.side === "long" ? 1 : -1;
     const originalSize = Number(t.original_size ?? t.size);
 
+    const currentRegime = regimeMap.get(`${t.user_id}|${t.symbol}`) ?? null;
     const action: InCandleAction = evaluateTradeInCandle({
       side: t.side,
       entryPrice: Number(t.entry_price),
@@ -241,6 +259,7 @@ async function runMarkToMarket(
       tp1Filled: !!t.tp1_filled,
       candle: buildEvaluationCandle(ticker, recent1m[t.symbol as Symbol] ?? null),
       stopAtBreakeven: !!t.tp1_filled,
+      currentRegime,
     });
 
     const bucket = perUserChanges.get(t.user_id) ?? {
@@ -254,9 +273,17 @@ async function runMarkToMarket(
       const upnlPct =
         ((px - Number(t.entry_price)) / Number(t.entry_price)) * 100 * sideMult;
 
+      // Trailing stop advance: update stop_loss when trail has moved.
+      // The next tick's stop check will close the trade if price reverses to it.
+      const trailUpdate = action.newTrailingStop != null
+        ? { stop_loss: action.newTrailingStop }
+        : {};
+
       // Tiny-move throttle (1¢ threshold) — avoid write storms when nothing changed.
+      // Trailing stop updates bypass the throttle — they must always land.
       const prev = t.current_price ?? 0;
       if (
+        action.newTrailingStop != null ||
         Math.abs(Number(prev) - px) >= 0.01 ||
         t.unrealized_pnl === null
       ) {
@@ -266,6 +293,7 @@ async function runMarkToMarket(
             current_price: px,
             unrealized_pnl: upnl,
             unrealized_pnl_pct: upnlPct,
+            ...trailUpdate,
           })
           .eq("id", t.id);
         updates += 1;
@@ -405,6 +433,123 @@ async function runMarkToMarket(
 
       bucket.realizedDelta += realizedHalf;
       bucket.unrealized += runnerUpnl;
+      perUserChanges.set(t.user_id, bucket);
+      continue;
+    }
+
+    if (action.type === "regime_exit") {
+      closed += 1;
+      const closedQty = action.closedQty;
+      let fillPx = action.fillPrice;
+      let closeBrokerOrderId: string | null = null;
+      let closeFeesUsd = 0;
+      // deno-lint-ignore no-explicit-any
+      let closeFill: any = null;
+
+      // LIVE MODE: place a market sell before closing the DB record.
+      if (liveUserIds.has(t.user_id) && brokerCreds) {
+        const { data: locked } = await admin
+          .from("trades")
+          .update({ status: "closing" })
+          .eq("id", t.id)
+          .eq("status", "open")
+          .select("id");
+        if (!locked || locked.length === 0) {
+          closed -= 1;
+          perUserChanges.set(t.user_id, bucket);
+          continue;
+        }
+        try {
+          const closeClientOrderId = `${t.id}-regime-exit`;
+          const fill = await placeMarketSell(
+            brokerCreds,
+            t.symbol,
+            closedQty.toFixed(8),
+            closeClientOrderId,
+          );
+          fillPx = fill.fillPrice;
+          closeBrokerOrderId = fill.orderId;
+          closeFeesUsd = Number.isFinite(fill.feesUsd) ? fill.feesUsd : 0;
+          closeFill = fill;
+          console.log(
+            `[MTM] LIVE REGIME_EXIT SELL filled ${t.symbol} ` +
+              `qty=${closedQty} @ $${fillPx} orderId=${closeBrokerOrderId}`,
+          );
+        } catch (brokerErr) {
+          await admin.from("trades").update({ status: "open" }).eq("id", t.id);
+          console.error(`[MTM] regime_exit broker sell failed for trade ${t.id}:`, brokerErr);
+          closed -= 1;
+          perUserChanges.set(t.user_id, bucket);
+          continue;
+        }
+      }
+
+      if (closeFill) {
+        await recordFill(admin, {
+          userId: t.user_id,
+          tradeId: t.id,
+          symbol: t.symbol,
+          fillKind: "stop",
+          proposedPrice: action.fillPrice,
+          fill: closeFill,
+        });
+      }
+
+      const realizedClose =
+        (fillPx - Number(t.entry_price)) * closedQty * sideMult;
+      const cumulativePnl = Number(t.pnl ?? 0) + realizedClose;
+      const pnlPct =
+        ((fillPx - Number(t.entry_price)) / Number(t.entry_price)) * 100 * sideMult;
+      const outcome = cumulativePnl >= 0 ? "win" : "loss";
+      const reason = `${closeBrokerOrderId ? "LIVE " : ""}Regime-flip exit @ $${fillPx.toFixed(2)} (regime: ${currentRegime ?? "unknown"})`;
+
+      const fsm = transitionTrade(
+        t.lifecycle_phase ?? (t.tp1_filled ? "tp1_hit" : "entered"),
+        "exited",
+        { actor: "engine", reason, meta: { fillPrice: fillPx, outcome, exitReason: "regime_exit" } },
+      );
+      const transition: LifecycleTransition = fsm.ok && fsm.transition
+        ? fsm.transition
+        : { phase: "exited", at: nowIso, by: "engine", reason };
+      const nextTransitions = appendTransition(t.lifecycle_transitions, transition);
+
+      const cumulativeExitFees = Number(t.exit_fees_usd ?? 0) + closeFeesUsd;
+      const entryFees = Number(t.entry_fees_usd ?? 0);
+      const netPnl = effectivePnl(cumulativePnl, entryFees, cumulativeExitFees);
+
+      await admin
+        .from("trades")
+        .update({
+          status: "closed",
+          size: 0,
+          current_price: fillPx,
+          unrealized_pnl: 0,
+          unrealized_pnl_pct: 0,
+          exit_price: fillPx,
+          pnl: cumulativePnl,
+          pnl_pct: pnlPct,
+          exit_fees_usd: cumulativeExitFees,
+          effective_pnl: netPnl,
+          closed_at: nowIso,
+          outcome,
+          lifecycle_phase: "exited",
+          lifecycle_transitions: nextTransitions,
+          notes: `${t.notes ?? ""}\n${reason} · realized $${realizedClose.toFixed(2)} · total $${cumulativePnl.toFixed(2)} · net $${netPnl.toFixed(2)}`
+            .trim(),
+          ...(closeBrokerOrderId ? { broker_close_order_id: closeBrokerOrderId } : {}),
+        })
+        .eq("id", t.id);
+      updates += 1;
+
+      await admin.from("journal_entries").insert({
+        user_id: t.user_id,
+        kind: "trade",
+        title: `Regime exit · ${t.symbol} ${cumulativePnl >= 0 ? "+" : ""}$${cumulativePnl.toFixed(2)}`,
+        summary: reason,
+        tags: ["regime_exit", t.symbol, t.strategy_version ?? "v2", outcome].filter(Boolean),
+      });
+
+      bucket.realizedDelta += realizedClose;
       perUserChanges.set(t.user_id, bucket);
       continue;
     }
