@@ -48,6 +48,8 @@ export type WatchedTable =
   | "doctrine_settings"
   | "pending_doctrine_changes"
   | "experiments"
+  | "incidents"
+  | "strategy_learning_recommendations"
   | "system_events"
   | "strategy_reviews";
 
@@ -61,6 +63,8 @@ const WATCHED_TABLES: WatchedTable[] = [
   "doctrine_settings",
   "pending_doctrine_changes",
   "experiments",
+  "incidents",
+  "strategy_learning_recommendations",
   "system_events",      // bobby_decision + katrina_recommendation events
   "strategy_reviews",   // needs_action flag from Katrina
 ];
@@ -102,7 +106,6 @@ export function RealtimeSubscriptionProvider({ children }: { children: ReactNode
 
     for (const table of WATCHED_TABLES) {
       ch = ch.on(
-        // @ts-expect-error — overloaded .on() signature; string literal is valid at runtime
         "postgres_changes",
         { event: "*", schema: "public", table, filter: `user_id=eq.${uid}` },
         () => {
