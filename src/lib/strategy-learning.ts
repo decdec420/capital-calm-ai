@@ -99,6 +99,7 @@ export interface EvidenceGroupKey {
   strategy_id: string | null;
   market_regime: string | null;
   reason_code: string;
+  blocker_codes?: string[];
   recommended_learning_action: LearningAction;
 }
 
@@ -153,6 +154,7 @@ export function groupEvidence(rows: EvidenceRow[]): EvidenceGroup[] {
       strategy_id: row.strategy_id,
       market_regime: row.market_regime,
       reason_code: row.reason_code,
+      blocker_codes: row.blocker_codes,
       recommended_learning_action: result.recommended_learning_action,
     };
 
@@ -476,6 +478,7 @@ export function buildExperimentProposalInput(rec: {
   confidence: number;
   evidence_count: number;
   recommendation: string;
+  status?: RecommendationStatus;
 }): ExperimentProposalInput {
   const paramFamily = reasonCodeToParameterFamily(rec.reason_code);
   const scope = [rec.symbol, rec.market_regime].filter(Boolean).join(" / ") || "all symbols";
