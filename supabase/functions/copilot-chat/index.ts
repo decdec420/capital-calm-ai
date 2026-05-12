@@ -17,6 +17,7 @@ import { buildEventModeContextInstruction } from "./event-mode-context.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { guardAiOutput, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
 import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
+import { MODEL_REGISTRY } from "../_shared/ai-provenance.ts";
 
 
 interface ChatMessage {
