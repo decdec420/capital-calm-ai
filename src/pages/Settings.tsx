@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 
-import { AlertTriangle, Compass, Plug, Wallet, Zap } from "lucide-react";
+import { AlertTriangle, Compass, LogOut, Plug, Wallet, Zap } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
@@ -21,6 +21,18 @@ import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { ProfilePicker } from "@/components/trader/ProfilePicker";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 import { toast } from "sonner";
 
@@ -32,6 +44,7 @@ export default function Settings() {
   const [armConfirmOpen, setArmConfirmOpen] = useState(false);
   const [capUsd, setCapUsd] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
 
   // Lazily initialise capUsd from the live account data on first render.
   // We keep it as a local string so the input stays editable before save.
@@ -265,6 +278,47 @@ export default function Settings() {
             <Compass className="h-3.5 w-3.5" />
             Replay tour
           </Button>
+        </div>
+      </Section>
+
+      <Section title="Account">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground truncate">
+              Signed in as {user?.email ?? "—"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Sign out ends your session on this device. The bot keeps running server-side.
+            </div>
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive shrink-0">
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Sign out of Capital Calm?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Your bot keeps running server-side. This only ends your browser session — you'll need to sign back in to see the UI.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Stay signed in</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={async () => {
+                    await signOut();
+                    toast.success("Signed out. Stay disciplined.");
+                  }}
+                >
+                  Sign out
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </Section>
 

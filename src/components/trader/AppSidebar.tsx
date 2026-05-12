@@ -115,7 +115,7 @@ export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile } = useAuth();
   const { alerts } = useAlerts();
   const { pending } = useSignals();
   const { counts: expCounts } = useExperiments();
@@ -140,10 +140,6 @@ export function AppSidebar() {
   const displayName = profile?.display_name || user?.email?.split("@")[0] || "Operator";
   const initials    = initialsFor(profile?.display_name, user?.email);
 
-  const handleSignOut = async () => {
-    await signOut();
-    toast.success("Signed out. Stay disciplined.");
-  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
@@ -252,13 +248,9 @@ export function AppSidebar() {
             >
               <Settings className="h-4 w-4" /> Settings
             </Link>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-destructive hover:bg-destructive/10"
-            >
-              <LogOut className="h-4 w-4" /> Sign out
-            </button>
+            <div className="px-2 py-1 text-[10px] text-muted-foreground">
+              Sign out lives in Settings → Account.
+            </div>
           </PopoverContent>
         </Popover>
       </SidebarFooter>
