@@ -51,7 +51,10 @@ export type WatchedTable =
   | "incidents"
   | "strategy_learning_recommendations"
   | "system_events"
-  | "strategy_reviews";
+  | "strategy_reviews"
+  | "bobby_directives"
+  | "broker_fills"
+  | "war_room_messages";
 
 const WATCHED_TABLES: WatchedTable[] = [
   "system_state",
@@ -67,6 +70,9 @@ const WATCHED_TABLES: WatchedTable[] = [
   "strategy_learning_recommendations",
   "system_events",      // bobby_decision + katrina_recommendation events
   "strategy_reviews",   // needs_action flag from Katrina
+  "bobby_directives",
+  "broker_fills",
+  "war_room_messages",
 ];
 
 // ── Context ───────────────────────────────────────────────────
