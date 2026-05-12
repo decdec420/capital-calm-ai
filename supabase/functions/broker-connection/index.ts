@@ -28,8 +28,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // ── Handler ──────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
-    const cors = makeCorsHeaders(req);
-if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  const cors = corsHeaders;
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   // Auth
   const authHeader = req.headers.get("Authorization") ?? "";
