@@ -341,6 +341,8 @@ function baseSystem(overrides: Partial<SystemState> = {}): SystemState {
       ranAt: new Date(NOW_MS - 60_000).toISOString(),
       setupScore: 0.8,
       gateReasons: [],
+      perSymbol: [],
+      chosenSymbol: null,
       proposedTrades: [],
       signalCount: 0,
     },
