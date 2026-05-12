@@ -58,20 +58,27 @@ export const PROMPT_REGISTRY = {
 
 export type PromptKey = keyof typeof PROMPT_REGISTRY;
 
+// Source of truth for which model each role uses on the Lovable AI Gateway.
+// Keep cheapest fit-for-purpose. Only models in the gateway's supported list
+// are allowed — Anthropic is NOT supported and would 400 on every call.
 export const MODEL_REGISTRY = {
-  TAYLOR:              "google/gemini-3-flash-preview",
-  BOBBY:               "anthropic/claude-sonnet-4-6",
-  HALL:                "google/gemini-2.5-flash",
-  BILL:                "google/gemini-2.5-flash",
-  MAFEE:               "google/gemini-2.5-flash-lite",
-  WENDY:               "anthropic/claude-sonnet-4-6",
-  EXPERIMENT:          "google/gemini-3-flash-preview",
-  DAILY_BRIEF:         "google/gemini-2.5-flash",
-  JOURNAL_EXPLAIN:     "google/gemini-3-flash-preview",
-  MARKET_BRIEF:        "google/gemini-2.5-flash-lite",
-  SIGNAL_EXPLAIN:      "google/gemini-3-flash-preview",
-  WAGS:                "google/gemini-3-flash-preview",
-  BOBBY_ORCHESTRATION: "google/gemini-2.0-flash-001",
+  TAYLOR:              "google/gemini-3-flash-preview",  // technical analyst — default
+  BOBBY:               "google/gemini-3.1-pro-preview",  // risk manager — needs reasoning
+  HALL:                "google/gemini-2.5-flash",        // brain trust generalist
+  BILL:                "google/gemini-2.5-flash",        // brain trust pattern
+  MAFEE:               "google/gemini-2.5-flash-lite",   // brain trust macro — cheapest
+  WENDY:               "google/gemini-3.1-pro-preview",  // post-trade coach — needs reasoning
+  EXPERIMENT:          "google/gemini-3-flash-preview",  // R&D proposer
+  DAILY_BRIEF:         "google/gemini-2.5-flash",        // daily briefing
+  JOURNAL_EXPLAIN:     "google/gemini-3-flash-preview",  // journal explainer
+  MARKET_BRIEF:        "google/gemini-2.5-flash-lite",   // short market brief — cheapest
+  SIGNAL_EXPLAIN:      "google/gemini-3-flash-preview",  // signal explainer
+  WAGS:                "google/gemini-3-flash-preview",  // copilot / COO
+  BOBBY_ORCHESTRATION: "google/gemini-3-flash-preview",  // was retired 2.0-flash-001
+  COPILOT:             "google/gemini-3-flash-preview",  // copilot chat
+  JESSICA:             "google/gemini-2.5-flash",        // heartbeat orchestrator
+  CHUCK:               "google/gemini-3-flash-preview",  // chuck agent
+  SPYROS:              "google/gemini-2.5-flash",        // katrina/spyros
   NONE:                "none",
 } as const;
 
