@@ -489,6 +489,63 @@ export type Database = {
         }
         Relationships: []
       }
+      decision_memory: {
+        Row: {
+          blocker_codes: string[]
+          confidence: number | null
+          created_at: string
+          event_type: string
+          id: string
+          market_regime: string | null
+          mode: string
+          reason_code: string
+          replay_packet: Json | null
+          setup_score: number | null
+          severity: string
+          source_agent: string
+          strategy_id: string | null
+          symbol: string | null
+          used_for_learning: boolean
+          user_id: string
+        }
+        Insert: {
+          blocker_codes?: string[]
+          confidence?: number | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          market_regime?: string | null
+          mode: string
+          reason_code: string
+          replay_packet?: Json | null
+          setup_score?: number | null
+          severity: string
+          source_agent?: string
+          strategy_id?: string | null
+          symbol?: string | null
+          used_for_learning?: boolean
+          user_id: string
+        }
+        Update: {
+          blocker_codes?: string[]
+          confidence?: number | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          market_regime?: string | null
+          mode?: string
+          reason_code?: string
+          replay_packet?: Json | null
+          setup_score?: number | null
+          severity?: string
+          source_agent?: string
+          strategy_id?: string | null
+          symbol?: string | null
+          used_for_learning?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
       doctrine_settings: {
         Row: {
           consecutive_loss_limit: number
@@ -830,6 +887,7 @@ export type Database = {
       }
       market_intelligence: {
         Row: {
+          ai_provenance: Json | null
           candle_count_1d: number | null
           candle_count_1h: number | null
           candle_count_4h: number | null
@@ -861,6 +919,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_provenance?: Json | null
           candle_count_1d?: number | null
           candle_count_1h?: number | null
           candle_count_4h?: number | null
@@ -892,6 +951,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ai_provenance?: Json | null
           candle_count_1d?: number | null
           candle_count_1h?: number | null
           candle_count_4h?: number | null
