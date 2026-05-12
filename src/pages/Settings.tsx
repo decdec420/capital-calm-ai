@@ -44,6 +44,7 @@ export default function Settings() {
   const [armConfirmOpen, setArmConfirmOpen] = useState(false);
   const [capUsd, setCapUsd] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
 
   // Lazily initialise capUsd from the live account data on first render.
   // We keep it as a local string so the input stays editable before save.
