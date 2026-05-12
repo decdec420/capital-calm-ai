@@ -455,14 +455,14 @@ describe("computePortfolioRisk", () => {
     const result = computePortfolioRisk(baseInput());
     // The result has no 'create', 'insert', or 'approve' methods
     expect(typeof result).toBe("object");
-    expect((result as Record<string, unknown>).create).toBeUndefined();
-    expect((result as Record<string, unknown>).insert).toBeUndefined();
-    expect((result as Record<string, unknown>).approve).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).create).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).insert).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).approve).toBeUndefined();
   });
 
   it("portfolio risk does NOT approve signals", () => {
     const result = computePortfolioRisk(baseInput());
-    expect((result as Record<string, unknown>).approveSignal).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).approveSignal).toBeUndefined();
   });
 
   it("portfolio risk does NOT mutate doctrine", () => {
@@ -475,7 +475,7 @@ describe("computePortfolioRisk", () => {
   it("portfolio risk does NOT mutate strategies", () => {
     // computePortfolioRisk doesn't accept strategies at all — verify input shape
     const input = baseInput();
-    expect((input as Record<string, unknown>).strategies).toBeUndefined();
+    expect((input as unknown as Record<string, unknown>).strategies).toBeUndefined();
   });
 
   // ── Unrealized PnL aggregation ─────────────────────────────────────────────
