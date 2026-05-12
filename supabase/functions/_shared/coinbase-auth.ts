@@ -97,10 +97,10 @@ export async function signCoinbaseJwt(
     .join("");
 
   const header = { alg: "ES256", kid: keyName, nonce, typ: "JWT" };
-  const payload: Record<string, string | number> = {
+  const payload: Record<string, string | number | string[]> = {
     iss: "cdp",
     sub: keyName,
-    aud: "cdp_service",
+    aud: ["cdp_service"],
     nbf: now,
     exp: now + 120,
   };
