@@ -1790,9 +1790,7 @@ async function runTickForUser(
     if (pbA !== pbB) return pbB - pbA;
     return b.regime.setupScore - a.regime.setupScore;
   });
-  const winner = tradable[0];
-
-  const perSymbol: PerSymbolSnapshot[] = candidates.map((c) => ({
+  const perSymbolNoWinner: PerSymbolSnapshot[] = candidates.map((c) => ({
     symbol: c.symbol,
     lastPrice: c.lastPrice,
     regime: c.regime.regime,
@@ -1802,10 +1800,10 @@ async function runTickForUser(
     todScore: c.regime.todScore,
     pullback: c.regime.pullback,
     lockGate: c.lockGate ?? null,
-    chosen: winner?.symbol === c.symbol,
+    chosen: false,
   }));
 
-  if (!winner) {
+  if (tradable.length === 0) {
     const gateReasons: GateReason[] = candidates.flatMap((c) => {
       if (c.lockGate) return [c.lockGate];
       if (c.regime.regime === "chop") {
@@ -1845,7 +1843,7 @@ async function runTickForUser(
 
     await persistSnapshot(admin, userId, {
       gateReasons,
-      perSymbol,
+      perSymbol: perSymbolNoWinner,
       chosenSymbol: null,
     });
 
@@ -1891,9 +1889,36 @@ async function runTickForUser(
       reason: "no qualifying setup",
       gateReasons,
       expiredCount,
-      perSymbol,
+      perSymbol: perSymbolNoWinner,
     };
   }
+
+  // ── Stage 2.5: waterfall — try each tradable symbol until one passes AI ──
+  // Symbols are ranked by setup score (pullback-boosted). Taylor evaluates them
+  // in order. An AI_DISCRETIONARY_SKIP falls through to the next rather than
+  // wasting the tick. All gate failures (doctrine, risk manager, etc.) are still
+  // immediate exits — only Taylor's own skip triggers the fallthrough.
+  const aiSkippedSymbols: string[] = [];
+  for (const winner of tradable) {
+    // Reset per-signal strategy context — the regime router may pick different
+    // strategies for different symbols, so start fresh each iteration.
+    strategyId = approvedStrategy?.id ?? null;
+    strategyVersion = approvedStrategy?.version ?? "signal-engine v2 (ladder)";
+    strategyRiskWeight = Math.max(0.25, Math.min(2.0, Number(approvedStrategy?.risk_weight ?? 1.0)));
+    stratStopAtrMult = paramNumOf(stratParams, "stop_atr_mult", 1.5);
+    stratTpRMult = paramNumOf(stratParams, "tp_r_mult", 2);
+    const perSymbol: PerSymbolSnapshot[] = candidates.map((c) => ({
+      symbol: c.symbol,
+      lastPrice: c.lastPrice,
+      regime: c.regime.regime,
+      confidence: c.regime.confidence,
+      setupScore: c.regime.setupScore,
+      volatility: c.regime.volatility,
+      todScore: c.regime.todScore,
+      pullback: c.regime.pullback,
+      lockGate: c.lockGate ?? null,
+      chosen: winner.symbol === c.symbol,
+    }));
 
   // ── Stage 3: context packet + AI call ──────────────────────────
   const intel = intelligenceBySymbol[winner.symbol] ?? null;
@@ -2243,15 +2268,8 @@ async function runTickForUser(
       summary: decision.reasoning ?? "AI chose to skip.",
       tags: [winner.symbol, winner.regime.regime, winner.regime.volatility],
     });
-    return {
-      userId,
-      tick: "skipped",
-      symbol: winner.symbol,
-      reasoning: decision.reasoning,
-      gateReasons: [skipGate],
-      expiredCount,
-      perSymbol,
-    };
+    aiSkippedSymbols.push(winner.symbol);
+    continue; // waterfall: try next tradable symbol
   }
 
   // ── Stage 4: derive entry/stop, then size by % risk ──────────
@@ -2474,11 +2492,8 @@ async function runTickForUser(
   // pushed a borderline signal below the threshold. Drop it here rather than
   // persisting a sub-threshold signal that the operator would reject anyway.
   if (conf < MIN_CONFIDENCE) {
-    return {
-      symbol: winner.symbol,
-      outcome: "skipped",
-      reason: `coach_penalty: conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
-    };
+    aiSkippedSymbols.push(winner.symbol);
+    continue; // waterfall: try next tradable symbol
   }
   // Phase 1 (Kelly-lite): scale the doctrine RISK_PER_TRADE_PCT by the
   // approved strategy's risk_weight. A weight of 1.0 = no change. The
@@ -3455,6 +3470,34 @@ async function runTickForUser(
     gateReasons: softGates,
     expiredCount,
     perSymbol,
+  };
+  } // end for (const winner of tradable) — waterfall
+
+  // Every tradable symbol was AI-skipped — surface as a distinct tick type
+  // so the learning pipeline can see the full waterfall outcome.
+  const perSymbolAllSkipped: PerSymbolSnapshot[] = candidates.map((c) => ({
+    symbol: c.symbol,
+    lastPrice: c.lastPrice,
+    regime: c.regime.regime,
+    confidence: c.regime.confidence,
+    setupScore: c.regime.setupScore,
+    volatility: c.regime.volatility,
+    todScore: c.regime.todScore,
+    pullback: c.regime.pullback,
+    lockGate: c.lockGate ?? null,
+    chosen: false,
+  }));
+  await persistSnapshot(admin, userId, {
+    gateReasons: [],
+    perSymbol: perSymbolAllSkipped,
+    chosenSymbol: null,
+  });
+  return {
+    userId,
+    tick: "all_ai_skipped",
+    symbols: aiSkippedSymbols,
+    expiredCount,
+    perSymbol: perSymbolAllSkipped,
   };
 }
 
