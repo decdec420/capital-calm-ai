@@ -61,10 +61,13 @@ interface OpenTradeRow {
   stop_loss: number | null;
   take_profit: number | null;
   tp1_price: number | null;
+  tp2_price: number | null;
   tp1_filled: boolean | null;
   pnl: number | null;
   current_price: number | null;
   unrealized_pnl: number | null;
+  entry_fees_usd: number | null;
+  exit_fees_usd: number | null;
   lifecycle_phase: TradeLifecyclePhase | null;
   lifecycle_transitions: LifecycleTransition[] | null;
   status: string;
@@ -107,7 +110,7 @@ async function runMarkToMarket(
   let openQuery = admin
     .from("trades")
     .select(
-      "id,user_id,symbol,side,size,original_size,entry_price,stop_loss,take_profit,tp1_price,tp1_filled,pnl,current_price,unrealized_pnl,lifecycle_phase,lifecycle_transitions,status,strategy_id,strategy_version,notes",
+      "id,user_id,symbol,side,size,original_size,entry_price,stop_loss,take_profit,tp1_price,tp2_price,tp1_filled,pnl,current_price,unrealized_pnl,entry_fees_usd,exit_fees_usd,lifecycle_phase,lifecycle_transitions,status,strategy_id,strategy_version,notes",
     )
     .eq("status", "open");
   if (opts.userId) {
@@ -238,6 +241,7 @@ async function runMarkToMarket(
   let updates = 0;
   let closed = 0;
   let tp1Fills = 0;
+  let regimeExits = 0;
 
   for (const t of trades) {
     const ticker = tickers[t.symbol as Symbol];
@@ -439,6 +443,7 @@ async function runMarkToMarket(
 
     if (action.type === "regime_exit") {
       closed += 1;
+      regimeExits += 1;
       const closedQty = action.closedQty;
       let fillPx = action.fillPrice;
       let closeBrokerOrderId: string | null = null;
@@ -728,6 +733,7 @@ async function runMarkToMarket(
     updates,
     closed,
     tp1Fills,
+    regimeExits,
     ranAt: nowIso,
   };
 }

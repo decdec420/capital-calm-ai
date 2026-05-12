@@ -1083,6 +1083,20 @@ async function runTickForUser(
       perSymbol: [],
       chosenSymbol: null,
     });
+    recordNonTrade(admin, {
+      userId,
+      reasonCode: "PORTFOLIO_RISK_BLOCK",
+      severity: "halt",
+      mode: isPaper ? "paper" : "live",
+      blockerCodes: [GATE_CODES.DOCTRINE_CORRELATION_BLOCK],
+      replayPacket: buildNonTradePacket({
+        symbol: null, regime: null, setupScore: null, confidence: null,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.DOCTRINE_CORRELATION_BLOCK],
+        reason: corrGate.message,
+        meta: { openTrades: totalOpenTrades, cap: MAX_CORRELATED_POSITIONS },
+      }),
+    });
     return {
       userId,
       tick: "correlation_cap",
@@ -1118,6 +1132,20 @@ async function runTickForUser(
         gateReasons: [exposureGate],
         perSymbol: [],
         chosenSymbol: null,
+      });
+      recordNonTrade(admin, {
+        userId,
+        reasonCode: "PORTFOLIO_RISK_BLOCK",
+        severity: "halt",
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.DOCTRINE_CORRELATION_BLOCK],
+        replayPacket: buildNonTradePacket({
+          symbol: null, regime: null, setupScore: null, confidence: null,
+          mode: isPaper ? "paper" : "live",
+          blockerCodes: [GATE_CODES.DOCTRINE_CORRELATION_BLOCK],
+          reason: exposureGate.message,
+          meta: { bookExposurePct, cap: MAX_BOOK_EXPOSURE_PCT, bookNotional, equity },
+        }),
       });
       return {
         userId,
@@ -1180,6 +1208,20 @@ async function runTickForUser(
       perSymbol: [],
       chosenSymbol: null,
     });
+    recordNonTrade(admin, {
+      userId,
+      reasonCode: "COOLDOWN_ACTIVE",
+      severity: "halt",
+      mode: isPaper ? "paper" : "live",
+      blockerCodes: [GATE_CODES.CONSECUTIVE_LOSS_HARD_STOP],
+      replayPacket: buildNonTradePacket({
+        symbol: null, regime: null, setupScore: null, confidence: null,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.CONSECUTIVE_LOSS_HARD_STOP],
+        reason: tiltGate.message,
+        meta: { consecutiveLosses, limit: consecutiveLossLimit },
+      }),
+    });
     return {
       userId,
       tick: "anti_tilt_hard_stop",
@@ -1213,6 +1255,20 @@ async function runTickForUser(
         gateReasons: [tiltGate],
         perSymbol: [],
         chosenSymbol: null,
+      });
+      recordNonTrade(admin, {
+        userId,
+        reasonCode: "COOLDOWN_ACTIVE",
+        severity: "skip",
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [GATE_CODES.ANTI_TILT_COOLDOWN],
+        replayPacket: buildNonTradePacket({
+          symbol: null, regime: null, setupScore: null, confidence: null,
+          mode: isPaper ? "paper" : "live",
+          blockerCodes: [GATE_CODES.ANTI_TILT_COOLDOWN],
+          reason: tiltGate.message,
+          meta: { consecutiveLosses, cooldownMinutes: cooldownMin, remainingMinutes: remainMin },
+        }),
       });
       return {
         userId,
