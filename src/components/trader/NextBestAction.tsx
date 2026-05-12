@@ -82,7 +82,9 @@ export function NextBestAction({ onToggleBot }: NextBestActionProps) {
   const { counts: expCounts } = useExperiments();
 
   const snapshot = system?.lastEngineSnapshot ?? null;
-  const dataStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null);
+  // Engine snapshot runs ~every 5 min via cron; flag stale only after 15 min (matches TAYLOR_STALE_SECONDS).
+  const SNAPSHOT_STALE_MS = 15 * 60 * 1000;
+  const dataStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null, SNAPSHOT_STALE_MS);
   const criticalAlerts = alerts.filter((a) => a.severity === "critical");
 
   // ── Compute the single best action ────────────────────────────────────────
