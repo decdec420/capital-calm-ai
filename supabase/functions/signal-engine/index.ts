@@ -2218,7 +2218,7 @@ async function runTickForUser(
       userId,
       symbol: winner.symbol,
       strategyId: strategyId ?? null,
-      reasonCode: "LOW_CONFIDENCE",
+      reasonCode: "AI_DISCRETIONARY_SKIP",
       severity: "skip",
       mode: isPaper ? "paper" : "live",
       marketRegime: winner.regime.regime,

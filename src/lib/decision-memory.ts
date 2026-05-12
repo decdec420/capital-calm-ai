@@ -35,6 +35,7 @@ export type NonTradeReasonCode =
   // Strategy routing
   | "NO_APPROVED_STRATEGY"
   // AI veto paths
+  | "AI_DISCRETIONARY_SKIP"
   | "RISK_MANAGER_VETO"
   | "RISK_MANAGER_SKIP_TICK"
   // Operator action
@@ -117,6 +118,7 @@ export const REASON_CODE_LABELS: Record<NonTradeReasonCode, string> = {
   BRAIN_TRUST_STALE: "Brain Trust stale / degraded",
   MARKET_DATA_STALE: "Market data stale",
   NO_APPROVED_STRATEGY: "No approved strategy for regime",
+  AI_DISCRETIONARY_SKIP: "AI discretionary skip (scores above threshold)",
   RISK_MANAGER_VETO: "Risk Manager veto",
   RISK_MANAGER_SKIP_TICK: "Risk Manager unavailable (transient)",
   OPERATOR_REJECTED: "Operator rejected",
@@ -152,6 +154,7 @@ export function isLearningOpportunity(code: NonTradeReasonCode): boolean {
     "EDGE_BELOW_COSTS",
     "BRAIN_TRUST_STALE",
     "NO_APPROVED_STRATEGY",
+    "AI_DISCRETIONARY_SKIP",
     "RISK_MANAGER_VETO",
   ].includes(code);
 }

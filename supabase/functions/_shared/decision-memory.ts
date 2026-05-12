@@ -39,6 +39,7 @@ export type NonTradeReasonCode =
   // Strategy routing
   | "NO_APPROVED_STRATEGY"     // No approved strategy for this regime + side combination
   // AI veto paths
+  | "AI_DISCRETIONARY_SKIP"    // AI chose to skip despite scores above threshold (timing, mid-range, qualitative)
   | "RISK_MANAGER_VETO"        // Risk Manager (Bobby/Wags) explicitly vetoed the trade
   | "RISK_MANAGER_SKIP_TICK"   // Risk Manager unavailable — transient infra failure (was invisible)
   // Portfolio risk blocks
