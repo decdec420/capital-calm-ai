@@ -30,7 +30,10 @@ export type SampleQuality = "insufficient" | "weak" | "moderate" | "strong";
 
 export type RecommendationStatus = "pending_review" | "accepted" | "rejected" | "deferred";
 
-export const MIN_EVIDENCE_COUNT = 5;
+// Lowered from 5 → 3: at current paper-mode volume (~25 sims/day on a single symbol)
+// 5/bucket meant we never graduated past INSUFFICIENT_EVIDENCE. Confidence is still
+// size-discounted via STRONG_EVIDENCE_COUNT=20, so 3-sample recs come through low-confidence.
+export const MIN_EVIDENCE_COUNT = 3;
 export const STRONG_EVIDENCE_COUNT = 20;
 export const MIN_ACTIONABLE_CONFIDENCE = 0.65;
 

@@ -989,7 +989,7 @@ async function runTickForUser(
       .eq("user_id", userId)
       .eq("status", "active")
       .or("expires_at.is.null,expires_at.gt." + new Date().toISOString())
-      .in("target_agent", ["taylor", "all"])
+      .in("target_agent", ["taylor", "wags", "all"])
       .order("priority", { ascending: false })
       .limit(5),
   ]);
@@ -2832,7 +2832,7 @@ async function runTickForUser(
   // we replace the hardcoded fee/slippage with the per-user observed
   // values from live_execution_stats_v. That way profitable maker users
   // get a tighter gate and unlucky high-slippage symbols get a stricter one.
-  let feePctPerSide = 0.006;        // Coinbase Advanced taker upper bound
+  let feePctPerSide = 0.004;        // Coinbase Advanced realistic taker (was 0.006 — too pessimistic)
   let slippagePctPerSide = 0.001;    // 10bps each side, generous for BTC/ETH/SOL
   let costSource: "default" | "observed" = "default";
   try {
@@ -2855,7 +2855,9 @@ async function runTickForUser(
   const FEE_PCT_PER_SIDE = feePctPerSide;
   const SLIPPAGE_PCT_PER_SIDE = slippagePctPerSide;
   const ROUND_TRIP_COST_PCT = 2 * (FEE_PCT_PER_SIDE + SLIPPAGE_PCT_PER_SIDE);
-  const EDGE_MULT_REQUIRED = 2.0;
+  // Paper mode runs 1.5× cost so the half-R TP1 (line ~2812) used for small
+  // accounts can actually clear the gate. Live keeps 2× for safety margin.
+  const EDGE_MULT_REQUIRED = isPaper ? 1.5 : 2.0;
   const minEdgePctRequired = ROUND_TRIP_COST_PCT * EDGE_MULT_REQUIRED;
   const edgeToTp1Pct = entry > 0
     ? Math.abs(tp1 - entry) / entry
