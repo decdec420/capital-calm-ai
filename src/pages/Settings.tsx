@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { NumberStepper } from "@/components/trader/NumberStepper";
 import { Label } from "@/components/ui/label";
 
-import { AlertTriangle, Compass, Plug, Wallet, Zap } from "lucide-react";
+import { AlertTriangle, Compass, LogOut, Plug, Wallet, Zap } from "lucide-react";
 import { useSystemState } from "@/hooks/useSystemState";
 import { useAccountState } from "@/hooks/useAccountState";
 import { WELCOME_KEY } from "@/pages/Welcome";
@@ -21,6 +21,18 @@ import { AsyncActionButton } from "@/components/trader/AsyncActionButton";
 import { AutonomyToggle } from "@/components/trader/AutonomyToggle";
 import { ProfilePicker } from "@/components/trader/ProfilePicker";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 import { toast } from "sonner";
 
