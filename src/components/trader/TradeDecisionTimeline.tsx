@@ -22,7 +22,7 @@ import { useTrades } from "@/hooks/useTrades";
 import { useSignals } from "@/hooks/useSignals";
 import { useExperiments } from "@/hooks/useExperiments";
 import { isStale } from "@/hooks/useRelativeTime";
-import type { TradeSignal } from "@/lib/domain-types";
+import type { Trade, TradeSignal } from "@/lib/domain-types";
 import {
   Activity,
   ArrowRight,
@@ -156,10 +156,11 @@ export function TradeDecisionTimeline({ signal, className }: TradeDecisionTimeli
   const symSnap = snapshot?.perSymbol.find((p) => p.symbol === chosenSym);
 
   // Has there been a completed (closed) trade from this signal?
-  const executedTrade = tracedSignal?.executedTradeId
+  const executedTrade: Trade | null = tracedSignal?.executedTradeId
     ? open.find((t) => t.id === tracedSignal.executedTradeId) ??
-      signalHistory?.find((s) => s.executedTradeId === tracedSignal.id) ?? null
+      null
     : null;
+  const experimentTotal = expCounts.queued + expCounts.running + expCounts.accepted + expCounts.rejected + expCounts.needsReview;
 
   // ── Build steps ─────────────────────────────────────────────────────────────
 
@@ -330,14 +331,14 @@ export function TradeDecisionTimeline({ signal, className }: TradeDecisionTimeli
       title: "Learning",
       agent: "Wendy",
       icon: <BookOpen className="h-3 w-3" />,
-      state: expCounts.total > 0
+      state: experimentTotal > 0
         ? expCounts.needsReview > 0
           ? "active"
           : "done"
         : "pending",
       detail: expCounts.needsReview > 0
         ? `${expCounts.needsReview} to review`
-        : expCounts.total > 0
+        : experimentTotal > 0
           ? "Lessons logged"
           : "No experiments yet",
     },
