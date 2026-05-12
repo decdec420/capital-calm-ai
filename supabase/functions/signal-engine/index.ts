@@ -581,6 +581,9 @@ ADDITIONAL SKIP CRITERIA for fades:
    "${intel?.entry_quality_context ?? "No pattern context available — be conservative."}"
    Use this to assess entry quality. A long at key support = tight, defined risk.
    A long in open space = wide stops, undefined risk. Prefer the former strongly.
+   NOTE: "open space" means no support visible within 1 ATR below entry. Being mid-range
+   with support 1-2% away is still acceptable risk — set the stop just under that
+   support and size accordingly. Do not wait for an exact touch that may never come.
 
 6. SKIP CRITERIA (these override everything — skip if ANY are true):
    - No clear trend on 4h timeframe
@@ -588,6 +591,9 @@ ADDITIONAL SKIP CRITERIA for fades:
    - setupScore < ${isPaper ? "0.45" : "0.55"} (not enough quality signals aligning)
    - Volatility is extreme (crypto flash crashes happen fast)
    - Outside of prime liquidity: only trade 07:00-23:00 UTC
+   NOTE: 15-minute timeframe is for entry timing, not direction. Do NOT skip a setup
+   because the 15m is briefly counter to the 4h/1h. 15m chop inside an aligned
+   higher-timeframe trend is normal — work with it, do not let it veto the trade.
 
 SIZING PHILOSOPHY:
 - High confidence (>0.80) + pullback + key level support: 20-25% of equity (max $${MAX_ORDER_USD})
