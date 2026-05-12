@@ -2275,6 +2275,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      prune_war_room_routine_intel: {
+        Args: { cutoff_interval: string }
+        Returns: number
+      }
       realized_pnl_today: { Args: { p_user_id: string }; Returns: number }
       update_broker_health: {
         Args: {
