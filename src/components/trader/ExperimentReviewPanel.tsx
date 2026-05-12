@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   useStrategyLearningExperiments,
+  type PromoteToQueuedOptions,
   type StrategyLearningExperimentRow,
 } from "@/hooks/useStrategyLearningExperiments";
 import {
@@ -73,12 +74,7 @@ function isUnsupported(param: string): boolean {
 
 interface ProposalCardProps {
   row: StrategyLearningExperimentRow;
-  onPromote: (
-    id: string,
-    beforeValue: string,
-    afterValue: string,
-    reviewerNotes: string,
-  ) => Promise<void>;
+  onPromote: (id: string, opts: PromoteToQueuedOptions) => Promise<void>;
 }
 
 function ProposalCard({ row, onPromote }: ProposalCardProps) {
@@ -107,7 +103,7 @@ function ProposalCard({ row, onPromote }: ProposalCardProps) {
   async function handlePromote() {
     setBusy(true);
     try {
-      await onPromote(row.id, beforeValue, afterValue, reviewerNotes);
+      await onPromote(row.id, { beforeValue, afterValue, reviewerNotes });
       toast.success("Experiment queued for backtest evaluation.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to promote experiment.");
