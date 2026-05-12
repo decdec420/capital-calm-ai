@@ -281,6 +281,47 @@ export default function Settings() {
         </div>
       </Section>
 
+      <Section title="Account">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground truncate">
+              Signed in as {user?.email ?? "—"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Sign out ends your session on this device. The bot keeps running server-side.
+            </div>
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive shrink-0">
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Sign out of Capital Calm?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Your bot keeps running server-side. This only ends your browser session — you'll need to sign back in to see the UI.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Stay signed in</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={async () => {
+                    await signOut();
+                    toast.success("Signed out. Stay disciplined.");
+                  }}
+                >
+                  Sign out
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </Section>
+
       {system && (
         <KillSwitchDialog
           open={killOpen}
