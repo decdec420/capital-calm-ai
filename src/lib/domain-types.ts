@@ -371,7 +371,7 @@ export interface Alert {
   category?: string;
   title: string;
   message: string;
-  timestamp?: string;
+  timestamp: string;
   triggeredAt?: string;
   acknowledgedAt?: string | null;
   resolvedAt?: string | null;
