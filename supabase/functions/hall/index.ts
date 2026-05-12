@@ -25,7 +25,7 @@ import { log } from "../_shared/logger.ts";
 import { corsHeaders, makeCorsHeaders } from "../_shared/cors.ts";
 
 const HALL_VERSION = "v1";
-const HALL_MODEL = "anthropic/claude-sonnet-4-6";
+const HALL_MODEL = "google/gemini-2.5-flash";
 
 // ── Types ────────────────────────────────────────────────────
 
