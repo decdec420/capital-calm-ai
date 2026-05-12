@@ -84,7 +84,7 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: MODEL_REGISTRY.SIGNAL_EXPLAIN,
         messages: [
           {
             role: "system",
