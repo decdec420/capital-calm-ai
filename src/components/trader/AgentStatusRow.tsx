@@ -137,7 +137,10 @@ export function AgentStatusRow() {
     : "No pending signals";
 
   // ── Brain Trust (market intelligence) ──────────────────────────────────────
-  const snapshotStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null);
+  // Engine cron runs every ~2 minutes; use a 5-minute threshold so we only
+  // flag stale when the engine actually misses 2+ ticks, not between normal ticks.
+  const SNAPSHOT_STALE_MS = 5 * 60 * 1000;
+  const snapshotStale = isStale(snapshot ? new Date(snapshot.ranAt).getTime() : null, SNAPSHOT_STALE_MS);
   const brainStatus: AgentStatus = !snapshot ? "unknown" : snapshotStale ? "alert" : "active";
   const brainLabel = !snapshot
     ? "No snapshot yet"
