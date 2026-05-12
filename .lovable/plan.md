@@ -1,58 +1,54 @@
-# War Room triage & restructure
+# Get more trades firing — without changing the safety model
 
-## The problem in one paragraph
+## The honest summary
 
-War Room is currently used as a logbook where every Brain Trust tick writes 3 messages (one each from Hall, Dollar Bill, Mafee) per symbol, even when nothing changed. 88% of the 19K rows are routine "normal" intel from Mafee/Dollar Bill running on cron. The actual state those messages describe (momentum, funding, support/resistance, fear & greed, etc.) is *already* persisted in the `market_intelligence` table, which is upserted in the same code path. The messages are a duplicate. Meanwhile, the genuinely useful signal — Bobby directives, Spyros reviews, Hall regime shifts, extreme readings — gets buried in the noise.
+The guardrails are not blocking anything. Wags (the AI trader) is being more cautious than the rules require — it's inventing extra strictness around 15-minute price action and "wait for the perfect support touch" that isn't part of the documented skip criteria. The fix is two small prompt edits plus a one-time cleanup of stale standing orders. No doctrine changes, no threshold changes, no behavioral overhaul.
 
-Your hospital triage analogy fits exactly:
-- **Vitals (routine intel):** belong on a chart that gets overwritten, not a new note every tick → `market_intelligence` table.
-- **Notable events (regime change, extreme reading, directive, review):** belong in the War Room log forever → `war_room_messages`.
+## Three small changes
 
-## What changes
+### 1. Stop Wags from over-indexing on 15-minute noise (prompt edit)
 
-### 1. Stop the noise at the source (`market-intelligence` edge function)
+In `supabase/functions/signal-engine/index.ts` around line 585 (the SKIP CRITERIA block), add one explicit clarification:
 
-In `supabase/functions/market-intelligence/index.ts` (lines ~1043–1112), only post to `war_room_messages` when the message carries new information. Concretely:
+> **15-minute timeframe is for entry timing, not direction. Do not skip a setup because the 15m is briefly counter to the 4h/1h. 15m chop inside an aligned higher-timeframe trend is normal — fade it if anything, do not let it veto the trade.**
 
-- **Hall:** post only when `macro_bias` or `market_phase` *changes vs. previous row*, OR priority is `high` (strong_long / strong_short). Otherwise: silent — the state is in `market_intelligence` already.
-- **Dollar Bill:** post only on extreme readings (`crowded_long`, `crowded_short`, F&G ≥80 or ≤20) OR when `funding_rate_signal` flips. Drop routine "neutral" posts entirely.
-- **Mafee:** post only when momentum direction flips (1h or 4h up↔down) OR pattern context newly appears/disappears. Drop the "no clear pattern, low priority" posts.
+This is the line that maps directly to the skip reasons we're actually seeing. Wags will still skip when 4h/1h disagree (the documented criterion), but won't keep skipping clean trending setups because 15m wiggled down for 20 minutes.
 
-Expected volume drop: ~95% (from ~170/hr to ~5–10/hr, only when something actually shifts).
+### 2. Soften the "perfect entry or skip" framing on key levels (prompt edit)
 
-### 2. Backfill cleanup (one-time)
+Same file, around line 583. Current language tells Wags: *"A long in open space = wide stops, undefined risk. Prefer the former strongly."* That's good guidance, but in practice it's reading as "only buy within $0.50 of support." Add one clarifying sentence:
 
-Delete the existing routine noise so the table reflects the new policy retroactively. Keep everything high-signal forever, as you chose:
+> **"Open space" means no support visible for more than 1 ATR below entry. Being mid-range with support 1-2% away is still acceptable risk — set the stop just under that support and size accordingly. Do not wait for an exact touch that may never come.**
 
-Delete rows where **all** of these are true:
-- `message_type = 'intel'`
-- `priority IN ('normal', 'low')`
-- `from_agent IN ('mafee', 'dollar_bill', 'hall')`
-- `acted_on = false`
-- `created_at < now() - interval '24 hours'` (keep last 24h of context for debugging)
+This nudges Wags from "snipe the exact support level" back to "trade with defined risk near support."
 
-This will drop roughly 17,000 rows. The remaining ~2,000 rows are: all Bobby directives, the Spyros review, every `high`-priority Hall/Bill post, anything ever acted on, and the last day of routine posts as a transition buffer.
+### 3. Clear stale Bobby standing orders (one-time)
 
-### 3. Ongoing retention: forever for signal, nightly sweep for stragglers
+There are 10+ active Bobby directives, several of which are months-old "reconcile conflicting intel" or "ETH broken support" notes that have long since been superseded. They're still being injected into Wags's prompt as "STANDING ORDERS FROM BOBBY" with `[URGENT]` tags, and they bias toward skipping. Move all active directives older than 24 hours and not tied to an open trade into `status = 'expired'`.
 
-Add a daily cron (`pg_cron`, 04:00 UTC) that re-applies the same delete rule but with a `created_at < now() - interval '7 days'` cutoff. This catches any future "normal" intel that slips through (e.g. from a code regression), but keeps a week-long debug window. **High-priority items, directives, reviews, and `acted_on` messages are never deleted** — that's your "forever" answer.
+This is data-only (UPDATE on `bobby_directives`), reversible, and doesn't change any code.
 
-### 4. War Room becomes what its name implies
+## What this is NOT
 
-After this, opening War Room shows the actual *events* — "Hall flipped bearish on SOL", "Bill flagged crowded_long on ETH", "Bobby directed Wendy to pause" — not a wall of vitals readouts. The dashboards that need current vitals already read from `market_intelligence`, so the UI doesn't lose anything.
+- **Not lowering MIN_CONFIDENCE.** Already irrelevant — Wags produces 0.75 against a 0.50 bar.
+- **Not raising max trades per day.** Already at 15, currently firing 0.
+- **Not weakening any doctrine setting** (`risk_per_trade_pct`, `daily_loss_pct`, `max_order_pct`, stop placement rules, etc.) — those stay exactly as they are.
+- **Not overriding the AI's judgement.** Wags can still skip; we're just removing two specific over-strict heuristics that aren't in the spec.
+- **Not changing the safety prompt for live mode.** The live-mode block ("hesitation on clear setups is its own form of failure") already says the right thing; the issue is in the shared skip-criteria block above it.
+
+## Expected effect
+
+Based on the last 24h sample where 210/217 skip reasons cited 15m-counter or "not at exact support":
+- Estimated trade rate goes from ~0/day → ~3–6/day in paper, matching the ~50% of evaluations that have aligned 4h/1h, setup ≥0.7, and defined support within range.
+- Quality stays controlled by the existing setup score and confidence floors, which aren't changing.
+- If trade rate overshoots (e.g. >10/day), it's already capped by `max_trades_per_day = 15` and would auto-cool after `consecutive_loss_limit = 4` losses — your existing safety net.
 
 ## Technical details
 
-**Files to change:**
-- `supabase/functions/market-intelligence/index.ts` — add a `wasInteresting()` gate before each of the three `warRoomPosts.push(...)` calls. Compare `upsertPayload` against `prev` (already loaded in the function as `prev`) to detect actual changes.
-- New migration: `pg_cron` job + helper SQL function `prune_war_room_routine_intel(cutoff_interval)` for the nightly sweep + immediate one-time call with `interval '24 hours'` to do the backfill cleanup.
+- Two edits to the system prompt string in `supabase/functions/signal-engine/index.ts` (around lines 583 and 585). No new functions, no schema changes, no migration.
+- One data update statement to expire stale `bobby_directives`. Reversible.
+- No doctrine_settings change. No `MIN_CONFIDENCE` change.
 
-**No schema changes** — existing columns (`priority`, `message_type`, `from_agent`, `acted_on`) already encode everything needed.
+## Rollback
 
-**No agent code other than `market-intelligence` needs to change.** Bobby, Spyros, Katrina, Jessica, post-trade-learn already post only on real events, not on a cron.
-
-**Disk impact:** combined with the indexes added earlier today, the table goes from 22 MB / 19K rows growing at 4K/day, to ~2 MB / 2K rows growing at ~100/day. Effectively zero disk IO from this table going forward.
-
-## Risk & rollback
-
-Low risk. The deleted rows are duplicates of state held in `market_intelligence`. If anything ever needs the historical noise back, it can be reconstructed from the `market_intelligence` table's update history (or just not — that's the point). Rollback is reverting the `market-intelligence` function file; the deleted rows are gone, but they weren't carrying unique information.
+If trade quality drops, revert the two prompt lines and the stale directives stay expired (no harm — they were stale). Total rollback is a single file revert.
