@@ -115,7 +115,7 @@ export function AppSidebar() {
   const { state, isMobile, setOpenMobile } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
-  const { user, profile, signOut } = useAuth();
+  const { user, profile } = useAuth();
   const { alerts } = useAlerts();
   const { pending } = useSignals();
   const { counts: expCounts } = useExperiments();
