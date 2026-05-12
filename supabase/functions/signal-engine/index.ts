@@ -1084,29 +1084,30 @@ async function runTickForUser(
   // Never throws — a probe failure must never abort the tick.
   (async () => {
     try {
-      const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME");
-      const envKeyPem  = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM");
       const liveEnabledForProbe = !!(sys as { live_trading_enabled?: boolean }).live_trading_enabled;
+      let creds;
 
-      if (!envKeyName || !envKeyPem) {
+      try {
+        creds = await getBrokerCredentials(admin);
+      } catch (credentialErr) {
         await admin.rpc("update_broker_health", {
           p_user_id: userId,
           p_status:  "not_connected",
           p_key_name: null,
           p_error:   liveEnabledForProbe
-            ? "COINBASE_API_KEY_NAME / COINBASE_API_KEY_PRIVATE_PEM not set in secrets"
+            ? String(credentialErr).slice(0, 200)
             : null,
         });
         return;
       }
 
-      const probeResult = await probeCoinbaseAccounts(envKeyName, envKeyPem);
+      const probeResult = await probeCoinbaseAccounts(creds.apiKeyName, creds.apiKeyPrivatePem);
 
       if (probeResult.ok) {
         await admin.rpc("update_broker_health", {
           p_user_id:  userId,
           p_status:   "healthy",
-          p_key_name: envKeyName,
+          p_key_name: creds.apiKeyName,
           p_error:    null,
         });
       } else {
@@ -1114,7 +1115,7 @@ async function runTickForUser(
         await admin.rpc("update_broker_health", {
           p_user_id:  userId,
           p_status:   isAuth ? "auth_failed" : "unknown",
-          p_key_name: envKeyName,
+          p_key_name: creds.apiKeyName,
           p_error:    `HTTP ${probeResult.status}: ${probeResult.error}`.slice(0, 200),
         });
       }

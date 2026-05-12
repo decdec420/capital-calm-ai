@@ -97,9 +97,10 @@ export async function signCoinbaseJwt(
     .join("");
 
   const header = { alg: "ES256", kid: keyName, nonce, typ: "JWT" };
-  const payload: Record<string, string | number> = {
+  const payload: Record<string, string | number | string[]> = {
     iss: "cdp",
     sub: keyName,
+    aud: ["cdp_service"],
     nbf: now,
     exp: now + 120,
   };
@@ -127,7 +128,7 @@ export async function probeCoinbaseAccounts(
   privatePem: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   try {
-    const requestPath = "/api/v3/brokerage/accounts?limit=1";
+    const requestPath = "/api/v3/brokerage/accounts";
     const jwt = await signCoinbaseJwt(keyName, privatePem, "GET", requestPath);
     const r = await fetch(`${CB_BASE}${requestPath}`, {
       headers: { Authorization: `Bearer ${jwt}` },

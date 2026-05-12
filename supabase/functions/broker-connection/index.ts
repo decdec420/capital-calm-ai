@@ -25,6 +25,30 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+type StoredCoinbaseCredentials = {
+  api_key_name: string | null;
+  api_key_private_pem: string | null;
+};
+
+async function getStoredCoinbaseCredentials(admin: ReturnType<typeof createClient>): Promise<StoredCoinbaseCredentials> {
+  const { data, error } = await admin.rpc("get_coinbase_broker_credentials");
+  if (error) throw new Error(`Vault read failed: ${error.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row?.api_key_name && row?.api_key_private_pem) {
+    return {
+      api_key_name: row.api_key_name,
+      api_key_private_pem: row.api_key_private_pem,
+    };
+  }
+
+  const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME")?.trim();
+  const envKeyPem = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM")?.trim();
+  return {
+    api_key_name: envKeyName || null,
+    api_key_private_pem: envKeyPem || null,
+  };
+}
+
 // ── Handler ──────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -132,14 +156,12 @@ Deno.serve(async (req) => {
     }
 
     if (action === "probe") {
-      // Re-probe using the currently-stored Vault credentials. Used by the
+      // Re-probe using the currently-stored credentials. Used by the
       // background health check and the "Re-test" button.
-      const { data, error } = await admin.rpc("get_coinbase_broker_credentials");
-      if (error) throw new Error(`Vault read failed: ${error.message}`);
-      const row = Array.isArray(data) ? data[0] : data;
+      const row = await getStoredCoinbaseCredentials(admin);
       if (!row?.api_key_name || !row?.api_key_private_pem) {
         await admin.rpc("update_broker_health", {
-          p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: "No credentials in Vault",
+          p_user_id: userId, p_status: "not_connected", p_key_name: null, p_error: "No Coinbase credentials configured",
         });
         return new Response(JSON.stringify({ ok: true, status: "not_connected" }), {
           headers: { ...cors, "Content-Type": "application/json" },

@@ -57,34 +57,35 @@ export interface BrokerFill {
 
 /**
  * Fetch Coinbase API credentials.
- * Checks env vars first (COINBASE_API_KEY_NAME + COINBASE_API_KEY_PRIVATE_PEM),
- * then falls back to Supabase Vault RPC for legacy setups.
+ * Checks Vault first so credentials saved from the reconnect UI override
+ * older environment secrets, then falls back to env vars for legacy setups.
  */
 // deno-lint-ignore no-explicit-any
 export async function getBrokerCredentials(admin: any): Promise<BrokerCredentials> {
-  // Primary: env vars set in Lovable Cloud → Secrets (or Supabase Edge Function secrets)
+  const { data, error } = await admin.rpc("get_coinbase_broker_credentials");
+  if (error) {
+    throw new Error(`[broker] Vault RPC failed: ${error.message}`);
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (row?.api_key_name && row?.api_key_private_pem) {
+    return {
+      apiKeyName: row.api_key_name,
+      apiKeyPrivatePem: row.api_key_private_pem,
+    };
+  }
+
   const envKeyName = Deno.env.get("COINBASE_API_KEY_NAME");
   const envKeyPem = Deno.env.get("COINBASE_API_KEY_PRIVATE_PEM");
   if (envKeyName && envKeyPem) {
     return { apiKeyName: envKeyName, apiKeyPrivatePem: envKeyPem };
   }
 
-  // Fallback: Supabase Vault RPC (legacy)
-  const { data, error } = await admin.rpc("get_coinbase_broker_credentials");
-  if (error) {
-    throw new Error(`[broker] Vault RPC failed: ${error.message}`);
-  }
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row?.api_key_name || !row?.api_key_private_pem) {
+  {
     throw new Error(
       "[broker] Coinbase credentials not found. " +
         "Set COINBASE_API_KEY_NAME and COINBASE_API_KEY_PRIVATE_PEM in Lovable Cloud → Secrets.",
     );
   }
-  return {
-    apiKeyName: row.api_key_name,
-    apiKeyPrivatePem: row.api_key_private_pem,
-  };
 }
 
 // ── Order polling ─────────────────────────────────────────────
