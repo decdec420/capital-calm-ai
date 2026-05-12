@@ -114,6 +114,10 @@ Deno.serve(async (req) => {
       error: string | null;
     }> = [];
 
+    // Track which users we've already fired a schema-missing system_event for
+    // so we don't spam one per row when the table doesn't exist yet.
+    const schemaWarnedUsers = new Set<string>();
+
     for (const decision of decisions) {
       const decisionId = decision.id as string;
       const userId = decision.user_id as string;
@@ -184,12 +188,34 @@ Deno.serve(async (req) => {
             .select("id")
             .single();
           if (insErr || !simRow) {
+            const errMsg = insErr?.message ?? "unknown";
             log("warn", "sim_insert_failed", {
               fn: "enrich-simulations",
               decisionId,
-              err: insErr?.message,
+              err: errMsg,
             });
-            rowError = `sim insert failed: ${insErr?.message ?? "unknown"}`;
+            // Surface table-not-found as a system_event once per user so it's
+            // visible in the dashboard rather than buried in function logs.
+            if (
+              errMsg.includes("relation") &&
+              errMsg.includes("does not exist") &&
+              !schemaWarnedUsers.has(userId)
+            ) {
+              schemaWarnedUsers.add(userId);
+              admin.from("system_events").insert({
+                user_id: userId,
+                event_type: "learning_pipeline_schema_missing",
+                actor: "enrich_simulations",
+                payload: {
+                  missing_table: "decision_memory_simulations",
+                  error: errMsg,
+                  note: "Apply pending migrations to fix: 20260511120000_catch_up_missing_schema.sql",
+                },
+              }).then(({ error: evtErr }: { error: { message: string } | null }) => {
+                if (evtErr) console.warn("[enrich-simulations] system_event insert failed:", evtErr.message);
+              });
+            }
+            rowError = `sim insert failed: ${errMsg}`;
             results.push({
               decisionMemoryId: decisionId,
               simulationId: null,
