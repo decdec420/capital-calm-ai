@@ -28,6 +28,7 @@ import { log } from "../_shared/logger.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { guardAiOutput, sanitizeForStorage } from "../_shared/ai-output-guard.ts";
 import { emitAiGuardEvent } from "../_shared/ai-guard-event.ts";
+import { evaluateQuietMode, shouldEmitQuietModeEvent } from "../_shared/quiet-mode.ts";
 
 
 // Flash for latency — Bobby runs every 60 seconds. He doesn't need deep
@@ -76,6 +77,37 @@ function jessicaCbFailure(): void {
   }
 }
 
+
+async function recordQuietModeSkip(
+  admin: SupabaseClient,
+  userId: string,
+  decision: ReturnType<typeof evaluateQuietMode>,
+): Promise<void> {
+  const { data: recent } = await admin
+    .from("system_events")
+    .select("created_at")
+    .eq("user_id", userId)
+    .eq("event_type", "quiet_mode_skip")
+    .eq("actor", "jessica_autonomous")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!shouldEmitQuietModeEvent(recent?.created_at)) return;
+
+  await admin.from("system_events").insert({
+    user_id: userId,
+    event_type: "quiet_mode_skip",
+    actor: "jessica_autonomous",
+    payload: {
+      mode: decision.mode,
+      reason_codes: decision.reasonCodes,
+      next_recommended_check_at: decision.nextRecommendedCheckAt,
+      recommended_cadence_seconds: decision.recommendedCadenceSeconds,
+      skipped: "heavy_ai_only",
+      safety_checks_preserved: decision.shouldPreserveSafetyChecks,
+    },
+  });
+}
 
 const JESSICA_SYSTEM = `
 You are Bobby Axelrod — desk commander and sole decision-maker at Axe Capital.
@@ -606,6 +638,51 @@ async function runJessicaForUser(
     stale_minutes: h.lastSuccessMinutesAgo,
     error: h.lastError,
   }));
+
+  const [{ data: openTrades }, { data: pendingSignals }, { data: openIncidents }, { data: recentSignals }, { data: intelligenceBriefs }] = await Promise.all([
+    admin.from("trades").select("id").eq("user_id", userId).eq("status", "open"),
+    admin.from("trade_signals").select("id,created_at").eq("user_id", userId).eq("status", "pending").gte("expires_at", new Date().toISOString()),
+    admin.from("incidents").select("id,severity,status").eq("user_id", userId).in("status", ["open", "escalated"]).in("severity", ["P1", "P2"]),
+    admin.from("trade_signals").select("created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(1),
+    admin.from("market_intelligence").select("generated_at,recent_momentum_at,recent_momentum_1h,recent_momentum_4h").eq("user_id", userId),
+  ]);
+  const latestMomentum = (intelligenceBriefs ?? [])
+    .map((brief: { recent_momentum_at?: string | null; generated_at?: string | null; recent_momentum_1h?: number | string | null; recent_momentum_4h?: number | string | null }) => ({
+      at: brief.recent_momentum_at ?? brief.generated_at ?? null,
+      magnitude: Math.max(Math.abs(Number(brief.recent_momentum_1h ?? 0)), Math.abs(Number(brief.recent_momentum_4h ?? 0))),
+    }))
+    .filter((brief: { at: string | null }) => !!brief.at)
+    .sort((a: { at: string | null }, b: { at: string | null }) => new Date(b.at!).getTime() - new Date(a.at!).getTime())[0];
+  const oldestMomentumAgeMin = (intelligenceBriefs ?? []).length === 0 ? 9999 : (intelligenceBriefs ?? []).reduce((oldest: number, brief: { recent_momentum_at?: string | null; generated_at?: string | null }) => {
+    const at = brief.recent_momentum_at ?? brief.generated_at ?? null;
+    if (!at) return 9999;
+    return Math.max(oldest, (Date.now() - new Date(at).getTime()) / 60_000);
+  }, 0);
+  const quietMode = evaluateQuietMode({
+    openPositionsCount: (openTrades ?? []).length,
+    pendingSignalsCount: (pendingSignals ?? []).length,
+    openCriticalIncidentsCount: (openIncidents ?? []).length,
+    bot: typeof sys.bot === "string" ? sys.bot : null,
+    activeProfile: typeof sys.active_profile === "string" ? sys.active_profile : null,
+    liveTradingEnabled: !!sys.live_trading_enabled,
+    brokerExposureKnown: true,
+    marketDataStaleBlocksTrading: oldestMomentumAgeMin > 120,
+    killSwitchEngaged: !!sys.kill_switch_engaged,
+    recentSignalActivityAt: recentSignals?.[0]?.created_at ?? null,
+    recentMarketMomentumAt: latestMomentum?.at ?? null,
+    recentMarketMomentumMagnitude: latestMomentum?.magnitude ?? null,
+  });
+  if (quietMode.shouldSkipHeavyAi) {
+    await recordQuietModeSkip(admin, userId, quietMode);
+    await writeHeartbeat(true, "quiet_mode_idle", 0, `Quiet Mode — deferred Bobby heavy AI. Next check ${quietMode.nextRecommendedCheckAt}.`);
+    return {
+      skipped: true,
+      reason: "quiet_mode_idle",
+      reasonCodes: quietMode.reasonCodes,
+      nextRecommendedCheckAt: quietMode.nextRecommendedCheckAt,
+      safetyChecksPreserved: quietMode.shouldPreserveSafetyChecks,
+    };
+  }
 
   // Auto-recovery: if Brain Trust is failed/degraded, refresh it BEFORE reasoning.
   // Stale macro context is the single biggest risk to bad decisions.
