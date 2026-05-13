@@ -1998,10 +1998,26 @@ async function runTickForUser(
       TRADEABLE_REGIMES.has(c.regime.regime) &&
       c.regime.setupScore >= MIN_SETUP_SCORE,
   );
+  // Build per-symbol recency: how many of the last 20 ticks chose this symbol.
+  // Lower = staler = preferred when scores are close.
+  const recentCounts: Record<string, number> = {};
+  for (const r of (recentEvalSymbols ?? []) as Array<{ symbol: string }>) {
+    if (!r?.symbol) continue;
+    recentCounts[r.symbol] = (recentCounts[r.symbol] ?? 0) + 1;
+  }
   tradable.sort((a, b) => {
     const pbA = a.regime.pullback ? 1 : 0;
     const pbB = b.regime.pullback ? 1 : 0;
     if (pbA !== pbB) return pbB - pbA;
+    // Rotation tiebreaker: when setupScores are within 0.10 of each other,
+    // prefer the symbol that's been evaluated less often recently. Stops
+    // the engine from getting tunnel-vision on one ticker.
+    const scoreDelta = Math.abs(b.regime.setupScore - a.regime.setupScore);
+    if (scoreDelta < 0.10) {
+      const ca = recentCounts[a.symbol] ?? 0;
+      const cb = recentCounts[b.symbol] ?? 0;
+      if (ca !== cb) return ca - cb;
+    }
     return b.regime.setupScore - a.regime.setupScore;
   });
   const winner = tradable[0];
