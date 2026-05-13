@@ -16,6 +16,7 @@ import { checkRateLimit, rateLimitResponse } from "../_shared/rate-limit.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { fetchCandles, type Candle } from "../_shared/market.ts";
 import { log } from "../_shared/logger.ts";
+import { evaluateQuietMode, shouldEmitQuietModeEvent } from "../_shared/quiet-mode.ts";
 import {
   buildAiProvenance,
   applyGuardToProvenance,
@@ -26,6 +27,34 @@ import {
   guardAiOutput,
   sanitizeForStorage,
 } from "../_shared/ai-output-guard.ts";
+
+
+// deno-lint-ignore no-explicit-any
+async function recordQuietModeSkip(admin: any, userId: string, decision: ReturnType<typeof evaluateQuietMode>): Promise<void> {
+  const { data: recent } = await admin
+    .from("system_events")
+    .select("created_at")
+    .eq("user_id", userId)
+    .eq("event_type", "quiet_mode_skip")
+    .eq("actor", "market_intelligence")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!shouldEmitQuietModeEvent(recent?.created_at)) return;
+  await admin.from("system_events").insert({
+    user_id: userId,
+    event_type: "quiet_mode_skip",
+    actor: "market_intelligence",
+    payload: {
+      mode: decision.mode,
+      reason_codes: decision.reasonCodes,
+      next_recommended_check_at: decision.nextRecommendedCheckAt,
+      recommended_cadence_seconds: decision.recommendedCadenceSeconds,
+      skipped: "heavy_ai_only",
+      safety_checks_preserved: decision.shouldPreserveSafetyChecks,
+    },
+  });
+}
 
 // Tiered Brain Trust freshness — each expert has its own cadence so the desk
 // feels live without burning gateway credits on near-identical reads.
@@ -1198,8 +1227,49 @@ if (req.method === "OPTIONS") return new Response(null, { headers: cors });
       if (!rl.allowed) return rateLimitResponse(rl, cors);
     }
 
-    const results: Array<{ userId: string; symbol: string; ok: boolean; error?: string }> = [];
+    const results: Array<{ userId: string; symbol: string; ok: boolean; error?: string; skipped?: string }> = [];
     for (const userId of userIds) {
+      if (isCron) {
+        const [{ data: sys }, { data: openTrades }, { data: pendingSignals }, { data: openIncidents }, { data: recentSignals }, { data: intelligenceBriefs }] = await Promise.all([
+          admin.from("system_state").select("bot,active_profile,live_trading_enabled,kill_switch_engaged").eq("user_id", userId).maybeSingle(),
+          admin.from("trades").select("id").eq("user_id", userId).eq("status", "open"),
+          admin.from("trade_signals").select("id,created_at").eq("user_id", userId).eq("status", "pending").gte("expires_at", new Date().toISOString()),
+          admin.from("incidents").select("id,severity,status").eq("user_id", userId).in("status", ["open", "escalated"]).in("severity", ["P1", "P2"]),
+          admin.from("trade_signals").select("created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(1),
+          admin.from("market_intelligence").select("generated_at,recent_momentum_at,recent_momentum_1h,recent_momentum_4h").eq("user_id", userId),
+        ]);
+        const latestMomentum = (intelligenceBriefs ?? [])
+          .map((brief: { recent_momentum_at?: string | null; generated_at?: string | null; recent_momentum_1h?: number | string | null; recent_momentum_4h?: number | string | null }) => ({
+            at: brief.recent_momentum_at ?? brief.generated_at ?? null,
+            magnitude: Math.max(Math.abs(Number(brief.recent_momentum_1h ?? 0)), Math.abs(Number(brief.recent_momentum_4h ?? 0))),
+          }))
+          .filter((brief: { at: string | null }) => !!brief.at)
+          .sort((a: { at: string | null }, b: { at: string | null }) => new Date(b.at!).getTime() - new Date(a.at!).getTime())[0];
+        const oldestMomentumAgeMin = (intelligenceBriefs ?? []).length === 0 ? 9999 : (intelligenceBriefs ?? []).reduce((oldest: number, brief: { recent_momentum_at?: string | null; generated_at?: string | null }) => {
+          const at = brief.recent_momentum_at ?? brief.generated_at ?? null;
+          if (!at) return 9999;
+          return Math.max(oldest, (Date.now() - new Date(at).getTime()) / 60_000);
+        }, 0);
+        const quietMode = evaluateQuietMode({
+          openPositionsCount: (openTrades ?? []).length,
+          pendingSignalsCount: (pendingSignals ?? []).length,
+          openCriticalIncidentsCount: (openIncidents ?? []).length,
+          bot: sys?.bot ?? null,
+          activeProfile: sys?.active_profile ?? null,
+          liveTradingEnabled: !!sys?.live_trading_enabled,
+          brokerExposureKnown: true,
+          marketDataStaleBlocksTrading: oldestMomentumAgeMin > 120,
+          killSwitchEngaged: !!sys?.kill_switch_engaged,
+          recentSignalActivityAt: recentSignals?.[0]?.created_at ?? null,
+          recentMarketMomentumAt: latestMomentum?.at ?? null,
+          recentMarketMomentumMagnitude: latestMomentum?.magnitude ?? null,
+        });
+        if (quietMode.shouldSkipHeavyAi) {
+          await recordQuietModeSkip(admin, userId, quietMode);
+          for (const symbol of SYMBOL_WHITELIST) results.push({ userId, symbol, ok: true, skipped: "quiet_mode_heavy_ai" });
+          continue;
+        }
+      }
       for (const symbol of SYMBOL_WHITELIST) {
         try {
           await runIntelligenceForSymbol(admin, userId, symbol as Symbol, LOVABLE_API_KEY, { skipFreshness: !isCron });

@@ -98,6 +98,36 @@ import {
   MULTI_SYMBOL_MODE,
   selectSignalEvaluationCandidates,
 } from "../_shared/signal-evaluation.ts";
+import { evaluateQuietMode, shouldEmitQuietModeEvent } from "../_shared/quiet-mode.ts";
+
+
+// deno-lint-ignore no-explicit-any
+async function recordQuietModeSkip(admin: any, userId: string, surface: string, decision: ReturnType<typeof evaluateQuietMode>): Promise<void> {
+  const { data: recent } = await admin
+    .from("system_events")
+    .select("created_at")
+    .eq("user_id", userId)
+    .eq("event_type", "quiet_mode_skip")
+    .eq("actor", surface)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!shouldEmitQuietModeEvent(recent?.created_at)) return;
+
+  await admin.from("system_events").insert({
+    user_id: userId,
+    event_type: "quiet_mode_skip",
+    actor: surface,
+    payload: {
+      mode: decision.mode,
+      reason_codes: decision.reasonCodes,
+      next_recommended_check_at: decision.nextRecommendedCheckAt,
+      recommended_cadence_seconds: decision.recommendedCadenceSeconds,
+      skipped: "heavy_ai_only",
+      safety_checks_preserved: decision.shouldPreserveSafetyChecks,
+    },
+  });
+}
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -944,6 +974,7 @@ async function runTickForUser(
     patternMemory,
     { data: bobbyDirectives },
     { data: recentEvalSymbols },
+    { data: openIncidents },
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("account_state").select("*").eq("user_id", userId).maybeSingle(),
@@ -1005,6 +1036,12 @@ async function runTickForUser(
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(20),
+    admin
+      .from("incidents")
+      .select("id,severity,status")
+      .eq("user_id", userId)
+      .in("status", ["open", "escalated"])
+      .in("severity", ["P1", "P2"]),
   ]);
 
   // Index Brain Trust briefs by symbol; flag stale entries (>6h old).
@@ -1035,6 +1072,50 @@ async function runTickForUser(
       ],
       expiredCount,
       perSymbol: [],
+    };
+  }
+
+  const latestSignalAt = (recentSignals ?? [])[0]?.created_at ?? null;
+  const latestMomentum = (intelligenceBriefs ?? [])
+    .map((brief: { recent_momentum_at?: string | null; generated_at?: string | null; recent_momentum_1h?: number | string | null; recent_momentum_4h?: number | string | null }) => ({
+      at: brief.recent_momentum_at ?? brief.generated_at ?? null,
+      magnitude: Math.max(
+        Math.abs(Number(brief.recent_momentum_1h ?? 0)),
+        Math.abs(Number(brief.recent_momentum_4h ?? 0)),
+      ),
+    }))
+    .filter((brief: { at: string | null; magnitude: number }) => !!brief.at)
+    .sort((a: { at: string | null }, b: { at: string | null }) => new Date(b.at!).getTime() - new Date(a.at!).getTime())[0];
+  const oldestMomentumAgeMin = (intelligenceBriefs ?? []).length === 0 ? 9999 : (intelligenceBriefs ?? []).reduce((oldest: number, brief: { recent_momentum_at?: string | null; generated_at?: string | null }) => {
+    const at = brief.recent_momentum_at ?? brief.generated_at ?? null;
+    if (!at) return 9999;
+    return Math.max(oldest, (Date.now() - new Date(at).getTime()) / 60_000);
+  }, 0);
+  const quietMode = evaluateQuietMode({
+    openPositionsCount: (openTrades ?? []).length,
+    pendingSignalsCount: (pendingSignals ?? []).length,
+    openCriticalIncidentsCount: (openIncidents ?? []).length,
+    bot: sys.bot ?? null,
+    activeProfile: sys.active_profile ?? null,
+    liveTradingEnabled: !!sys.live_trading_enabled,
+    brokerExposureKnown: true,
+    marketDataStaleBlocksTrading: oldestMomentumAgeMin > 120,
+    killSwitchEngaged: !!sys.kill_switch_engaged,
+    recentSignalActivityAt: latestSignalAt,
+    recentMarketMomentumAt: latestMomentum?.at ?? null,
+    recentMarketMomentumMagnitude: latestMomentum?.magnitude ?? null,
+  });
+
+  if (quietMode.shouldSkipHeavyAi) {
+    await recordQuietModeSkip(admin, userId, "signal_engine", quietMode);
+    return {
+      userId,
+      tick: "quiet_mode_skip",
+      reasonCodes: quietMode.reasonCodes,
+      nextRecommendedCheckAt: quietMode.nextRecommendedCheckAt,
+      expiredCount,
+      perSymbol: [],
+      safetyChecksPreserved: quietMode.shouldPreserveSafetyChecks,
     };
   }
 
