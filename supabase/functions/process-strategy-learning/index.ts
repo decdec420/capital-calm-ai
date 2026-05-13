@@ -227,6 +227,15 @@ Deno.serve(async (req) => {
       const group = groups[i];
       const simIds = group.rows.map((r) => r.id);
 
+      // INSUFFICIENT_EVIDENCE recs are not actionable — they say "wait for more
+      // data". Asking the operator to Accept/Defer/Reject them is pure noise,
+      // and inserting one per tick creates duplicate cards. Skip the insert
+      // AND skip marking sims consumed so they keep accumulating until the
+      // bucket finally crosses MIN_EVIDENCE_COUNT and produces a real rec.
+      if (rec.recommendation_type === "INSUFFICIENT_EVIDENCE") {
+        continue;
+      }
+
       try {
         const { error: insErr } = await admin
           .from("strategy_learning_recommendations")
