@@ -940,6 +940,7 @@ async function runTickForUser(
     { data: recentClosedTrades },
     patternMemory,
     { data: bobbyDirectives },
+    { data: recentEvalSymbols },
   ] = await Promise.all([
     admin.from("system_state").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("account_state").select("*").eq("user_id", userId).maybeSingle(),
