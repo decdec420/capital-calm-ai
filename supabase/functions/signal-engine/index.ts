@@ -993,6 +993,15 @@ async function runTickForUser(
       .in("target_agent", ["taylor", "wags", "all"])
       .order("priority", { ascending: false })
       .limit(5),
+    // Symbol rotation: read last N decisions to know which symbols got
+    // recent attention. Used as a tiebreaker so we don't always pick the
+    // same coin when scores are close.
+    admin
+      .from("decision_memory")
+      .select("symbol")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20),
   ]);
 
   // Index Brain Trust briefs by symbol; flag stale entries (>6h old).
