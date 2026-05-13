@@ -79,6 +79,9 @@ function baseInput(overrides: Partial<PortfolioRiskInput> = {}): PortfolioRiskIn
     openTrades: [],
     account: baseAccount(),
     mode: "paper",
+    exposureUpdatedAt: freshSnapshotRanAt(),
+    marketDataUpdatedAt: freshSnapshotRanAt(),
+    accountStateUpdatedAt: freshSnapshotRanAt(),
     nowMs: NOW_MS,
     ...overrides,
   };
@@ -554,7 +557,7 @@ describe("TradingDecisionSnapshot + portfolio risk", () => {
   it("snapshot includes portfolioRisk when portfolioRiskInput is provided", () => {
     const snap = computeTradingDecisionSnapshot(
       baseSnapshotInput({
-        portfolioRiskInput: { openTrades: [], account: baseAccount(), mode: "paper" },
+        portfolioRiskInput: { openTrades: [], account: baseAccount(), mode: "paper", exposureUpdatedAt: freshSnapshotRanAt(), marketDataUpdatedAt: freshSnapshotRanAt(), accountStateUpdatedAt: freshSnapshotRanAt() },
       }),
     );
     expect(snap.portfolioRisk).not.toBeNull();
@@ -650,7 +653,7 @@ describe("TradingDecisionSnapshot + portfolio risk", () => {
     const snap = computeTradingDecisionSnapshot(
       baseSnapshotInput({
         system: baseSystem({ killSwitchEngaged: true }),
-        portfolioRiskInput: { openTrades: [], account: baseAccount(), mode: "paper" },
+        portfolioRiskInput: { openTrades: [], account: baseAccount(), mode: "paper", exposureUpdatedAt: freshSnapshotRanAt(), marketDataUpdatedAt: freshSnapshotRanAt(), accountStateUpdatedAt: freshSnapshotRanAt() },
       }),
     );
     expect(snap.killSwitchEngaged).toBe(true);
@@ -665,6 +668,9 @@ describe("TradingDecisionSnapshot + portfolio risk", () => {
           openTrades: [openTrade("BTC-USD", 50_000, 0.00002)], // tiny $1 position
           account: baseAccount(),
           mode: "paper",
+          exposureUpdatedAt: freshSnapshotRanAt(),
+          marketDataUpdatedAt: freshSnapshotRanAt(),
+          accountStateUpdatedAt: freshSnapshotRanAt(),
         },
       }),
     );
