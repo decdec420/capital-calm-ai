@@ -1263,11 +1263,13 @@ async function runTickForUser(
       entry_price?: number | string | null;
       size?: number | string | null;
       unrealized_pnl?: number | string | null;
+      side?: string | null;
     }) => ({
       symbol: t.symbol,
       entry_price: t.entry_price ?? 0,
       size: t.size ?? 0,
       unrealized_pnl: t.unrealized_pnl ?? null,
+      side: t.side ?? null,
     })),
     account: acct ? {
       equity: acct.equity ?? 0,
