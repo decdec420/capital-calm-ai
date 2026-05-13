@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { OpsTimeline } from "@/components/hall/OpsTimeline";
+import { QuietModeStatusTile } from "@/components/hall/QuietModeStatusTile";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -431,7 +432,8 @@ export default function Company() {
         ))}
       </div>
 
-      {/* Hall/Ops Incident Timeline */}
+      {/* Hall/Ops Quiet Mode status + Incident Timeline */}
+      <QuietModeStatusTile />
       <OpsTimeline />
 
       {/* Status summary strip */}

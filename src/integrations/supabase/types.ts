@@ -2256,6 +2256,24 @@ export type Database = {
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_hall_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
+      get_current_quiet_mode_status: {
+        Args: { p_user_id?: string }
+        Returns: {
+          mode: string | null
+          latest_reason_codes: string[] | null
+          latest_skipped_scope: string | null
+          latest_surface: string | null
+          recommended_cadence_seconds: Json | null
+          next_recommended_check_at: string | null
+          safety_checks_preserved: boolean | null
+          last_quiet_event_at: string | null
+          last_cleanup_at: string | null
+          cleanup_status: string | null
+          cleanup_deleted_routine_event_count: number | null
+          cleanup_cron_configured: boolean | null
+          cleanup_result: string | null
+        }[]
+      }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_katrina_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
