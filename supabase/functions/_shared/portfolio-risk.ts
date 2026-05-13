@@ -47,6 +47,7 @@ export const PORTFOLIO_RISK_CODES = {
   DRAWDOWN_WARN: "PORTFOLIO_DRAWDOWN_WARN",
   OVERTRADING_WARN: "PORTFOLIO_OVERTRADING_WARN",
   DUPLICATE_SYMBOL_WARN: "PORTFOLIO_DUPLICATE_SYMBOL_WARN",
+  DUPLICATE_DIRECTION_WARN: "PORTFOLIO_DUPLICATE_DIRECTION_WARN",
   // Blocks
   TOTAL_EXPOSURE_BLOCK: "PORTFOLIO_TOTAL_EXPOSURE_BLOCK",
   SYMBOL_EXPOSURE_BLOCK: "PORTFOLIO_SYMBOL_EXPOSURE_BLOCK",
@@ -67,6 +68,7 @@ export interface DbTradeForPortfolioRisk {
   entry_price: number | string | null;
   size: number | string | null;
   unrealized_pnl?: number | string | null;
+  side?: "long" | "short" | string | null;
 }
 
 /** Minimal subset of an account_state DB row needed for portfolio risk. */
@@ -283,6 +285,21 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
     if (count >= DUPLICATE_SYMBOL_WARN_COUNT) {
       if (!warningCodes.includes(PORTFOLIO_RISK_CODES.DUPLICATE_SYMBOL_WARN)) {
         warningCodes.push(PORTFOLIO_RISK_CODES.DUPLICATE_SYMBOL_WARN);
+      }
+    }
+  }
+
+  // Duplicate direction stacking (same-side exposure across multiple open positions)
+  const sideCounts = new Map<string, number>();
+  for (const trade of openTrades) {
+    if (trade.side === "long" || trade.side === "short") {
+      sideCounts.set(trade.side, (sideCounts.get(trade.side) ?? 0) + 1);
+    }
+  }
+  for (const count of sideCounts.values()) {
+    if (count >= DUPLICATE_SYMBOL_WARN_COUNT) {
+      if (!warningCodes.includes(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN)) {
+        warningCodes.push(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN);
       }
     }
   }

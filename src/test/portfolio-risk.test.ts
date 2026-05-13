@@ -388,6 +388,30 @@ describe("computePortfolioRisk", () => {
     expect(result.openPositionsBySymbol["ETH-USD"]).toBe(1);
   });
 
+  it("two open positions with same direction returns DUPLICATE_DIRECTION_WARN", () => {
+    const result = computePortfolioRisk(
+      baseInput({
+        openTrades: [
+          openTrade("BTC-USD", 50_000, 0.0001, { side: "long" }),
+          openTrade("ETH-USD", 2_000, 0.001, { side: "long" }),
+        ],
+      }),
+    );
+    expect(result.warningCodes).toContain(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN);
+  });
+
+  it("opposite open directions do not return DUPLICATE_DIRECTION_WARN", () => {
+    const result = computePortfolioRisk(
+      baseInput({
+        openTrades: [
+          openTrade("BTC-USD", 50_000, 0.0001, { side: "long" }),
+          openTrade("ETH-USD", 2_000, 0.001, { side: "short" }),
+        ],
+      }),
+    );
+    expect(result.warningCodes).not.toContain(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN);
+  });
+
   // ── Drawdown ───────────────────────────────────────────────────────────────
 
   it("drawdown exceeding 3% from start-of-day returns DRAWDOWN_WARN", () => {

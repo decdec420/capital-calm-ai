@@ -249,6 +249,15 @@ describe("open position count", () => {
     expect(result.openPositionCount).toBe(2);
     expect(MAX_OPEN_POSITIONS_WARN).toBe(2);
   });
+
+  it("10c. duplicate same-side exposure produces DUPLICATE_DIRECTION_WARN", () => {
+    const trades = [
+      openTrade("BTC-USD", 40_000, 0.001, { side: "long" }),
+      openTrade("ETH-USD", 2_000, 0.01, { side: "long" }),
+    ];
+    const result = computePortfolioRisk(baseInput({ openTrades: trades }));
+    expect(result.warningCodes).toContain(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN);
+  });
 });
 
 // ─── Tests 11-13: Decision memory integration (unit-level verification) ───────

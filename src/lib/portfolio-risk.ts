@@ -66,6 +66,7 @@ export const PORTFOLIO_RISK_CODES = {
   DRAWDOWN_WARN: "PORTFOLIO_DRAWDOWN_WARN",
   OVERTRADING_WARN: "PORTFOLIO_OVERTRADING_WARN",
   DUPLICATE_SYMBOL_WARN: "PORTFOLIO_DUPLICATE_SYMBOL_WARN",
+  DUPLICATE_DIRECTION_WARN: "PORTFOLIO_DUPLICATE_DIRECTION_WARN",
   // Blocks
   TOTAL_EXPOSURE_BLOCK: "PORTFOLIO_TOTAL_EXPOSURE_BLOCK",
   SYMBOL_EXPOSURE_BLOCK: "PORTFOLIO_SYMBOL_EXPOSURE_BLOCK",
@@ -301,6 +302,19 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
     }
   }
 
+  // Duplicate direction stacking (same-side exposure across multiple open positions)
+  const sideCounts = new Map<string, number>();
+  for (const trade of openTrades) {
+    sideCounts.set(trade.side, (sideCounts.get(trade.side) ?? 0) + 1);
+  }
+  for (const count of sideCounts.values()) {
+    if (count >= DUPLICATE_SYMBOL_WARN_COUNT) {
+      if (!warningCodes.includes(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN)) {
+        warningCodes.push(PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN);
+      }
+    }
+  }
+
   // Daily risk budget low
   if (
     dailyRiskBudgetRemaining !== null &&
@@ -384,6 +398,8 @@ export function portfolioRiskCodeMessage(
       return `Intra-day drawdown ${pct(Math.abs(summary.drawdownPct ?? 0))} from start-of-day equity.`;
     case PORTFOLIO_RISK_CODES.DUPLICATE_SYMBOL_WARN:
       return "Multiple open positions on the same symbol detected — stacking risk.";
+    case PORTFOLIO_RISK_CODES.DUPLICATE_DIRECTION_WARN:
+      return "Multiple open positions share the same direction — directional crowding risk.";
     case PORTFOLIO_RISK_CODES.OVERTRADING_WARN:
       return "Overtrading pattern detected — position frequency is elevated.";
     case PORTFOLIO_RISK_CODES.UNKNOWN_EXPOSURE_LIVE_BLOCK:
