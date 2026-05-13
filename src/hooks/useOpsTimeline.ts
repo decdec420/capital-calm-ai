@@ -12,6 +12,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTableChanges } from "@/hooks/useRealtimeSubscriptions";
 import {
@@ -78,8 +79,49 @@ const OPS_EVENT_TYPES = [
 
 // ─── Mappers ──────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapIncidentRow(r: any): OpsTimelineEntry {
+type IncidentTimelineRow = Pick<
+  Database["public"]["Tables"]["incidents"]["Row"],
+  | "id"
+  | "incident_id"
+  | "severity"
+  | "status"
+  | "ops_review_status"
+  | "source_event_type"
+  | "affected_workflow"
+  | "affected_agent"
+  | "trading_blocked"
+  | "money_at_risk"
+  | "paper_or_live_mode"
+  | "user_attention_required"
+  | "root_cause"
+  | "evidence"
+  | "actions_taken"
+  | "recovery_result"
+  | "follow_up_recommendation"
+  | "symptoms"
+  | "detected_at"
+  | "resolved_at"
+  | "updated_at"
+>;
+
+type SystemEventTimelineRow = Pick<
+  Database["public"]["Tables"]["system_events"]["Row"],
+  "id" | "event_type" | "actor" | "payload" | "created_at"
+>;
+
+function isJsonRecord(value: Json): value is Record<string, Json | undefined> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function jsonRecordToUnknownRecord(value: Json): Record<string, unknown> {
+  return isJsonRecord(value) ? value : {};
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function mapIncidentRow(r: IncidentTimelineRow): OpsTimelineEntry {
   const severityMap: Record<string, IncidentSeverity> = {
     P1: "critical",
     P2: "warning",
@@ -104,7 +146,7 @@ function mapIncidentRow(r: any): OpsTimelineEntry {
     mode: r.paper_or_live_mode ?? "unknown",
     userAttentionRequired: r.user_attention_required ?? false,
     rootCause: r.root_cause ?? "",
-    evidence: (r.evidence as Record<string, unknown>) ?? {},
+    evidence: jsonRecordToUnknownRecord(r.evidence),
     actionsTaken: r.actions_taken ?? [],
     recoveryResult: r.recovery_result ?? "",
     followUpRecommendation: r.follow_up_recommendation ?? "",
@@ -116,11 +158,10 @@ function mapIncidentRow(r: any): OpsTimelineEntry {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapSystemEventRow(r: any): OpsTimelineEntry {
-  const payload = (r.payload as Record<string, unknown>) ?? {};
-  const surface = (payload["surface"] as string | undefined) ?? r.actor ?? "unknown";
-  const mode = (payload["mode"] as string | undefined) ?? "unknown";
+function mapSystemEventRow(r: SystemEventTimelineRow): OpsTimelineEntry {
+  const payload = jsonRecordToUnknownRecord(r.payload);
+  const surface = optionalString(payload["surface"]) ?? r.actor ?? "unknown";
+  const mode = optionalString(payload["mode"]) ?? "unknown";
 
   const classification = classifyEventType({
     eventType: r.event_type,
@@ -182,7 +223,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     try {
       // Fetch incidents and system_events in parallel
       const [incidentRes, eventRes] = await Promise.all([
-        (supabase as any)
+        supabase
           .from("incidents")
           .select(
             "id,incident_id,severity,status,ops_review_status,source_event_type," +
@@ -239,7 +280,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     async (incidentId: string, newStatus: OpsReviewStatus): Promise<void> => {
       if (!user) throw new Error("Not signed in");
 
-      const { error: rpcError } = await (supabase as any).rpc("update_incident_ops_status", {
+      const { error: rpcError } = await supabase.rpc("update_incident_ops_status", {
         p_incident_id: incidentId,
         p_ops_status: newStatus,
       });
