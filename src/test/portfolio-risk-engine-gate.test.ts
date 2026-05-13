@@ -30,6 +30,7 @@ import type { Trade, AccountState } from "@/lib/domain-types";
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
 const NOW_MS = 1_700_000_000_000;
+const FRESH = new Date(NOW_MS - 60_000).toISOString();
 
 function baseAccount(overrides: Partial<AccountState> = {}): AccountState {
   return {
@@ -88,6 +89,9 @@ function baseInput(overrides: Partial<PortfolioRiskInput> = {}): PortfolioRiskIn
     openTrades: [],
     account: baseAccount(),
     mode: "paper",
+    exposureUpdatedAt: FRESH,
+    marketDataUpdatedAt: FRESH,
+    accountStateUpdatedAt: FRESH,
     nowMs: NOW_MS,
     ...overrides,
   };
@@ -178,8 +182,9 @@ describe("paper mode with unknown account", () => {
     });
     // Paper mode does NOT emit UNKNOWN_EXPOSURE_LIVE_BLOCK — that code is live-only.
     expect(result.blockCodes).not.toContain(PORTFOLIO_RISK_CODES.UNKNOWN_EXPOSURE_LIVE_BLOCK);
-    // With no trades and no account in paper mode: clear (nothing to block on)
-    expect(result.verdict).toBe("clear");
+    // Paper mode degrades unknown freshness/account state to warnings, not hard blocks.
+    expect(result.verdict).toBe("warn");
+    expect(result.warningCodes).toContain(PORTFOLIO_RISK_CODES.STALE_EXPOSURE);
     expect(result.insufficientData).toBe(true);
   });
 });

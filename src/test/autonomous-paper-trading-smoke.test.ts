@@ -379,6 +379,9 @@ describe("Smoke Path A — Happy path (paper mode, all gates clear)", () => {
       openTrades: [],
       account: paperAccount(),
       mode: "paper" as const,
+      exposureUpdatedAt: FRESH_1MIN_AGO,
+      marketDataUpdatedAt: FRESH_1MIN_AGO,
+      accountStateUpdatedAt: FRESH_1MIN_AGO,
       nowMs: NOW_MS,
     });
     expect(risk.verdict).toBe("clear");
@@ -433,6 +436,9 @@ describe("Smoke Path A — Happy path (paper mode, all gates clear)", () => {
       openTrades: [],
       account: paperAccount(),
       mode: "paper" as const,
+      exposureUpdatedAt: FRESH_1MIN_AGO,
+      marketDataUpdatedAt: FRESH_1MIN_AGO,
+      accountStateUpdatedAt: FRESH_1MIN_AGO,
       nowMs: NOW_MS,
     });
     const guard = guardAiOutput(SAFE_AI_TEXT);
@@ -567,6 +573,9 @@ describe("Smoke Path B — Blocked path (kill switch / portfolio exposure)", () 
       openTrades: [],
       account: null, // unknown account state
       mode: "live" as const,
+      exposureUpdatedAt: FRESH_1MIN_AGO,
+      marketDataUpdatedAt: FRESH_1MIN_AGO,
+      accountStateUpdatedAt: FRESH_1MIN_AGO,
       nowMs: NOW_MS,
     });
     expect(risk.blockCodes).toContain(PORTFOLIO_RISK_CODES.UNKNOWN_EXPOSURE_LIVE_BLOCK);
@@ -579,6 +588,9 @@ describe("Smoke Path B — Blocked path (kill switch / portfolio exposure)", () 
       openTrades: [],
       account: null,
       mode: "paper" as const,
+      exposureUpdatedAt: FRESH_1MIN_AGO,
+      marketDataUpdatedAt: FRESH_1MIN_AGO,
+      accountStateUpdatedAt: FRESH_1MIN_AGO,
       nowMs: NOW_MS,
     });
     // Paper mode degrades gracefully — unknown account does not hard-block
@@ -883,6 +895,9 @@ describe("Smoke Path D — Safety regression", () => {
       openTrades: [],
       account: null,
       mode: "live" as const,
+      exposureUpdatedAt: FRESH_1MIN_AGO,
+      marketDataUpdatedAt: FRESH_1MIN_AGO,
+      accountStateUpdatedAt: FRESH_1MIN_AGO,
       nowMs: NOW_MS,
     });
     expect(risk.blockCodes).toContain(PORTFOLIO_RISK_CODES.UNKNOWN_EXPOSURE_LIVE_BLOCK);

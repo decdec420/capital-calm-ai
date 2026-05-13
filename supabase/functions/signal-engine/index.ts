@@ -13,7 +13,6 @@
 
 import {
   CAPITAL_PRESERVATION_DOCTRINE,
-  SYMBOL_WHITELIST,
   getProfile,
   validateDoctrineInvariants,
   type TradingProfile,
@@ -93,8 +92,12 @@ import {
 import {
   computePortfolioRisk,
   safePortfolioRiskSummary,
-  PORTFOLIO_RISK_CODES,
 } from "../_shared/portfolio-risk.ts";
+import {
+  SIGNAL_EVALUATION_SYMBOLS,
+  MULTI_SYMBOL_MODE,
+  selectSignalEvaluationCandidates,
+} from "../_shared/signal-evaluation.ts";
 
 // Fail loud on doctrine drift — if someone edits a constant wrong, this
 // explodes at cold-start instead of silently mis-sizing a live order.
@@ -248,8 +251,8 @@ async function ensureFreshBrainTrustMomentum(admin: any, userId: string, symbol:
 }
 // corsHeaders is imported from ../_shared/cors.ts (see import at top of file)
 
-// Symbols come from the doctrine whitelist — single source of truth.
-const SYMBOLS = SYMBOL_WHITELIST;
+// Controlled PR #49 evaluation universe. Do not expand beyond BTC/ETH/SOL here.
+const SYMBOLS = SIGNAL_EVALUATION_SYMBOLS;
 
 // ─── AI Model Assignments ──────────────────────────────────────
 // Technical Analyst stays on Flash — runs on every tick (288×/day).
@@ -950,7 +953,7 @@ async function runTickForUser(
       .eq("user_id", userId),
     admin
       .from("trades")
-      .select("id,symbol,side,entry_price,size,unrealized_pnl")
+      .select("id,symbol,side,entry_price,size,unrealized_pnl,updated_at,created_at")
       .eq("user_id", userId)
       .eq("status", "open"),
     admin
@@ -1246,6 +1249,21 @@ async function runTickForUser(
     }
   }
 
+  const latestMarketDataAt = Object.values(candlesBySymbol)
+    .flatMap((candles) => candles ?? [])
+    .reduce<string | null>((latest, candle) => {
+      const iso = new Date(candle.t * 1000).toISOString();
+      return latest === null || new Date(iso).getTime() > new Date(latest).getTime() ? iso : latest;
+    }, null);
+  const accountStateUpdatedAt = (acct as { updated_at?: string | null } | null)?.updated_at ?? null;
+  const exposureUpdatedAt = (() => {
+    const tradeTimes = ((openTrades ?? []) as Array<{ updated_at?: string | null; created_at?: string | null }>)
+      .map((t) => t.updated_at ?? t.created_at ?? null)
+      .filter((t): t is string => typeof t === "string" && t.length > 0);
+    if (tradeTimes.length === 0) return accountStateUpdatedAt;
+    return tradeTimes.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+  })();
+
   // ── Portfolio risk gate ───────────────────────────────────────
   // Evaluates portfolio-level exposure using the same pure logic as
   // the frontend Risk Center (PR #48). Additive — does not replace
@@ -1277,6 +1295,9 @@ async function runTickForUser(
       daily_auto_execute_cap_usd: (acct as { daily_auto_execute_cap_usd?: number }).daily_auto_execute_cap_usd ?? 2,
     } : null,
     mode: isPaper ? "paper" : "live",
+    exposureUpdatedAt,
+    marketDataUpdatedAt: latestMarketDataAt,
+    accountStateUpdatedAt,
   });
 
   // Build gate reasons from portfolio risk codes.
@@ -2022,7 +2043,83 @@ async function runTickForUser(
     }
     return b.regime.setupScore - a.regime.setupScore;
   });
-  const winner = tradable[0];
+  const multiSymbolSelection = selectSignalEvaluationCandidates(
+    tradable.map((c) => ({
+      symbol: c.symbol,
+      setupScore: c.regime.setupScore,
+      confidence: c.regime.confidence,
+      pullback: c.regime.pullback,
+      momentumAgeMin: (() => {
+        const intel = intelligenceBySymbol[c.symbol] ?? null;
+        const momentumAt = intel?.recent_momentum_at ?? intel?.generated_at ?? null;
+        return momentumAt ? (Date.now() - new Date(momentumAt).getTime()) / 60000 : null;
+      })(),
+      brainTrustScore: intelligenceBySymbol[c.symbol]?.recent_momentum_1h ?? null,
+      lockCode: c.lockGate?.code ?? null,
+      regime: c.regime.regime,
+      lastPrice: c.lastPrice,
+    })),
+    {
+      openTrades: (openTrades ?? []).map((t: {
+        symbol: string;
+        entry_price?: number | string | null;
+        size?: number | string | null;
+        unrealized_pnl?: number | string | null;
+        side?: string | null;
+      }) => ({
+        symbol: t.symbol,
+        entry_price: t.entry_price ?? 0,
+        size: t.size ?? 0,
+        unrealized_pnl: t.unrealized_pnl ?? null,
+        side: t.side ?? null,
+      })),
+      account: acct ? {
+        equity: acct.equity ?? 0,
+        start_of_day_equity: (acct as { start_of_day_equity?: number }).start_of_day_equity ?? acct.equity ?? 0,
+        daily_auto_execute_cap_usd: (acct as { daily_auto_execute_cap_usd?: number }).daily_auto_execute_cap_usd ?? 2,
+      } : null,
+      mode: isPaper ? "paper" : "live",
+      exposureUpdatedAt,
+      marketDataUpdatedAt: latestMarketDataAt,
+      accountStateUpdatedAt,
+    },
+    activeProfile.id === "aggressive" ? "canary" : MULTI_SYMBOL_MODE,
+  );
+
+  for (const skippedCandidate of multiSymbolSelection.skipped) {
+    if (skippedCandidate.skipCodes.length === 0) continue;
+    recordNonTrade(admin, {
+      userId,
+      symbol: skippedCandidate.symbol,
+      reasonCode: skippedCandidate.skipCodes.some((code) => code.startsWith("PORTFOLIO_") || code.startsWith("STALE_"))
+        ? "PORTFOLIO_RISK_BLOCK"
+        : "NO_TRADE_REGIME",
+      severity: skippedCandidate.portfolioRisk.verdict === "block" ? "block" : "skip",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: skippedCandidate.regime ?? null,
+      setupScore: skippedCandidate.setupScore,
+      confidence: skippedCandidate.confidence,
+      blockerCodes: skippedCandidate.skipCodes,
+      replayPacket: buildNonTradePacket({
+        symbol: skippedCandidate.symbol,
+        regime: skippedCandidate.regime ?? null,
+        setupScore: skippedCandidate.setupScore,
+        confidence: skippedCandidate.confidence,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: skippedCandidate.skipCodes,
+        reason: `${skippedCandidate.symbol}: skipped by multi-symbol selection (${skippedCandidate.skipCodes.join(", ")}).`,
+        meta: {
+          multi_symbol_mode: multiSymbolSelection.mode,
+          max_evaluated: multiSymbolSelection.maxEvaluated,
+          rankScore: skippedCandidate.rankScore,
+          rankReasons: skippedCandidate.rankReasons,
+          portfolioRisk: safePortfolioRiskSummary(skippedCandidate.portfolioRisk),
+        },
+      }),
+    }).catch(() => {});
+  }
+
+  const winner = tradable.find((c) => c.symbol === multiSymbolSelection.evaluated[0]?.symbol);
 
   const perSymbol: PerSymbolSnapshot[] = candidates.map((c) => ({
     symbol: c.symbol,
@@ -2484,16 +2581,15 @@ async function runTickForUser(
   // "long" — now we mark that as a fallback and refuse to propose the
   // trade so users never see a silent default-long entry. The signal
   // is dropped with a gate reason the operator can inspect.
-  const aiSide = decision.side === "long" || decision.side === "short" ? decision.side : null;
-  const side: "long" | "short" = aiSide ?? "long";
+  const side: "long" | "short" | null = decision.side === "long" || decision.side === "short" ? decision.side : null;
   const directionBasis: "engine_chose_long" | "engine_chose_short" | "default_long_fallback" =
-    aiSide === "long"
+    side === "long"
       ? "engine_chose_long"
-      : aiSide === "short"
+      : side === "short"
         ? "engine_chose_short"
         : "default_long_fallback";
 
-  if (decision.decision === "propose_trade" && directionBasis === "default_long_fallback") {
+  if (side === null) {
     const fallbackGate = gate(
       GATE_CODES.DEFAULT_LONG_FALLBACK_BLOCKED,
       "block",

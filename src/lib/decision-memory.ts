@@ -37,6 +37,8 @@ export type NonTradeReasonCode =
   // AI veto paths
   | "RISK_MANAGER_VETO"
   | "RISK_MANAGER_SKIP_TICK"
+  // Portfolio risk blocks
+  | "PORTFOLIO_RISK_BLOCK"
   // Operator action
   | "OPERATOR_REJECTED";
 
@@ -119,6 +121,7 @@ export const REASON_CODE_LABELS: Record<NonTradeReasonCode, string> = {
   NO_APPROVED_STRATEGY: "No approved strategy for regime",
   RISK_MANAGER_VETO: "Risk Manager veto",
   RISK_MANAGER_SKIP_TICK: "Risk Manager unavailable (transient)",
+  PORTFOLIO_RISK_BLOCK: "Portfolio risk blocked",
   OPERATOR_REJECTED: "Operator rejected",
 };
 
@@ -136,6 +139,7 @@ export function isSafetyBlock(code: NonTradeReasonCode): boolean {
     "COOLDOWN_ACTIVE",
     "DOCTRINE_BLOCK",
     "RISK_GATE_BLOCK",
+    "PORTFOLIO_RISK_BLOCK",
   ].includes(code);
 }
 

@@ -49,6 +49,7 @@ export const DAILY_RISK_BUDGET_LOW_FRACTION = 0.2;
 export const DRAWDOWN_WARN_PCT = 0.03;
 /** How many open positions on the SAME symbol triggers a duplicate warning */
 export const DUPLICATE_SYMBOL_WARN_COUNT = 2;
+export const STALE_INPUT_MAX_AGE_MS = 5 * 60_000;
 
 // ─── Portfolio risk verdict ───────────────────────────────────────────────────
 
@@ -74,6 +75,9 @@ export const PORTFOLIO_RISK_CODES = {
   OPEN_POSITIONS_BLOCK: "PORTFOLIO_OPEN_POSITIONS_BLOCK",
   // Live-only blocks
   UNKNOWN_EXPOSURE_LIVE_BLOCK: "PORTFOLIO_UNKNOWN_EXPOSURE_LIVE_BLOCK",
+  STALE_EXPOSURE: "STALE_EXPOSURE",
+  STALE_MARKET_DATA: "STALE_MARKET_DATA",
+  STALE_ACCOUNT_STATE: "STALE_ACCOUNT_STATE",
 } as const;
 
 export type PortfolioRiskCode =
@@ -140,10 +144,18 @@ export interface PortfolioRiskSummary {
 export interface PortfolioRiskInput {
   /** Open trades only (status = 'open'). Caller filters. */
   openTrades: Trade[];
+  /** Optional proposed candidate, included before proposal/insert. */
+  proposedTrade?: { symbol: string; side?: "long" | "short" | string | null; notionalUsd: number } | null;
   /** Account state — null when not yet loaded or user has no row */
   account: AccountState | null;
   /** System mode drives paper-vs-live strictness */
   mode: SystemMode | "unknown";
+  /** Last reliable exposure snapshot timestamp. Missing is never fresh in live mode. */
+  exposureUpdatedAt?: string | null;
+  /** Last reliable market-data timestamp. Missing is never fresh in live mode. */
+  marketDataUpdatedAt?: string | null;
+  /** Last reliable account-state timestamp. Missing is never fresh in live mode. */
+  accountStateUpdatedAt?: string | null;
   /** Current time in ms (for testability) */
   nowMs?: number;
 }
@@ -159,14 +171,53 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
   const blockCodes: PortfolioRiskCode[] = [];
 
   // ── Data quality ──────────────────────────────────────────────────────────
-  const insufficientData = account === null;
-  if (isLiveMode && insufficientData) {
+  const staleOrMissing = (timestamp: string | null | undefined): boolean => {
+    if (!timestamp) return true;
+    const parsed = new Date(timestamp).getTime();
+    return !Number.isFinite(parsed) || nowMs - parsed > STALE_INPUT_MAX_AGE_MS || parsed > nowMs + 60_000;
+  };
+
+  const exposureStale = staleOrMissing(input.exposureUpdatedAt);
+  const marketDataStale = staleOrMissing(input.marketDataUpdatedAt);
+  const accountStateStale = staleOrMissing(input.accountStateUpdatedAt);
+
+  const insufficientData = account === null || (isLiveMode && (exposureStale || accountStateStale));
+  if (isLiveMode && account === null) {
     blockCodes.push(PORTFOLIO_RISK_CODES.UNKNOWN_EXPOSURE_LIVE_BLOCK);
+  }
+  if (isLiveMode && exposureStale) {
+    blockCodes.push(PORTFOLIO_RISK_CODES.STALE_EXPOSURE);
+  } else if (!isLiveMode && exposureStale) {
+    warningCodes.push(PORTFOLIO_RISK_CODES.STALE_EXPOSURE);
+  }
+  if (isLiveMode && marketDataStale) {
+    blockCodes.push(PORTFOLIO_RISK_CODES.STALE_MARKET_DATA);
+  } else if (!isLiveMode && marketDataStale) {
+    warningCodes.push(PORTFOLIO_RISK_CODES.STALE_MARKET_DATA);
+  }
+  if (isLiveMode && accountStateStale) {
+    blockCodes.push(PORTFOLIO_RISK_CODES.STALE_ACCOUNT_STATE);
+  } else if (!isLiveMode && accountStateStale) {
+    warningCodes.push(PORTFOLIO_RISK_CODES.STALE_ACCOUNT_STATE);
   }
 
   // ── Exposure by symbol ────────────────────────────────────────────────────
   const symbolMap = new Map<string, SymbolExposure>();
-  for (const trade of openTrades) {
+  const proposedTrade = input.proposedTrade ?? null;
+  const exposureRows = proposedTrade && proposedTrade.notionalUsd >= 0
+    ? [
+        ...openTrades,
+        {
+          symbol: proposedTrade.symbol,
+          side: proposedTrade.side === "short" ? "short" as const : "long" as const,
+          entryPrice: proposedTrade.notionalUsd,
+          size: 1,
+          unrealizedPnl: null,
+        } as Trade,
+      ]
+    : openTrades;
+
+  for (const trade of exposureRows) {
     const notional = trade.entryPrice * trade.size;
     const existing = symbolMap.get(trade.symbol);
     if (existing) {
@@ -191,7 +242,7 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
 
   // ── Totals ────────────────────────────────────────────────────────────────
   const totalExposureUsd = exposureBySymbol.reduce((s, e) => s + e.notionalUsd, 0);
-  const openPositionCount = openTrades.length;
+  const openPositionCount = exposureRows.length;
   const openPositionsBySymbol: Record<string, number> = {};
   for (const [sym, exp] of symbolMap.entries()) {
     openPositionsBySymbol[sym] = exp.openPositionCount;
@@ -199,7 +250,7 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
 
   // ── Unrealized PnL ────────────────────────────────────────────────────────
   let totalUnrealizedPnl: number | null = null;
-  for (const trade of openTrades) {
+  for (const trade of exposureRows) {
     if (trade.unrealizedPnl !== null) {
       totalUnrealizedPnl = (totalUnrealizedPnl ?? 0) + trade.unrealizedPnl;
     }
@@ -304,7 +355,7 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
 
   // Duplicate direction stacking (same-side exposure across multiple open positions)
   const sideCounts = new Map<string, number>();
-  for (const trade of openTrades) {
+  for (const trade of exposureRows) {
     sideCounts.set(trade.side, (sideCounts.get(trade.side) ?? 0) + 1);
   }
   for (const count of sideCounts.values()) {
