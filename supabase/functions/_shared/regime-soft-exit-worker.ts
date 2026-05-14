@@ -40,6 +40,8 @@ export interface RegimeSoftExitOpenTrade {
   strategy_id?: string | null;
   strategy_version?: string | null;
   lifecycle_transitions?: unknown;
+  context_snapshot?: unknown;
+  replay_packet?: unknown;
 }
 
 export interface RegimeSoftExitMarketIntel {
@@ -182,20 +184,47 @@ function isKnownRegime(value: string | null): value is string {
   return !!value && !UNKNOWN_REGIMES.has(value);
 }
 
-export function deriveEntryRegimeFromTrade(trade: Pick<RegimeSoftExitOpenTrade, "reason_tags" | "lifecycle_transitions">): string | null {
-  for (const tag of trade.reason_tags ?? []) {
-    const normalized = normalizeRegimeToken(tag);
-    if (normalized && ENTRY_REGIME_TAGS.has(tag.trim().toLowerCase().replace(/\s+/g, "_"))) {
-      return normalized;
-    }
-  }
+function readRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
 
+export function deriveEntryRegimeFromTrade(
+  trade: Pick<RegimeSoftExitOpenTrade, "reason_tags" | "lifecycle_transitions" | "context_snapshot" | "replay_packet">,
+): string | null {
+  // New normalized path for future trades: entry-time lifecycle metadata copied
+  // from the originating signal. Prefer this over legacy reason tags.
   if (Array.isArray(trade.lifecycle_transitions)) {
     for (const transition of trade.lifecycle_transitions) {
       if (!transition || typeof transition !== "object") continue;
       const meta = (transition as { meta?: Record<string, unknown> }).meta;
       const normalized = normalizeRegimeToken(meta?.entryRegime ?? meta?.marketRegime ?? meta?.regime);
       if (normalized) return normalized;
+    }
+  }
+
+  // Optional structured metadata fallbacks for tests/future trade metadata.
+  const context = readRecord(trade.context_snapshot);
+  const replay = readRecord(trade.replay_packet);
+  const replayMarket = readRecord(replay.market);
+  for (const candidate of [
+    context.entryRegime,
+    replayMarket.entryRegime,
+    readRecord(context.regime).regime,
+    replayMarket.regime,
+  ]) {
+    const normalized = normalizeRegimeToken(candidate);
+    if (normalized) return normalized;
+  }
+
+  // Legacy fallback: older trades may only have the regime as a plain tag.
+  for (const tag of trade.reason_tags ?? []) {
+    const raw = tag.trim().toLowerCase().replace(/\s+/g, "_");
+    const value = raw.startsWith("entry_regime:") ? raw.slice("entry_regime:".length) : raw;
+    const normalized = normalizeRegimeToken(value);
+    if (normalized && (ENTRY_REGIME_TAGS.has(value) || raw.startsWith("entry_regime:"))) {
+      return normalized;
     }
   }
 

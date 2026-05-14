@@ -39,6 +39,10 @@ export interface MarketReplaySlice {
   snapshotAgeSeconds: number;
   /** Hypothetical trade direction. Required for direction-aware outcome enrichment. */
   side?: "long" | "short";
+  /** Normalized market regime captured at proposal/entry time. "unknown" means no structured source was available. */
+  entryRegime?: string;
+  /** Structured source used to populate entryRegime; never AI-inferred. */
+  entryRegimeSource?: "signal_regime" | "market_intelligence" | "unknown";
 }
 
 export interface ModelReplaySlice {

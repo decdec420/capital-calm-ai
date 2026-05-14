@@ -98,6 +98,33 @@ describe("buildDecisionReplayPacket", () => {
     expect(packet.ranAt).toBe("2026-05-10T09:00:00.000Z");
   });
 
+  it("stores entry-regime metadata from structured market context when provided", () => {
+    const packet = buildPacket({
+      market: makeMarket({
+        regime: "trending_up",
+        entryRegime: "trending_up",
+        entryRegimeSource: "signal_regime",
+      }),
+    });
+
+    expect(packet.market.entryRegime).toBe("trending_up");
+    expect(packet.market.entryRegimeSource).toBe("signal_regime");
+  });
+
+  it("stores unknown entry regime honestly when no structured source exists", () => {
+    const packet = buildPacket({
+      market: makeMarket({
+        regime: "no_trade",
+        entryRegime: "unknown",
+        entryRegimeSource: "unknown",
+      }),
+    });
+
+    expect(packet.market.entryRegime).toBe("unknown");
+    expect(packet.market.entryRegimeSource).toBe("unknown");
+    expect(JSON.stringify(packet.market)).not.toContain("inferred");
+  });
+
   it("stores market context without credentials", () => {
     const packet = buildPacket({ market: makeMarket({ symbol: "ETH-USD", regime: "range", setupScore: 0.55 }) });
     expect(packet.market.symbol).toBe("ETH-USD");

@@ -90,10 +90,12 @@ const NEXT_STATUS: Partial<Record<OpsReviewStatus, OpsReviewStatus>> = {
 function EntryCard({
   entry,
   onAdvance,
+  onReviewSoftExit,
   advancing,
 }: {
   entry: OpsTimelineEntry;
   onAdvance: (id: string, status: OpsReviewStatus) => void;
+  onReviewSoftExit: (id: string, action: "acknowledge" | "mark_reviewed" | "dismiss") => void;
   advancing: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -167,6 +169,19 @@ function EntryCard({
         )}
       </div>
 
+      {entry.source === "soft_exit_simulation" && (
+        <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+          <div><span className="text-muted-foreground">Trade</span> <span className="font-mono">{String(entry.evidence.tradeId ?? "—").slice(0, 8)}</span></div>
+          <div><span className="text-muted-foreground">Side</span> <span className="font-mono">{String(entry.evidence.side ?? "—")}</span></div>
+          <div><span className="text-muted-foreground">Entry</span> <span className="font-mono">{String(entry.evidence.entryRegime ?? "unknown")}</span></div>
+          <div><span className="text-muted-foreground">Current</span> <span className="font-mono">{String(entry.evidence.currentRegime ?? "unknown")}</span></div>
+          <div><span className="text-muted-foreground">Action</span> <span className="font-mono">{String(entry.evidence.simulatedActions ?? "NO_ACTION")}</span></div>
+          <div><span className="text-muted-foreground">Result</span> <span className="font-mono">{String(entry.evidence.resultLabel ?? "simulation_only")}</span></div>
+          <div><span className="text-muted-foreground">Allowed</span> <span className="font-mono">executionAllowed: false</span></div>
+          <div><span className="text-muted-foreground">Review</span> <span className="font-mono">{entry.softExitReviewStatus ?? "unreviewed"}</span></div>
+        </div>
+      )}
+
       {/* Expanded detail */}
       {expanded && (
         <div className="mt-2.5 space-y-1.5 border-t border-border/40 pt-2">
@@ -238,6 +253,36 @@ function EntryCard({
               </p>
             </div>
           )}
+
+          {entry.source === "soft_exit_simulation" && entry.softExitReviewStatus !== "reviewed" && entry.softExitReviewStatus !== "dismissed" && (
+            <div className="pt-1 space-y-1">
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  ["acknowledge", "Acknowledge"],
+                  ["mark_reviewed", "Mark reviewed"],
+                  ["dismiss", "Dismiss"],
+                ].map(([action, label]) => (
+                  <button
+                    key={action}
+                    className={cn(
+                      "text-[10px] font-medium px-2.5 py-1 rounded border",
+                      "bg-secondary hover:bg-secondary/80 border-border",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      "flex items-center gap-1.5",
+                    )}
+                    disabled={advancing}
+                    onClick={() => onReviewSoftExit(entry.id, action as "acknowledge" | "mark_reviewed" | "dismiss")}
+                  >
+                    {advancing && <RefreshCw className="h-2.5 w-2.5 animate-spin" />}
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[9px] text-muted-foreground mt-0.5">
+                Review updates metadata only — no trade closes, stop changes, take-profit changes, or broker action.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -249,7 +294,7 @@ function EntryCard({
 type FilterSeverity = "all" | "critical" | "warning" | "info";
 
 export function OpsTimeline() {
-  const { entries, loading, error, openTradingBlockers, attentionCount, updateOpsStatus } =
+  const { entries, loading, error, openTradingBlockers, attentionCount, updateOpsStatus, reviewSoftExitSimulation } =
     useOpsTimeline();
 
   const [filter, setFilter] = useState<FilterSeverity>("all");
@@ -262,6 +307,17 @@ export function OpsTimeline() {
       await updateOpsStatus(id, status);
     } catch (e) {
       console.error("[OpsTimeline] updateOpsStatus failed:", e);
+    } finally {
+      setAdvancingId(null);
+    }
+  };
+
+  const handleSoftExitReview = async (id: string, action: "acknowledge" | "mark_reviewed" | "dismiss") => {
+    setAdvancingId(id);
+    try {
+      await reviewSoftExitSimulation(id, action);
+    } catch (e) {
+      console.error("[OpsTimeline] reviewSoftExitSimulation failed:", e);
     } finally {
       setAdvancingId(null);
     }
@@ -361,6 +417,7 @@ export function OpsTimeline() {
               key={`${entry.source}-${entry.id}`}
               entry={entry}
               onAdvance={handleAdvance}
+              onReviewSoftExit={handleSoftExitReview}
               advancing={advancingId === entry.id}
             />
           ))}

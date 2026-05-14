@@ -559,6 +559,10 @@ export type Database = {
           input_snapshot: Json
           lookahead_window: string
           result: Json | null
+          review_note: string | null
+          review_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           score: number | null
           simulation_type: string
           started_at: string | null
@@ -578,6 +582,10 @@ export type Database = {
           input_snapshot?: Json
           lookahead_window?: string
           result?: Json | null
+          review_note?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           score?: number | null
           simulation_type?: string
           started_at?: string | null
@@ -597,6 +605,10 @@ export type Database = {
           input_snapshot?: Json
           lookahead_window?: string
           result?: Json | null
+          review_note?: string | null
+          review_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           score?: number | null
           simulation_type?: string
           started_at?: string | null
@@ -2243,6 +2255,14 @@ export type Database = {
       }
       check_jessica_heartbeat: { Args: never; Returns: undefined }
       delete_broker_secrets: { Args: never; Returns: undefined }
+      review_regime_soft_exit_simulation: {
+        Args: {
+          p_simulation_id: string
+          p_action: string
+          p_review_note?: string | null
+        }
+        Returns: Database["public"]["Tables"]["decision_memory_simulations"]["Row"]
+      }
       get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }
       get_coinbase_broker_credentials: {
         Args: never
