@@ -80,6 +80,7 @@ import {
 } from "../_shared/broker.ts";
 import { probeCoinbaseAccounts } from "../_shared/coinbase-auth.ts";
 import { recordFill } from "../_shared/fills.ts";
+import { buildPaperExecutionSnapshot } from "../_shared/execution-data-readiness.ts";
 import { corsHeaders, makeCorsHeaders} from "../_shared/cors.ts";
 import { log } from "../_shared/logger.ts";
 import {
@@ -3401,6 +3402,18 @@ async function runTickForUser(
       meta: entryRegime,
     };
 
+  const decisionTimestamp = new Date().toISOString();
+  const executionQualitySnapshot = isPaper
+    ? buildPaperExecutionSnapshot({
+      expectedPrice: entry,
+      symbol: winner.symbol,
+      lastPrice: winner.lastPrice,
+      capturedAt: decisionTimestamp,
+      decisionTimestamp,
+      orderType: "paper_market",
+    })
+    : null;
+
   const { data: signalRow, error: insertErr } = await admin
     .from("trade_signals")
     .insert({
@@ -3429,6 +3442,7 @@ async function runTickForUser(
         entryRegimeSource: entryRegime.entryRegimeSource,
         lastPrice: winner.lastPrice,
         perSymbol,
+        executionQualitySnapshot,
         tp1,
         pullback: winner.regime.pullback,
         doctrineClampedBy: clamp.clampedBy,
