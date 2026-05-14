@@ -559,10 +559,6 @@ export type Database = {
           input_snapshot: Json
           lookahead_window: string
           result: Json | null
-          review_note: string | null
-          review_status: string
-          reviewed_at: string | null
-          reviewed_by: string | null
           score: number | null
           simulation_type: string
           started_at: string | null
@@ -582,10 +578,6 @@ export type Database = {
           input_snapshot?: Json
           lookahead_window?: string
           result?: Json | null
-          review_note?: string | null
-          review_status?: string
-          reviewed_at?: string | null
-          reviewed_by?: string | null
           score?: number | null
           simulation_type?: string
           started_at?: string | null
@@ -605,10 +597,6 @@ export type Database = {
           input_snapshot?: Json
           lookahead_window?: string
           result?: Json | null
-          review_note?: string | null
-          review_status?: string
-          reviewed_at?: string | null
-          reviewed_by?: string | null
           score?: number | null
           simulation_type?: string
           started_at?: string | null
@@ -2255,14 +2243,6 @@ export type Database = {
       }
       check_jessica_heartbeat: { Args: never; Returns: undefined }
       delete_broker_secrets: { Args: never; Returns: undefined }
-      review_regime_soft_exit_simulation: {
-        Args: {
-          p_simulation_id: string
-          p_action: string
-          p_review_note?: string | null
-        }
-        Returns: Database["public"]["Tables"]["decision_memory_simulations"]["Row"]
-      }
       get_activate_doctrine_changes_cron_token: { Args: never; Returns: string }
       get_coinbase_broker_credentials: {
         Args: never
@@ -2276,24 +2256,6 @@ export type Database = {
       get_evaluate_candidate_cron_token: { Args: never; Returns: string }
       get_hall_cron_token: { Args: never; Returns: string }
       get_jessica_cron_token: { Args: never; Returns: string }
-      get_current_quiet_mode_status: {
-        Args: { p_user_id?: string }
-        Returns: {
-          mode: string | null
-          latest_reason_codes: string[] | null
-          latest_skipped_scope: string | null
-          latest_surface: string | null
-          recommended_cadence_seconds: Json | null
-          next_recommended_check_at: string | null
-          safety_checks_preserved: boolean | null
-          last_quiet_event_at: string | null
-          last_cleanup_at: string | null
-          cleanup_status: string | null
-          cleanup_deleted_routine_event_count: number | null
-          cleanup_cron_configured: boolean | null
-          cleanup_result: string | null
-        }[]
-      }
       get_journal_digest_cron_token: { Args: never; Returns: string }
       get_katrina_cron_token: { Args: never; Returns: string }
       get_mark_to_market_cron_token: { Args: never; Returns: string }
