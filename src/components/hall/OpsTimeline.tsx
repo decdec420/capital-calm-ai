@@ -19,6 +19,7 @@
 import { cn } from "@/lib/utils";
 import { useOpsTimeline } from "@/hooks/useOpsTimeline";
 import type { OpsTimelineEntry } from "@/hooks/useOpsTimeline";
+import type { SoftExitLearningSummary } from "@/lib/regime-soft-exit-learning";
 import {
   type OpsReviewStatus,
   OPS_STATUS_LABEL,
@@ -75,6 +76,51 @@ function StatusBadge({ status }: { status: OpsReviewStatus }) {
       {isResolved && <CheckCircle2 className="h-2.5 w-2.5 mr-1" />}
       {OPS_STATUS_LABEL[status]}
     </span>
+  );
+}
+
+
+function SoftExitLearningPanel({ summaries }: { summaries: SoftExitLearningSummary[] }) {
+  if (summaries.length === 0) return null;
+
+  return (
+    <div className="rounded border border-border/60 bg-secondary/25 p-2 space-y-2">
+      <div className="flex items-start gap-2">
+        <ShieldAlert className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Soft-exit learning summaries</div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Learning summary only — no exit rule, strategy parameter, stop, or broker action was changed.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        {summaries.slice(0, 3).map((summary) => (
+          <div key={summary.groupKey} className="rounded bg-background/60 border border-border/50 p-1.5">
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5 items-center text-[10px]">
+              <span className="font-mono font-semibold">{summary.symbol ?? "unknown"}</span>
+              <span className="text-muted-foreground">{summary.side ?? "—"}</span>
+              <span className="font-mono">{summary.entryRegime ?? "unknown"} → {summary.currentRegime ?? "unknown"}</span>
+              <span className="text-muted-foreground">{summary.simulatedActions.join(", ")}</span>
+              <span className="ml-auto font-medium uppercase text-muted-foreground">{summary.sampleQuality}</span>
+            </div>
+            <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-1 text-[10px] text-muted-foreground">
+              <span>Count <span className="font-mono text-foreground">{summary.totalCount}</span></span>
+              <span>Ack <span className="font-mono text-foreground">{summary.acknowledgedCount}</span></span>
+              <span>Reviewed <span className="font-mono text-foreground">{summary.reviewedCount}</span></span>
+              <span>Dismissed <span className="font-mono text-foreground">{summary.dismissedCount}</span></span>
+              <span>Unreviewed <span className="font-mono text-foreground">{summary.unreviewedCount}</span></span>
+              <span>Useful <span className="font-mono text-foreground">{summary.usefulCount ?? 0}</span></span>
+              <span>Not useful <span className="font-mono text-foreground">{summary.notUsefulCount ?? 0}</span></span>
+              <span className="font-mono text-foreground">executionAllowed: false</span>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground leading-relaxed">
+              {summary.recommendation}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -294,8 +340,16 @@ function EntryCard({
 type FilterSeverity = "all" | "critical" | "warning" | "info";
 
 export function OpsTimeline() {
-  const { entries, loading, error, openTradingBlockers, attentionCount, updateOpsStatus, reviewSoftExitSimulation } =
-    useOpsTimeline();
+  const {
+    entries,
+    loading,
+    error,
+    openTradingBlockers,
+    attentionCount,
+    softExitLearningSummaries,
+    updateOpsStatus,
+    reviewSoftExitSimulation,
+  } = useOpsTimeline();
 
   const [filter, setFilter] = useState<FilterSeverity>("all");
   const [showResolved, setShowResolved] = useState(false);
@@ -398,6 +452,8 @@ export function OpsTimeline() {
           Show resolved
         </label>
       </div>
+
+      <SoftExitLearningPanel summaries={softExitLearningSummaries} />
 
       {/* Timeline entries */}
       {loading && entries.length === 0 ? (

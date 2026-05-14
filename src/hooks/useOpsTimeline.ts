@@ -21,6 +21,10 @@ import {
   type AffectedWorkflow,
   type OpsReviewStatus,
 } from "@/lib/incident-classification";
+import {
+  aggregateSoftExitLearningSummaries,
+  type SoftExitLearningSummary,
+} from "@/lib/regime-soft-exit-learning";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +66,8 @@ export interface UseOpsTimelineResult {
   attentionCount: number;
   /** Advance the ops_review_status on an incident. Metadata-only — never mutates trading state. */
   updateOpsStatus: (incidentId: string, newStatus: OpsReviewStatus) => Promise<void>;
+  /** Review-only grouped soft-exit learning summaries. These never allow execution. */
+  softExitLearningSummaries: SoftExitLearningSummary[];
   /** Review a soft-exit simulation artifact. Metadata-only — never mutates trading state. */
   reviewSoftExitSimulation: (simulationId: string, action: "acknowledge" | "mark_reviewed" | "dismiss") => Promise<void>;
   refetch: () => void;
@@ -279,11 +285,14 @@ function mapSystemEventRow(r: SystemEventTimelineRow): OpsTimelineEntry {
 export function useOpsTimeline(): UseOpsTimelineResult {
   const { user } = useAuth();
   const [entries, setEntries] = useState<OpsTimelineEntry[]>([]);
+  const [softExitLearningSummaries, setSoftExitLearningSummaries] = useState<SoftExitLearningSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
     if (!user) {
+      setEntries([]);
+      setSoftExitLearningSummaries([]);
       setLoading(false);
       return;
     }
@@ -319,7 +328,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
           .eq("simulation_type", "REGIME_CHANGE_SOFT_EXIT")
           .eq("status", "completed")
           .order("created_at", { ascending: false })
-          .limit(20),
+          .limit(100),
       ]);
 
       if (incidentRes.error) throw incidentRes.error;
@@ -328,7 +337,9 @@ export function useOpsTimeline(): UseOpsTimelineResult {
 
       const incidentEntries = (incidentRes.data ?? []).map(mapIncidentRow);
       const eventEntries = (eventRes.data ?? []).map(mapSystemEventRow);
-      const softExitEntries = (softExitRes.data ?? []).map(mapSoftExitSimulationRow);
+      const softExitRows = softExitRes.data ?? [];
+      const softExitEntries = softExitRows.slice(0, 20).map(mapSoftExitSimulationRow);
+      const learningSummaries = aggregateSoftExitLearningSummaries(softExitRows);
 
       // Merge and sort newest first
       const merged = [...incidentEntries, ...eventEntries, ...softExitEntries].sort(
@@ -336,6 +347,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
       );
 
       setEntries(merged);
+      setSoftExitLearningSummaries(learningSummaries);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load ops timeline");
@@ -401,8 +413,9 @@ export function useOpsTimeline(): UseOpsTimelineResult {
           e.id === simulationId ? { ...e, softExitReviewStatus: reviewStatus, opsStatus } : e
         )
       );
+      refetch();
     },
-    [user]
+    [user, refetch]
   );
 
   // ── Derived values ───────────────────────────────────────────────────────
@@ -421,6 +434,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     error,
     openTradingBlockers,
     attentionCount,
+    softExitLearningSummaries,
     updateOpsStatus,
     reviewSoftExitSimulation,
     refetch,
