@@ -181,6 +181,54 @@ describe("regime soft-exit dry-run worker", () => {
     expect(record.simulatedActions).toEqual(["NO_ACTION"]);
   });
 
+
+  it("prefers the normalized lifecycle entry-regime metadata over legacy tags", () => {
+    const normalized = deriveEntryRegimeFromTrade(trade({
+      reason_tags: ["ai-signal", "trending_down"],
+      lifecycle_transitions: [{
+        phase: "entered",
+        at: NOW.toISOString(),
+        by: "auto",
+        reason: "entered",
+        meta: { entryRegime: "trending_up", entryRegimeSource: "signal_regime" },
+      }],
+    }));
+
+    expect(normalized).toBe("trending_up");
+  });
+
+  it("falls back to legacy reason tags for older trades", () => {
+    expect(deriveEntryRegimeFromTrade(trade({
+      reason_tags: ["ai-signal", "entry_regime:trending_down"],
+      lifecycle_transitions: [],
+    }))).toBe("trending_down");
+
+    expect(deriveEntryRegimeFromTrade(trade({
+      reason_tags: ["ai-signal", "range"],
+      lifecycle_transitions: [],
+    }))).toBe("range");
+  });
+
+  it("stores unknown entry regime honestly as insufficient data without inventing a regime", () => {
+    const unknown = deriveEntryRegimeFromTrade(trade({
+      reason_tags: ["ai-signal", "entry_regime:unknown"],
+      lifecycle_transitions: [{ meta: { entryRegime: "unknown" } }],
+    }));
+
+    const record = buildRegimeSoftExitSimulationRecord({
+      trade: trade({ reason_tags: ["ai-signal", "entry_regime:unknown"] }),
+      entryRegime: unknown,
+      currentRegime: "trending_down",
+      nowIso: NOW.toISOString(),
+      nowMs: NOW.getTime(),
+    });
+
+    expect(unknown).toBeNull();
+    expect(record.resultLabel).toBe("insufficient_data");
+    expect(record.reasonCodes).toContain("INSUFFICIENT_REGIME_DATA");
+    expect(record.executionAllowed).toBe(false);
+  });
+
   it("does not store duplicate simulations for the same trade/regime pair inside the dedupe window", async () => {
     const fake = storageFor(trade(), intel());
     fake.dedupedTradeIds.add("trade-1");
@@ -217,6 +265,8 @@ describe("regime soft-exit dry-run worker", () => {
     expect(adapterSource).not.toContain('.from("trade_signals")');
     expect(adapterSource).not.toContain('.from("doctrine');
     expect(adapterSource).not.toContain('.from("strategies")');
+    expect(source).toContain("meta?.entryRegime");
+    expect(source).toContain("entry_regime:");
     expect(createSupabaseRegimeSoftExitStorage).toBeTypeOf("function");
   });
 
@@ -237,5 +287,44 @@ describe("regime soft-exit dry-run worker", () => {
     expect(migration).toContain(REGIME_SOFT_EXIT_SIMULATION_TYPE);
     expect(migration).toContain("execution_allowed=false");
     expect(migration).not.toMatch(/UPDATE public\.(trades|trade_signals|doctrine)|INSERT INTO public\.trades/i);
+  });
+
+  it("review workflow updates only simulation review metadata", () => {
+    const migration = readFileSync("supabase/migrations/20260514100000_regime_soft_exit_review_workflow.sql", "utf8");
+
+    expect(migration).toContain("review_regime_soft_exit_simulation");
+    expect(migration).toContain("review_status");
+    expect(migration).toContain("p_action = 'acknowledge'");
+    expect(migration).toContain("p_action = 'mark_reviewed'");
+    expect(migration).toContain("p_action = 'dismiss'");
+    expect(migration).toMatch(/UPDATE public\.decision_memory_simulations/);
+    expect(migration).not.toMatch(/UPDATE public\.(trades|trade_signals|doctrine|strategies)/i);
+    expect(migration).not.toMatch(/stop_loss\s*=|take_profit\s*=|placeMarket|status\s*=\s*'closed'/i);
+  });
+
+  it("signal lifecycle code preserves entry regime into proposal replay and trade metadata", () => {
+    const engine = readFileSync("supabase/functions/signal-engine/index.ts", "utf8");
+    const decide = readFileSync("supabase/functions/signal-decide/index.ts", "utf8");
+
+    expect(engine).toContain("entryRegime: entryRegime.entryRegime");
+    expect(engine).toContain("entryRegimeSource: entryRegime.entryRegimeSource");
+    expect(engine).toContain("meta: entryRegime");
+    expect(engine).toContain("entry_regime:${entryRegime.entryRegime}");
+    expect(decide).toContain("entryRegimeFromSignal");
+    expect(decide).toContain("meta: { fromSignalId: signalId, ...entryRegime }");
+    expect(decide).toContain("entry_regime:${entryRegime.entryRegime}");
+  });
+
+  it("OpsTimeline displays simulation-only copy and metadata-only soft-exit review actions", () => {
+    const source = readFileSync("src/components/hall/OpsTimeline.tsx", "utf8");
+    const hook = readFileSync("src/hooks/useOpsTimeline.ts", "utf8");
+
+    expect(hook).toContain("review_regime_soft_exit_simulation");
+    expect(hook).toContain("Simulation only — no trade was closed, no stop was changed, and no broker action was taken.");
+    expect(source).toContain("executionAllowed: false");
+    expect(source).toContain("Acknowledge");
+    expect(source).toContain("Mark reviewed");
+    expect(source).toContain("Dismiss");
+    expect(source).not.toMatch(/placeMarket|broker-execute|stop_loss\s*:|take_profit\s*:/i);
   });
 });

@@ -33,6 +33,57 @@ import type { DecisionReplayPacket } from "../_shared/decision-replay.ts";
 
 validateDoctrineInvariants();
 
+type EntryRegimeMeta = { entryRegime: string; entryRegimeSource: string };
+
+function normalizeEntryRegime(value: unknown): string {
+  if (typeof value !== "string") return "unknown";
+  const token = value.trim().toLowerCase().replace(/\s+/g, "_");
+  if (!token || token === "unknown" || token === "no_trade" || token === "insufficient_data") return "unknown";
+  switch (token) {
+    case "uptrend":
+    case "markup":
+    case "lean_long":
+    case "strong_long":
+      return "trending_up";
+    case "downtrend":
+    case "markdown":
+    case "lean_short":
+    case "strong_short":
+      return "trending_down";
+    case "transitioning":
+      return "chop";
+    case "accumulation":
+    case "distribution":
+      return "range";
+    default:
+      return token;
+  }
+}
+
+function readRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function entryRegimeFromSignal(sig: { regime?: unknown; context_snapshot?: unknown; replay_packet?: unknown }): EntryRegimeMeta {
+  const context = readRecord(sig.context_snapshot);
+  const replay = readRecord(sig.replay_packet);
+  const replayMarket = readRecord(replay.market);
+  const candidates: Array<{ value: unknown; source: string }> = [
+    { value: context.entryRegime, source: String(context.entryRegimeSource ?? "signal_context_snapshot") },
+    { value: replayMarket.entryRegime, source: String(replayMarket.entryRegimeSource ?? "signal_replay_packet") },
+    { value: sig.regime, source: "trade_signals.regime" },
+    { value: readRecord(context.regime).regime, source: "signal_context_snapshot.regime" },
+  ];
+
+  for (const candidate of candidates) {
+    const entryRegime = normalizeEntryRegime(candidate.value);
+    if (entryRegime !== "unknown") return { entryRegime, entryRegimeSource: candidate.source };
+  }
+  return { entryRegime: "unknown", entryRegimeSource: "unknown" };
+}
+
 
 Deno.serve(async (req) => {
     const cors = makeCorsHeaders(req);
@@ -277,8 +328,9 @@ if (req.method === "OPTIONS") {
     };
     const tp1Price = ctx?.tp1 != null ? Number(ctx.tp1) : null;
     const wasPullback = ctx?.pullback === true;
+    const entryRegime = entryRegimeFromSignal(sig);
 
-    const tags = ["ai-signal", sig.regime];
+    const tags = ["ai-signal", sig.regime, `entry_regime:${entryRegime.entryRegime}`];
     if (wasPullback) tags.push("pullback");
 
     // ── LIVE MODE: place broker order ──────────────────────────────────
@@ -325,7 +377,7 @@ if (req.method === "OPTIONS") {
     const tradeEnteredResult = transitionTrade("entered", "entered", {
       actor: "user",
       reason: reason ?? "Operator approved",
-      meta: { fromSignalId: signalId },
+      meta: { fromSignalId: signalId, ...entryRegime },
     });
     const tradeEnteredTransition: LifecycleTransition =
       tradeEnteredResult.ok && tradeEnteredResult.transition
@@ -335,7 +387,7 @@ if (req.method === "OPTIONS") {
           at: nowIso,
           by: "user",
           reason: reason ?? "Operator approved",
-          meta: { fromSignalId: signalId },
+          meta: { fromSignalId: signalId, ...entryRegime },
         };
 
     const { data: tradeRow, error: tradeErr } = await admin

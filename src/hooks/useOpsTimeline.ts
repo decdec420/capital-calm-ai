@@ -49,6 +49,7 @@ export interface OpsTimelineEntry {
   resolvedAt: string | null;
   updatedAt: string;
   label: string;
+  softExitReviewStatus?: "unreviewed" | "acknowledged" | "reviewed" | "dismissed";
 }
 
 export interface UseOpsTimelineResult {
@@ -61,6 +62,8 @@ export interface UseOpsTimelineResult {
   attentionCount: number;
   /** Advance the ops_review_status on an incident. Metadata-only — never mutates trading state. */
   updateOpsStatus: (incidentId: string, newStatus: OpsReviewStatus) => Promise<void>;
+  /** Review a soft-exit simulation artifact. Metadata-only — never mutates trading state. */
+  reviewSoftExitSimulation: (simulationId: string, action: "acknowledge" | "mark_reviewed" | "dismiss") => Promise<void>;
   refetch: () => void;
 }
 
@@ -111,7 +114,7 @@ type SystemEventTimelineRow = Pick<
 
 type SoftExitSimulationRow = Pick<
   Database["public"]["Tables"]["decision_memory_simulations"]["Row"],
-  "id" | "symbol" | "input_snapshot" | "result" | "created_at" | "updated_at"
+  "id" | "symbol" | "input_snapshot" | "result" | "created_at" | "updated_at" | "review_status" | "reviewed_at" | "reviewed_by" | "review_note"
 >;
 
 function isJsonRecord(value: Json): value is Record<string, Json | undefined> {
@@ -175,6 +178,12 @@ function mapSoftExitSimulationRow(r: SoftExitSimulationRow): OpsTimelineEntry {
   const actionText = Array.isArray(result["simulated_actions"])
     ? result["simulated_actions"].filter((a): a is string => typeof a === "string").join(", ")
     : "NO_ACTION";
+  const reviewStatus = (r.review_status ?? "unreviewed") as OpsTimelineEntry["softExitReviewStatus"];
+  const opsStatus: OpsReviewStatus = reviewStatus === "reviewed" || reviewStatus === "dismissed"
+    ? "resolved"
+    : reviewStatus === "acknowledged"
+      ? "diagnosed"
+      : "detected";
 
   return {
     id: r.id,
@@ -182,7 +191,7 @@ function mapSoftExitSimulationRow(r: SoftExitSimulationRow): OpsTimelineEntry {
     sourceId: r.id,
     humanId: `soft_exit_${(r.id as string).slice(0, 8)}`,
     severity: severity === "critical" ? "critical" : severity === "warning" ? "warning" : "info",
-    opsStatus: "detected",
+    opsStatus,
     hallStatus: "open",
     sourceEventType: "REGIME_CHANGE_SOFT_EXIT",
     affectedWorkflow: "trade_decision",
@@ -201,6 +210,9 @@ function mapSoftExitSimulationRow(r: SoftExitSimulationRow): OpsTimelineEntry {
       resultLabel,
       simulatedActions: result["simulated_actions"],
       executionAllowed: result["execution_allowed"] === false ? false : false,
+      side: result["side"],
+      severity: result["severity"],
+      reviewStatus,
     },
     actionsTaken: ["Simulation only — no trade was closed, no stop was changed, and no broker action was taken."],
     recoveryResult: "No execution was allowed or attempted.",
@@ -210,6 +222,7 @@ function mapSoftExitSimulationRow(r: SoftExitSimulationRow): OpsTimelineEntry {
     resolvedAt: null,
     updatedAt: r.updated_at ?? r.created_at,
     label: `${symbol} soft-exit simulation`,
+    softExitReviewStatus: reviewStatus,
   };
 }
 
@@ -301,7 +314,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
 
         supabase
           .from("decision_memory_simulations")
-          .select("id,symbol,input_snapshot,result,created_at,updated_at")
+          .select("id,symbol,input_snapshot,result,created_at,updated_at,review_status,reviewed_at,reviewed_by,review_note")
           .eq("user_id", user.id)
           .eq("simulation_type", "REGIME_CHANGE_SOFT_EXIT")
           .eq("status", "completed")
@@ -364,6 +377,34 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     [user]
   );
 
+  const reviewSoftExitSimulation = useCallback(
+    async (simulationId: string, action: "acknowledge" | "mark_reviewed" | "dismiss"): Promise<void> => {
+      if (!user) throw new Error("Not signed in");
+
+      const { error: rpcError } = await supabase.rpc("review_regime_soft_exit_simulation", {
+        p_simulation_id: simulationId,
+        p_action: action,
+        p_review_note: null,
+      });
+
+      if (rpcError) throw rpcError;
+
+      const reviewStatus = action === "acknowledge"
+        ? "acknowledged"
+        : action === "mark_reviewed"
+          ? "reviewed"
+          : "dismissed";
+      const opsStatus: OpsReviewStatus = reviewStatus === "acknowledged" ? "diagnosed" : "resolved";
+
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === simulationId ? { ...e, softExitReviewStatus: reviewStatus, opsStatus } : e
+        )
+      );
+    },
+    [user]
+  );
+
   // ── Derived values ───────────────────────────────────────────────────────
 
   const openTradingBlockers = entries.filter(
@@ -381,6 +422,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     openTradingBlockers,
     attentionCount,
     updateOpsStatus,
+    reviewSoftExitSimulation,
     refetch,
   };
 }

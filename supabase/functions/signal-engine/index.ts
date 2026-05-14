@@ -167,6 +167,39 @@ async function pingHeartbeat(): Promise<void> {
 }
 const brainTrustRefreshAttempts = new Map<string, number>();
 
+function normalizeEntryRegime(value: unknown): string {
+  if (typeof value !== "string") return "unknown";
+  const token = value.trim().toLowerCase().replace(/\s+/g, "_");
+  if (!token || token === "unknown" || token === "no_trade" || token === "insufficient_data") return "unknown";
+  switch (token) {
+    case "uptrend":
+    case "markup":
+    case "lean_long":
+    case "strong_long":
+      return "trending_up";
+    case "downtrend":
+    case "markdown":
+    case "lean_short":
+    case "strong_short":
+      return "trending_down";
+    case "transitioning":
+      return "chop";
+    case "accumulation":
+    case "distribution":
+      return "range";
+    default:
+      return token;
+  }
+}
+
+function entryRegimeMeta(regime: unknown): { entryRegime: string; entryRegimeSource: "signal_regime" | "unknown" } {
+  const entryRegime = normalizeEntryRegime(regime);
+  return {
+    entryRegime,
+    entryRegimeSource: entryRegime === "unknown" ? "unknown" : "signal_regime",
+  };
+}
+
 function cbAllow(): boolean {
   if (CB_STATE.state === "closed") return true;
   if (CB_STATE.state === "open") {
@@ -3299,12 +3332,16 @@ async function runTickForUser(
     return "sentinel";
   })();
 
+  const entryRegime = entryRegimeMeta(winner.regime.regime);
+
   const replayPacketPayload = buildDecisionReplayPacket({
     signalId: "pending", // will be updated after INSERT returns the real id
     ranAt: tickRanAt,
     market: {
       symbol: winner.symbol,
       regime: winner.regime.regime,
+      entryRegime: entryRegime.entryRegime,
+      entryRegimeSource: entryRegime.entryRegimeSource,
       setupScore: winner.regime.setupScore,
       confidence: conf,
       volatility: winner.regime.volatility ?? "unknown",
@@ -3349,6 +3386,7 @@ async function runTickForUser(
   const proposedResult = transitionSignal("proposed", "proposed", {
     actor: "engine",
     reason: "AI proposed entry (synthetic origin)",
+    meta: entryRegime,
   });
   // The FSM table doesn't list proposed→proposed as legal, so we build
   // the first transition record manually (lifecycle is always seeded
@@ -3360,6 +3398,7 @@ async function runTickForUser(
       at: new Date().toISOString(),
       by: "engine",
       reason: "AI proposed entry",
+      meta: entryRegime,
     };
 
   const { data: signalRow, error: insertErr } = await admin
@@ -3386,6 +3425,8 @@ async function runTickForUser(
       paper_grade: isPaper,
       context_snapshot: {
         regime: winner.regime,
+        entryRegime: entryRegime.entryRegime,
+        entryRegimeSource: entryRegime.entryRegimeSource,
         lastPrice: winner.lastPrice,
         perSymbol,
         tp1,
@@ -3520,7 +3561,7 @@ async function runTickForUser(
   }
 
   if (autoApprove) {
-    const tags = ["ai-signal", "auto", winner.regime.regime, winner.symbol];
+    const tags = ["ai-signal", "auto", winner.regime.regime, `entry_regime:${entryRegime.entryRegime}`, winner.symbol];
     if (winner.regime.pullback) tags.push("pullback");
 
     // ── Two-phase write — ghost-trade & idempotency fix ────────────────
@@ -3547,6 +3588,7 @@ async function runTickForUser(
     const tradeEnteredResult = transitionTrade("entered", "entered", {
       actor: "auto",
       reason: `Auto-approved (${autonomy}, conf ${(conf * 100).toFixed(0)}%)`,
+      meta: { ...entryRegime, fromSignalId: signalRow.id },
     });
     const tradeEnteredTransition: LifecycleTransition =
       tradeEnteredResult.ok
@@ -3556,6 +3598,7 @@ async function runTickForUser(
           at: new Date().toISOString(),
           by: "auto",
           reason: `Auto-approved (${autonomy})`,
+          meta: { ...entryRegime, fromSignalId: signalRow.id },
         };
 
     // ── PHASE 1: pre-insert 'broker_pending' row BEFORE broker call ──────
