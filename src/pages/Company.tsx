@@ -28,6 +28,7 @@ import { useMarketIntelligence } from "@/hooks/useMarketIntelligence";
 import { isStale } from "@/hooks/useRelativeTime";
 import { AGENT_PERMISSIONS } from "@/lib/agent-permissions";
 import { assessExecutionDataReadiness, EXECUTION_SCHEMA_AUDIT } from "@/lib/execution-data-readiness";
+import { assessPaperOpsReadiness, type PaperOpsReadiness } from "@/lib/paper-ops-readiness";
 import {
   Activity,
   ArrowRight,
@@ -47,6 +48,7 @@ import type { ReactNode } from "react";
 import { OpsTimeline } from "@/components/hall/OpsTimeline";
 import { QuietModeStatusTile } from "@/components/hall/QuietModeStatusTile";
 import { CronHealthPanel } from "@/components/hall/CronHealthPanel";
+import { useCronHealth } from "@/hooks/useCronHealth";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -154,6 +156,75 @@ function ExecutionDataReadinessPanel() {
   );
 }
 
+
+function readinessTone(status: PaperOpsReadiness["status"]): string {
+  if (status === "ready_for_7_day_paper_run") return "border-status-safe/30 bg-status-safe/10 text-status-safe";
+  if (status === "blocked") return "border-status-blocked/30 bg-status-blocked/10 text-status-blocked";
+  return "border-status-caution/30 bg-status-caution/10 text-status-caution";
+}
+
+function readinessLabel(status: PaperOpsReadiness["status"]): string {
+  if (status === "ready_for_7_day_paper_run") return "Ready";
+  if (status === "blocked") return "Blocked";
+  return "Not ready";
+}
+
+function PaperOpsReadinessCard({ readiness }: { readiness: PaperOpsReadiness }) {
+  const visibleMessages = readiness.blockers.length > 0 ? readiness.blockers : readiness.warnings;
+
+  return (
+    <div className="panel p-4 space-y-3 border-primary/20 bg-primary/5" aria-label="Paper Ops Readiness">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Shield className="h-4 w-4 text-primary" />
+            Paper Ops Readiness
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Seven-day paper run surface. This card summarizes readiness only; it never enables live execution.
+          </p>
+        </div>
+        <span className={cn("rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider", readinessTone(readiness.status))}>
+          {readinessLabel(readiness.status)}
+        </span>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invariant</div>
+          <div className="mt-1 rounded border border-status-safe/25 bg-status-safe/10 px-2 py-1 text-xs font-semibold text-status-safe">
+            liveExecutionAllowed: {String(readiness.liveExecutionAllowed)}
+          </div>
+        </div>
+        <div className="md:col-span-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {readiness.blockers.length > 0 ? "Blockers" : "Warnings"}
+          </div>
+          {visibleMessages.length > 0 ? (
+            <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] text-muted-foreground">
+              {visibleMessages.slice(0, 4).map((message) => <li key={message}>{message}</li>)}
+            </ul>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted-foreground">No blockers. Continue to operate from the checklist.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {readiness.checks.map((row) => (
+          <span key={row.id} className="rounded border border-border bg-secondary/40 px-2 py-0.5 text-[10px] text-muted-foreground">
+            {row.label}: {row.status}
+          </span>
+        ))}
+      </div>
+
+      <div className="inline-flex rounded border border-border bg-secondary/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+        Checklist: docs/ops/7-day-paper-trading-readiness.md
+      </div>
+    </div>
+  );
+}
+
 // ─── card ─────────────────────────────────────────────────────────────────────
 
 function AgentCard({ agent }: { agent: AgentDef }) {
@@ -247,6 +318,7 @@ export default function Company() {
   const { alerts } = useAlerts();
   const { pending: pendingSignals } = useSignals();
   const { counts: expCounts } = useExperiments();
+  const cronHealth = useCronHealth();
 
   const { data: marketIntel } = useMarketIntelligence();
   const snapshot       = system?.lastEngineSnapshot ?? null;
@@ -272,6 +344,19 @@ export default function Company() {
   const criticalAlerts = alerts.filter((a) => a.severity === "critical");
   const hardBlocks     = gateReasons.filter((r) => r.severity === "halt" || r.severity === "block");
   const decision       = system?.lastJessicaDecision;
+  const executionReadiness = assessExecutionDataReadiness({});
+  const paperOpsReadiness = assessPaperOpsReadiness({
+    liveModeEnabled: system?.liveTradingEnabled === true || system?.mode === "live",
+    brokerExecutionEnabled: system?.liveTradingEnabled === true && system?.brokerConnection === "connected",
+    cronHealthRows: cronHealth.rows,
+    quietModeVisible: true,
+    executionDataReadiness: executionReadiness,
+    portfolioRisk: snapshot?.portfolioRisk ?? null,
+    opsIncidents: alerts,
+    opsTimelineVisible: true,
+    doctrineGatesVisible: true,
+    paperOnlyPathVisible: system?.mode !== "live",
+  });
 
   const agents: AgentDef[] = [
     {
@@ -492,7 +577,8 @@ export default function Company() {
         ))}
       </div>
 
-      {/* Execution data readiness audit */}
+      {/* Paper ops readiness + execution data readiness audit */}
+      <PaperOpsReadinessCard readiness={paperOpsReadiness} />
       <ExecutionDataReadinessPanel />
 
       {/* Hall/Ops Quiet Mode status + Incident Timeline */}
