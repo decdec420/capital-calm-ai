@@ -402,13 +402,20 @@ async function buildContext(
       .limit(20),
   ]);
 
-  // Brain Trust staleness per symbol
+  // Brain Trust staleness per symbol.
+  // Use recent_momentum_at (refreshed every market-intelligence tick) as the
+  // freshness signal — generated_at only updates on full Hall/Bill/Mafee
+  // reruns (every 4h) and treating those as "stale" was firing run_brain_trust
+  // every minute and torching the AI budget. The cheap-path momentum refresh
+  // IS what downstream consumers rely on.
   const intelStaleness: Record<string, number> = {};
   for (const row of (intel ?? []) as Array<Record<string, unknown>>) {
     const sym = row.symbol as string;
+    const momentumAt = (row.recent_momentum_at as string | null) ?? null;
     const genAt = row.generated_at as string | null;
-    intelStaleness[sym] = genAt
-      ? Math.floor((now.getTime() - new Date(genAt).getTime()) / 60000)
+    const freshAt = momentumAt ?? genAt;
+    intelStaleness[sym] = freshAt
+      ? Math.floor((now.getTime() - new Date(freshAt).getTime()) / 60000)
       : 9999;
   }
 
