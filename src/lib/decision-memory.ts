@@ -29,6 +29,7 @@ export type NonTradeReasonCode =
   | "MAX_TRADES_REACHED"
   | "COOLDOWN_ACTIVE"
   | "DOCTRINE_BLOCK"
+  | "DEFAULT_LONG_FALLBACK_BLOCKED"
   // Brain Trust / data quality
   | "BRAIN_TRUST_STALE"
   | "MARKET_DATA_STALE"

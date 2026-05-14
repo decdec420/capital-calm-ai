@@ -2693,7 +2693,7 @@ async function runTickForUser(
     recordNonTrade(admin, {
       userId,
       symbol: winner.symbol,
-      reasonCode: "DOCTRINE_BLOCK",
+      reasonCode: "DEFAULT_LONG_FALLBACK_BLOCKED",
       severity: "block",
       mode: isPaper ? "paper" : "live",
       marketRegime: winner.regime.regime,
