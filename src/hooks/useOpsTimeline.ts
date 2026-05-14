@@ -26,7 +26,7 @@ import {
 
 export interface OpsTimelineEntry {
   id: string;
-  source: "incident" | "system_event";
+  source: "incident" | "system_event" | "soft_exit_simulation";
   sourceId: string;
   humanId: string;
   severity: IncidentSeverity;
@@ -109,6 +109,11 @@ type SystemEventTimelineRow = Pick<
   "id" | "event_type" | "actor" | "payload" | "created_at"
 >;
 
+type SoftExitSimulationRow = Pick<
+  Database["public"]["Tables"]["decision_memory_simulations"]["Row"],
+  "id" | "symbol" | "input_snapshot" | "result" | "created_at" | "updated_at"
+>;
+
 function isJsonRecord(value: Json): value is Record<string, Json | undefined> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -155,6 +160,56 @@ function mapIncidentRow(r: IncidentTimelineRow): OpsTimelineEntry {
     resolvedAt: r.resolved_at ?? null,
     updatedAt: r.updated_at ?? r.detected_at,
     label: r.source_event_type ?? `Incident ${r.incident_id ?? r.id}`,
+  };
+}
+
+
+function mapSoftExitSimulationRow(r: SoftExitSimulationRow): OpsTimelineEntry {
+  const result = jsonRecordToUnknownRecord(r.result);
+  const input = jsonRecordToUnknownRecord(r.input_snapshot);
+  const severity = optionalString(result["severity"]);
+  const resultLabel = optionalString(result["result_label"]);
+  const symbol = r.symbol ?? optionalString(input["symbol"]) ?? "unknown";
+  const currentRegime = optionalString(result["current_regime"] ?? input["currentRegime"]);
+  const entryRegime = optionalString(result["entry_regime"] ?? input["entryRegime"]);
+  const actionText = Array.isArray(result["simulated_actions"])
+    ? result["simulated_actions"].filter((a): a is string => typeof a === "string").join(", ")
+    : "NO_ACTION";
+
+  return {
+    id: r.id,
+    source: "soft_exit_simulation",
+    sourceId: r.id,
+    humanId: `soft_exit_${(r.id as string).slice(0, 8)}`,
+    severity: severity === "critical" ? "critical" : severity === "warning" ? "warning" : "info",
+    opsStatus: "detected",
+    hallStatus: "open",
+    sourceEventType: "REGIME_CHANGE_SOFT_EXIT",
+    affectedWorkflow: "trade_decision",
+    affectedAgent: "Bobby/Wags",
+    tradingBlocked: false,
+    moneyAtRisk: false,
+    mode: "research",
+    userAttentionRequired: resultLabel === "adverse_regime_flip",
+    rootCause: `${symbol}: regime soft-exit simulation (${entryRegime ?? "unknown"} → ${currentRegime ?? "unknown"}).`,
+    evidence: {
+      source: "regime_change_soft_exit",
+      tradeId: input["tradeId"],
+      symbol,
+      entryRegime,
+      currentRegime,
+      resultLabel,
+      simulatedActions: result["simulated_actions"],
+      executionAllowed: result["execution_allowed"] === false ? false : false,
+    },
+    actionsTaken: ["Simulation only — no trade was closed, no stop was changed, and no broker action was taken."],
+    recoveryResult: "No execution was allowed or attempted.",
+    followUpRecommendation: `Review simulated action: ${actionText}. Treat as learning/review input only.`,
+    tags: ["REGIME_CHANGE_SOFT_EXIT", "simulation_only", symbol],
+    createdAt: r.created_at,
+    resolvedAt: null,
+    updatedAt: r.updated_at ?? r.created_at,
+    label: `${symbol} soft-exit simulation`,
   };
 }
 
@@ -221,8 +276,8 @@ export function useOpsTimeline(): UseOpsTimelineResult {
     }
 
     try {
-      // Fetch incidents and system_events in parallel
-      const [incidentRes, eventRes] = await Promise.all([
+      // Fetch incidents, system_events, and simulation-only soft-exit warnings in parallel
+      const [incidentRes, eventRes, softExitRes] = await Promise.all([
         supabase
           .from("incidents")
           .select(
@@ -243,16 +298,27 @@ export function useOpsTimeline(): UseOpsTimelineResult {
           .in("event_type", [...OPS_EVENT_TYPES])
           .order("created_at", { ascending: false })
           .limit(50),
+
+        supabase
+          .from("decision_memory_simulations")
+          .select("id,symbol,input_snapshot,result,created_at,updated_at")
+          .eq("user_id", user.id)
+          .eq("simulation_type", "REGIME_CHANGE_SOFT_EXIT")
+          .eq("status", "completed")
+          .order("created_at", { ascending: false })
+          .limit(20),
       ]);
 
       if (incidentRes.error) throw incidentRes.error;
       if (eventRes.error) throw eventRes.error;
+      if (softExitRes.error) throw softExitRes.error;
 
       const incidentEntries = (incidentRes.data ?? []).map(mapIncidentRow);
       const eventEntries = (eventRes.data ?? []).map(mapSystemEventRow);
+      const softExitEntries = (softExitRes.data ?? []).map(mapSoftExitSimulationRow);
 
       // Merge and sort newest first
-      const merged = [...incidentEntries, ...eventEntries].sort(
+      const merged = [...incidentEntries, ...eventEntries, ...softExitEntries].sort(
         (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
       );
 
@@ -271,6 +337,7 @@ export function useOpsTimeline(): UseOpsTimelineResult {
 
   useTableChanges("incidents", refetch);
   useTableChanges("system_events", refetch);
+  useTableChanges("decision_memory_simulations", refetch);
 
   // ── Update actions — metadata only ───────────────────────────────────────
   // This function ONLY updates ops_review_status on the incidents table.
