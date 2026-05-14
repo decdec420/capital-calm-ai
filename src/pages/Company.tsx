@@ -27,6 +27,7 @@ import { useExperiments } from "@/hooks/useExperiments";
 import { useMarketIntelligence } from "@/hooks/useMarketIntelligence";
 import { isStale } from "@/hooks/useRelativeTime";
 import { AGENT_PERMISSIONS } from "@/lib/agent-permissions";
+import { assessExecutionDataReadiness, EXECUTION_SCHEMA_AUDIT } from "@/lib/execution-data-readiness";
 import {
   Activity,
   ArrowRight,
@@ -94,6 +95,64 @@ const TONE: Record<AgentTone, { dept: string; bg: string; border: string; can: s
   violet:  { dept: "text-[hsl(280_60%_65%)]", bg: "bg-[hsl(280_60%_65%/0.05)]", border: "border-[hsl(280_60%_65%/0.2)]", can: "bg-[hsl(280_60%_65%/0.1)] text-[hsl(280_60%_65%)] border-[hsl(280_60%_65%/0.2)]" },
   neutral: { dept: "text-muted-foreground", bg: "bg-secondary/40",      border: "border-border",             can: "bg-secondary text-muted-foreground border-border"       },
 };
+
+
+function ExecutionDataReadinessPanel() {
+  const report = assessExecutionDataReadiness({});
+  const partialFields = EXECUTION_SCHEMA_AUDIT
+    .filter((row) => row.currentCapture !== "missing")
+    .map((row) => row.requiredField);
+
+  return (
+    <div className="panel p-4 space-y-3 border-status-caution/25 bg-status-caution/5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <ShieldAlert className="h-4 w-4 text-status-caution" />
+            Execution data readiness
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Maker-vs-taker research is blocked until explicit fill/fee/slippage data exists.
+          </p>
+        </div>
+        <span className="rounded-full border border-status-caution/30 bg-status-caution/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-status-caution">
+          {report.readiness.replaceAll("_", " ")}
+        </span>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Available / partial</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {partialFields.map((field) => (
+              <span key={field} className="rounded border border-border bg-secondary/40 px-2 py-0.5 text-[10px] text-muted-foreground">
+                {field}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Missing now</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {report.missingFields.slice(0, 6).map((field) => (
+              <span key={field} className="rounded border border-status-blocked/20 bg-status-blocked/10 px-2 py-0.5 text-[10px] text-status-blocked">
+                {field}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Warnings</div>
+          <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] text-muted-foreground">
+            {report.warnings.slice(0, 3).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── card ─────────────────────────────────────────────────────────────────────
 
@@ -432,6 +491,9 @@ export default function Company() {
           <AgentCard key={agent.id} agent={agent} />
         ))}
       </div>
+
+      {/* Execution data readiness audit */}
+      <ExecutionDataReadinessPanel />
 
       {/* Hall/Ops Quiet Mode status + Incident Timeline */}
       <QuietModeStatusTile />
