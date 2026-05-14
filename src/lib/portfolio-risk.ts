@@ -160,6 +160,12 @@ export interface PortfolioRiskInput {
   nowMs?: number;
 }
 
+type RiskExposureRow = Pick<Trade, "symbol" | "entryPrice" | "size" | "unrealizedPnl"> & { side?: "long" | "short" | string | null };
+
+function normalizeProposedSide(side: "long" | "short" | string | null | undefined): "long" | "short" | null {
+  return side === "long" || side === "short" ? side : null;
+}
+
 // ─── Pure compute ─────────────────────────────────────────────────────────────
 
 export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSummary {
@@ -204,16 +210,17 @@ export function computePortfolioRisk(input: PortfolioRiskInput): PortfolioRiskSu
   // ── Exposure by symbol ────────────────────────────────────────────────────
   const symbolMap = new Map<string, SymbolExposure>();
   const proposedTrade = input.proposedTrade ?? null;
-  const exposureRows = proposedTrade && proposedTrade.notionalUsd >= 0
+  const proposedSide = proposedTrade ? normalizeProposedSide(proposedTrade.side) : null;
+  const exposureRows: RiskExposureRow[] = proposedTrade && proposedTrade.notionalUsd >= 0
     ? [
         ...openTrades,
         {
           symbol: proposedTrade.symbol,
-          side: proposedTrade.side === "short" ? "short" as const : "long" as const,
+          side: proposedSide,
           entryPrice: proposedTrade.notionalUsd,
           size: 1,
           unrealizedPnl: null,
-        } as Trade,
+        },
       ]
     : openTrades;
 

@@ -33,6 +33,7 @@ export type NonTradeReasonCode =
   | "MAX_TRADES_REACHED"       // Daily trade count cap reached
   | "COOLDOWN_ACTIVE"          // Reentry cooldown or anti-tilt pause
   | "DOCTRINE_BLOCK"           // Doctrine overlay lockout, correlation cap, or book exposure cap
+  | "DEFAULT_LONG_FALLBACK_BLOCKED" // Missing/unknown side refused; never default long
   // Brain Trust / data quality
   | "BRAIN_TRUST_STALE"        // Momentum stale or Brain Trust refresh failed
   | "MARKET_DATA_STALE"        // Candle feed unavailable or stale

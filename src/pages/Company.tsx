@@ -45,6 +45,7 @@ import {
 import type { ReactNode } from "react";
 import { OpsTimeline } from "@/components/hall/OpsTimeline";
 import { QuietModeStatusTile } from "@/components/hall/QuietModeStatusTile";
+import { CronHealthPanel } from "@/components/hall/CronHealthPanel";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -434,6 +435,7 @@ export default function Company() {
 
       {/* Hall/Ops Quiet Mode status + Incident Timeline */}
       <QuietModeStatusTile />
+      <CronHealthPanel />
       <OpsTimeline />
 
       {/* Status summary strip */}
