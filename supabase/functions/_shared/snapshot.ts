@@ -6,7 +6,7 @@
 // Copilot. Writing it from one place keeps the shape honest.
 // ============================================================
 
-import type { GateReason } from "./reasons.ts";
+import type { GateReason, GateSeverity } from "./reasons.ts";
 
 export interface PerSymbolSnapshot {
   symbol: string;
@@ -21,11 +21,72 @@ export interface PerSymbolSnapshot {
   chosen: boolean;
 }
 
+export interface NormalizedBlocker {
+  code: string;
+  severity: "critical" | "high" | "medium" | "low";
+  message: string;
+  source: "gate" | "portfolio" | "position" | "account" | "doctrine" | "market" | "system";
+  owner?: string;
+  nextSafeAction?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface UnifiedTradeDecisionSnapshot {
+  status: "CLEAR" | "WARN" | "BLOCKED" | "RISK_BLOCKED" | "NO_TRADE";
+  canTradeNow: boolean;
+  riskBlocked: boolean;
+  blockers: NormalizedBlocker[];
+  scoreAdjustment: number;
+  requiredScoreBump: number;
+  reasonCodes: string[];
+}
+
 export interface EngineSnapshotPayload {
   ranAt: string;
   gateReasons: GateReason[];
   perSymbol: PerSymbolSnapshot[];
   chosenSymbol: string | null;
+  /** Normalized concise reasons for UI "why not trading" panels. */
+  blockers: NormalizedBlocker[];
+  /** Unified trade-decision contract emitted by signal-engine. */
+  tradeDecision: UnifiedTradeDecisionSnapshot;
+}
+
+
+function gateSeverityToBlockerSeverity(severity: GateSeverity): NormalizedBlocker["severity"] {
+  switch (severity) {
+    case "halt": return "critical";
+    case "block": return "high";
+    case "skip": return "medium";
+    case "warn": return "low";
+    case "info": return "low";
+  }
+}
+
+function normalizeGateBlockers(gateReasons: GateReason[]): NormalizedBlocker[] {
+  return gateReasons
+    .filter((g) => g.severity === "halt" || g.severity === "block" || g.severity === "warn")
+    .map((g) => ({
+      code: g.code,
+      severity: gateSeverityToBlockerSeverity(g.severity),
+      message: g.message,
+      source: "gate" as const,
+      meta: g.meta,
+    }));
+}
+
+function defaultTradeDecision(blockers: NormalizedBlocker[]): UnifiedTradeDecisionSnapshot {
+  const riskBlocked = blockers.some((b) => b.severity === "critical" || b.severity === "high");
+  const hasWarnings = blockers.length > 0;
+  return {
+    status: riskBlocked ? "RISK_BLOCKED" : hasWarnings ? "WARN" : "CLEAR",
+    canTradeNow: !riskBlocked,
+    riskBlocked,
+    blockers,
+    scoreAdjustment: 0,
+    requiredScoreBump: 0,
+    reasonCodes: blockers.map((b) => b.code),
+  };
 }
 
 export async function persistSnapshot(
@@ -36,13 +97,19 @@ export async function persistSnapshot(
     gateReasons: GateReason[];
     perSymbol: PerSymbolSnapshot[];
     chosenSymbol: string | null;
+    blockers?: NormalizedBlocker[];
+    tradeDecision?: UnifiedTradeDecisionSnapshot;
   },
 ): Promise<void> {
+  const blockers = snap.blockers ?? normalizeGateBlockers(snap.gateReasons);
+  const tradeDecision = snap.tradeDecision ?? defaultTradeDecision(blockers);
   const payload: EngineSnapshotPayload = {
     ranAt: new Date().toISOString(),
     gateReasons: snap.gateReasons,
     perSymbol: snap.perSymbol,
     chosenSymbol: snap.chosenSymbol,
+    blockers,
+    tradeDecision,
   };
   await admin
     .from("system_state")
