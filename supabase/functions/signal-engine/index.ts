@@ -2134,6 +2134,7 @@ async function runTickForUser(
     (c) =>
       !c.lockGate &&
       TRADEABLE_REGIMES.has(c.regime.regime) &&
+      (c.regime.regime !== "range" || c.regime.rangeTradeEligible) &&
       c.regime.setupScore >= MIN_SETUP_SCORE,
   );
   // Build per-symbol recency: how many of the last 20 ticks chose this symbol.
@@ -2262,15 +2263,18 @@ async function runTickForUser(
           ),
         ];
       }
-      if (c.regime.regime === "range" && c.regime.setupScore < MIN_SETUP_SCORE) {
-        // Range is tradeable but only at RSI extremes (≥70 overbought / ≤30 oversold).
-        // setupScore < MIN_SETUP_SCORE here means rangeReversionBoost wasn't earned.
+      if (c.regime.regime === "range" && !c.regime.rangeTradeEligible) {
         return [
           gate(
             GATE_CODES.RANGE_REGIME,
             "skip",
-            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion fade). setupScore ${c.regime.setupScore.toFixed(2)}.`,
-            { symbol: c.symbol, rsiNow: c.regime.rsiNow, setupScore: c.regime.setupScore },
+            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} has not shown exhaustion or recovery confirmation yet. RSI decision score ${c.regime.rsiTradeDecisionScore.toFixed(2)}, setupScore ${c.regime.setupScore.toFixed(2)}.`,
+            {
+              symbol: c.symbol,
+              rsiNow: c.regime.rsiNow,
+              rsiTradeDecisionScore: c.regime.rsiTradeDecisionScore,
+              setupScore: c.regime.setupScore,
+            },
           ),
         ];
       }

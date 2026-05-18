@@ -45,6 +45,68 @@ function rsi(values: number[], period = 14): number {
   return 100 - 100 / (1 + avgG / avgL);
 }
 
+const RSI_DEEP_OVERSOLD = 25;
+const RSI_OVERSOLD = 30;
+const RSI_SHALLOW_OVERSOLD = 35;
+const RSI_OVERBOUGHT = 70;
+const RSI_RECENT_DIP_THRESHOLD = 35;
+const RSI_RECENT_DIP_LOOKBACK = 5;
+const RSI_RECOVERY_MIN_DELTA = 1.5;
+const RSI_FALLING_FAST_DELTA = 6;
+const RANGE_TRADE_DECISION_THRESHOLD = 0.45;
+
+interface RsiSignalComponents {
+  levelScore: number;
+  directionScore: number;
+  recoveryScore: number;
+  fallingFastPenalty: number;
+  score: number;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function computeRsiSignalComponents(
+  closes: number[],
+  period: number,
+  rsiNow: number,
+  rsiPrev: number,
+): RsiSignalComponents {
+  const rsiDelta = rsiNow - rsiPrev;
+  const recentRsiValues: number[] = [];
+  for (let i = 1; i <= RSI_RECENT_DIP_LOOKBACK; i++) {
+    const sliceEnd = closes.length - i;
+    if (sliceEnd >= period + 1) recentRsiValues.push(rsi(closes.slice(0, sliceEnd), period));
+  }
+  const recentlyDipped = recentRsiValues.some((value) => value < RSI_RECENT_DIP_THRESHOLD);
+  const recoveringFromDip = recentlyDipped && rsiDelta >= RSI_RECOVERY_MIN_DELTA && rsiNow < 55;
+  const fallingFast = rsiPrev - rsiNow >= RSI_FALLING_FAST_DELTA;
+
+  const levelScore =
+    rsiNow < RSI_DEEP_OVERSOLD ? 0.52
+      : rsiNow < RSI_OVERSOLD ? 0.4
+        : rsiNow < RSI_SHALLOW_OVERSOLD ? 0.28
+          : rsiNow >= RSI_OVERBOUGHT ? 0.5
+            : 0;
+
+  const directionScore =
+    rsiNow < 50 && rsiDelta > 0 ? 0.12
+      : rsiNow >= RSI_OVERBOUGHT && rsiDelta < 0 ? 0.12
+        : 0;
+
+  const recoveryScore = recoveringFromDip ? 0.18 : 0;
+  const fallingFastPenalty = fallingFast ? -0.2 : 0;
+
+  return {
+    levelScore,
+    directionScore,
+    recoveryScore,
+    fallingFastPenalty,
+    score: clamp01(levelScore + directionScore + recoveryScore + fallingFastPenalty),
+  };
+}
+
 // ── Main export ───────────────────────────────────────────────
 
 /** Compute a market regime from raw candles. Pure function — no I/O. */
@@ -69,6 +131,8 @@ export function computeRegime(
     summary: "Calibrating on the latest tape — no trades until there's a real read.",
     rsiNow: 50,
     rsiPrev: 50,
+    rsiTradeDecisionScore: 0,
+    rangeTradeEligible: false,
     emaFast: 0,
     emaSlow: 0,
     slowRising: false,
@@ -143,9 +207,11 @@ export function computeRegime(
   const rsiCurlingUp = rsiPrev < 45 && rsiNow > rsiPrev && rsiNow < 65;
   const pullback = inUptrend && touchedFastEma && rsiCurlingUp;
 
-  // ── RSI extremes (for range mean-reversion gate) ──────────
-  const rsiOverbought = rsiNow >= 70;
-  const rsiOversold   = rsiNow <= 30;
+  // ── RSI signal components (for range mean-reversion decision) ──
+  const rsiSignal = computeRsiSignalComponents(closes, rsiP, rsiNow, rsiPrev);
+  const rsiOverbought = rsiNow >= RSI_OVERBOUGHT;
+  const rsiOversold   = rsiNow <= RSI_OVERSOLD;
+  const rangeTradeEligible = regime === "range" && rsiSignal.score >= RANGE_TRADE_DECISION_THRESHOLD;
 
   // ── Setup score (matches server formula exactly) ──────────
   const trendBoost =
@@ -154,9 +220,10 @@ export function computeRegime(
     : 0;
   const volBoost   = volatility === "normal" ? 0.2 : volatility === "low" ? 0.05 : 0;
   const pullbackBoost = pullback ? 0.2 : 0;
-  // Range reversion boost: only when RSI is at an extreme
+  // Range reversion boost scales with the RSI trade-decision score; final
+  // range entry eligibility is evaluated separately by rangeTradeEligible.
   const rangeReversionBoost =
-    regime === "range" && (rsiOverbought || rsiOversold) ? 0.15 : 0;
+    regime === "range" ? rsiSignal.score * 0.15 : 0;
 
   const setupScore = Math.min(
     1,
@@ -179,9 +246,9 @@ export function computeRegime(
     noTradeReasons.push("Volatility extreme");
   if (regime === "chop")
     noTradeReasons.push("Chop regime — no edge, sitting out");
-  if (regime === "range" && !rsiOverbought && !rsiOversold)
+  if (regime === "range" && !rangeTradeEligible)
     noTradeReasons.push(
-      `Range regime — RSI ${rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion)`,
+      `Range regime — RSI ${rsiNow.toFixed(0)} has not shown exhaustion or recovery confirmation yet`,
     );
   if (todScore < 0.4)
     noTradeReasons.push("Outside prime liquidity window");
@@ -195,7 +262,9 @@ export function computeRegime(
         ? " · RSI overbought — fade opportunity"
         : rsiOversold
         ? " · RSI oversold — fade opportunity"
-        : " · RSI mid-range — no fade edge"
+        : rangeTradeEligible
+          ? " · RSI recovery confirmed — fade opportunity"
+          : " · RSI has not confirmed exhaustion/recovery"
       : "";
   const summary =
     `${symbol} is ${regime.replace(/_/g, " ")} — ${Math.abs(pctChange).toFixed(2)}% ${dirWord} over the window. ` +
@@ -217,6 +286,8 @@ export function computeRegime(
     summary,
     rsiNow,
     rsiPrev,
+    rsiTradeDecisionScore: rsiSignal.score,
+    rangeTradeEligible,
     emaFast: emaFastVal,
     emaSlow: emaSlowVal,
     slowRising,

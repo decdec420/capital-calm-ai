@@ -241,14 +241,16 @@ export interface MarketRegime {
   // Extended fields — synced with _shared/regime.ts
   rsiNow: number;
   rsiPrev: number;
+  rsiTradeDecisionScore: number;
+  rangeTradeEligible: boolean;
   emaFast: number;
   emaSlow: number;
   slowRising: boolean;
   pullback: boolean;
   annualizedVolPct: number;
   pctChange: number;
-  rsiOverbought: boolean;  // RSI ≥ 70
-  rsiOversold: boolean;    // RSI ≤ 30
+  rsiOverbought: boolean;  // RSI >= configured overbought threshold
+  rsiOversold: boolean;    // RSI <= configured oversold threshold
 }
 
 export interface Trade {
