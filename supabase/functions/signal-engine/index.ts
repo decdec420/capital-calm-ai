@@ -100,6 +100,11 @@ import {
   selectSignalEvaluationCandidates,
 } from "../_shared/signal-evaluation.ts";
 import { evaluateQuietMode, shouldEmitQuietModeEvent } from "../_shared/quiet-mode.ts";
+import {
+  computeTradeDecisionScore,
+  summarizeTradeDecisionForReplay,
+  type TradeDecisionScore,
+} from "../_shared/trade-decision-score.ts";
 
 
 // deno-lint-ignore no-explicit-any
@@ -480,6 +485,7 @@ async function decideForSymbol(opts: {
   regime: RegimeResult;
   // deno-lint-ignore no-explicit-any
   contextPacket: any;
+  tradeDecision: TradeDecisionScore;
   // deno-lint-ignore no-explicit-any
   intel: any;
   LOVABLE_API_KEY: string;
@@ -528,7 +534,7 @@ async function decideForSymbol(opts: {
     }
   | { error: string; status?: number }
 > {
-  const { symbol, lastPrice, contextPacket, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride, isPaper, strategyMenu, crossSymbolContext, correlationNote, bobbydirectives } = opts;
+  const { symbol, lastPrice, contextPacket, tradeDecision, intel, LOVABLE_API_KEY, stratParams, profile, maxOrderUsdOverride, isPaper, strategyMenu, crossSymbolContext, correlationNote, bobbydirectives } = opts;
   const MAX_ORDER_USD = maxOrderUsdOverride ?? profile.maxOrderUsdHardCap;
 
   // Circuit breaker: skip AI entirely if the gateway has been failing.
@@ -564,6 +570,22 @@ You think like the best discretionary traders in the world:
   signals agree. One signal is noise. Three signals in agreement is edge.
 
 DECISION HIERARCHY (work through all of these before deciding):
+
+0. CANONICAL TRADE-DECISION SCORE (authoritative, deterministic):
+   Current decision state: ${tradeDecision.currentDecisionState}
+   Trade score: ${tradeDecision.tradeScore.toFixed(2)} (minimum ${tradeDecision.minSetupScore.toFixed(2)})
+   Top reasons:
+${tradeDecision.topReasons.map((r) => `   - ${r}`).join("\n") || "   - none"}
+   Blockers:
+${tradeDecision.blockers.map((b) => `   - ${b}`).join("\n") || "   - none"}
+   Next likely trigger: ${tradeDecision.nextLikelyTrigger}
+
+   This score and the hard risk gates are CANONICAL. You may choose entry, stop,
+   target, side, sizing hint, confidence, and concise reasoning only inside the
+   state allowed by this object. If currentDecisionState is RISK_BLOCKED, you
+   MUST return skip. If currentDecisionState is LOW_SCORE, you MUST return skip
+   unless the deterministic score already meets the minimum; do not invent
+   discretionary reasons to override low-score states.
 
 1. MACRO FILTER (from the Brain Trust — this is non-negotiable):
    Macro bias: ${macroBiasStr} | Environment: ${envRating}
@@ -652,7 +674,10 @@ ADDITIONAL SKIP CRITERIA for fades:
    with support 1-2% away is still acceptable risk — set the stop just under that
    support and size accordingly. Do not wait for an exact touch that may never come.
 
-6. SKIP CRITERIA (these override everything — skip if ANY are true):
+6. SKIP CRITERIA (canonical risk gates override everything — skip if ANY are true):
+   - Canonical currentDecisionState is RISK_BLOCKED
+   - Canonical currentDecisionState is LOW_SCORE
+   - Any hard risk gate or blocker is present in the trade-decision object
    - No clear trend on 4h timeframe
    - 4h and 1h trends are opposed (fighting the intermediate trend)
    - setupScore < ${isPaper ? "0.45" : "0.55"} (not enough quality signals aligning)
@@ -732,7 +757,7 @@ You MUST call submit_decision. No plain text responses.
           { role: "system", content: systemPrompt },
           {
             role: "user",
-            content: `Tick at ${new Date().toISOString()} for ${symbol} @ $${lastPrice.toFixed(2)}.\nContext:\n${JSON.stringify(contextPacket, null, 2)}\n\nDecide.`,
+            content: `Tick at ${new Date().toISOString()} for ${symbol} @ $${lastPrice.toFixed(2)}.\nAuthoritative trade decision:\n${JSON.stringify(tradeDecision, null, 2)}\n\nContext:\n${JSON.stringify(contextPacket, null, 2)}\n\nDecide.`,
           },
         ],
         tools: [
@@ -2203,6 +2228,19 @@ async function runTickForUser(
 
   for (const skippedCandidate of multiSymbolSelection.skipped) {
     if (skippedCandidate.skipCodes.length === 0) continue;
+    const skippedSource = candidates.find((c) => c.symbol === skippedCandidate.symbol);
+    const skippedTradeDecision = skippedSource
+      ? summarizeTradeDecisionForReplay(computeTradeDecisionScore({
+        symbol: skippedSource.symbol,
+        regime: skippedSource.regime,
+        minSetupScore: MIN_SETUP_SCORE,
+        tradeableRegime: TRADEABLE_REGIMES.has(skippedSource.regime.regime),
+        lockGate: skippedSource.lockGate ?? null,
+        riskGates: skippedSource.riskGates,
+        warningGates: portfolioWarnGates,
+        mode: isPaper ? "paper" : "live",
+      }))
+      : undefined;
     recordNonTrade(admin, {
       userId,
       symbol: skippedCandidate.symbol,
@@ -2223,6 +2261,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: skippedCandidate.skipCodes,
         reason: `${skippedCandidate.symbol}: skipped by multi-symbol selection (${skippedCandidate.skipCodes.join(", ")}).`,
+        ...(skippedTradeDecision ? { tradeDecision: skippedTradeDecision } : {}),
         meta: {
           multi_symbol_mode: multiSymbolSelection.mode,
           max_evaluated: multiSymbolSelection.maxEvaluated,
@@ -2307,6 +2346,16 @@ async function runTickForUser(
     // per-symbol: e.g. "BTC-USD was chop 47 times before this trend started."
     for (const c of candidates) {
       const symbolGate = c.lockGate ?? gateReasons.find((g) => g.meta && (g.meta as Record<string, unknown>).symbol === c.symbol);
+      const candidateTradeDecision = summarizeTradeDecisionForReplay(computeTradeDecisionScore({
+        symbol: c.symbol,
+        regime: c.regime,
+        minSetupScore: MIN_SETUP_SCORE,
+        tradeableRegime: TRADEABLE_REGIMES.has(c.regime.regime),
+        lockGate: c.lockGate ?? null,
+        riskGates: c.riskGates,
+        warningGates: portfolioWarnGates,
+        mode: isPaper ? "paper" : "live",
+      }));
       const reasonCode = (() => {
         const code = symbolGate?.code ?? "";
         if (code === GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE || code === GATE_CODES.BRAIN_TRUST_REFRESH_FAILED || code === GATE_CODES.MISSING_MARKET_INTELLIGENCE) return "BRAIN_TRUST_STALE" as const;
@@ -2334,6 +2383,7 @@ async function runTickForUser(
           mode: isPaper ? "paper" : "live",
           blockerCodes: symbolGate ? [symbolGate.code] : [],
           reason: symbolGate?.message ?? `${c.symbol}: no qualifying setup (${c.regime.regime}, score=${c.regime.setupScore.toFixed(2)})`,
+          tradeDecision: candidateTradeDecision,
         }),
       }).catch(() => {});
     }
@@ -2397,7 +2447,25 @@ async function runTickForUser(
     };
   })();
 
+  const tradeDecision = computeTradeDecisionScore({
+    symbol: winner.symbol,
+    regime: winner.regime,
+    minSetupScore: MIN_SETUP_SCORE,
+    tradeableRegime: TRADEABLE_REGIMES.has(winner.regime.regime),
+    lockGate: winner.lockGate ?? null,
+    riskGates: winner.riskGates,
+    warningGates: portfolioWarnGates,
+    mode: isPaper ? "paper" : "live",
+    timeframeTrends: {
+      "15m": momentum15m.trend,
+      "1h": trend1h,
+      "4h": trend4h,
+    },
+  });
+  const tradeDecisionReplay = summarizeTradeDecisionForReplay(tradeDecision);
+
   const contextPacket = {
+    tradeDecision,
     profile: {
       id: activeProfile.id,
       label: activeProfile.label,
@@ -2590,6 +2658,7 @@ async function runTickForUser(
     crossSymbolContext,
     correlationNote,
     bobbydirectives: (bobbyDirectives ?? []) as Array<{ directive: string; priority: string; issued_at: string }>,
+    tradeDecision,
   });
 
   if ("error" in aiResult) {
@@ -2622,6 +2691,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [aiErr.code],
         reason: aiErr.message,
+        tradeDecision: tradeDecisionReplay,
         meta: { error: aiResult.error },
       }),
     }).catch(() => {});
@@ -2636,6 +2706,49 @@ async function runTickForUser(
     };
   }
   const decision = aiResult.decision;
+
+  if (decision.decision === "propose_trade" && (tradeDecision.currentDecisionState === "RISK_BLOCKED" || tradeDecision.currentDecisionState === "LOW_SCORE")) {
+    const canonicalGate = gate(
+      tradeDecision.currentDecisionState === "RISK_BLOCKED" ? GATE_CODES.RISK_GATE_BLOCK : GATE_CODES.LOW_SETUP_SCORE,
+      tradeDecision.currentDecisionState === "RISK_BLOCKED" ? "block" : "skip",
+      `${winner.symbol}: Taylor proposed a trade, but canonical trade-decision state is ${tradeDecision.currentDecisionState}; refusing override.`,
+      { symbol: winner.symbol, tradeDecision: tradeDecisionReplay },
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [canonicalGate],
+      perSymbol,
+      chosenSymbol: winner.symbol,
+    });
+    recordNonTrade(admin, {
+      userId,
+      symbol: winner.symbol,
+      reasonCode: tradeDecision.currentDecisionState === "RISK_BLOCKED" ? "RISK_GATE_BLOCK" : "LOW_SETUP_SCORE",
+      severity: canonicalGate.severity === "block" ? "block" : "skip",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: winner.regime.confidence,
+      blockerCodes: tradeDecision.blockerCodes.length > 0 ? tradeDecision.blockerCodes : [canonicalGate.code],
+      replayPacket: buildNonTradePacket({
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        setupScore: winner.regime.setupScore,
+        confidence: winner.regime.confidence,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: tradeDecision.blockerCodes.length > 0 ? tradeDecision.blockerCodes : [canonicalGate.code],
+        reason: canonicalGate.message,
+        tradeDecision: tradeDecisionReplay,
+      }),
+    }).catch(() => {});
+    return {
+      userId,
+      tick: "canonical_trade_decision_blocked",
+      symbol: winner.symbol,
+      gateReasons: [canonicalGate],
+      expiredCount,
+      perSymbol,
+    };
+  }
 
   if (decision.decision === "skip") {
     const skipGate = gate(
@@ -2677,6 +2790,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [skipGate.code],
         reason: decision.reasoning ?? "AI chose to skip.",
+        tradeDecision: tradeDecisionReplay,
       }),
     }).catch(() => {});
     return {
@@ -2742,6 +2856,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [fallbackGate.code],
         reason: fallbackGate.message,
+        tradeDecision: tradeDecisionReplay,
         meta: { side: null }, // AI did not provide a direction — do not guess
       }),
     }).catch(() => {});
@@ -2810,6 +2925,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [noStratGate.code],
         reason: noStratGate.message,
+        tradeDecision: tradeDecisionReplay,
         meta: { side, candidates: routerDecision.candidates },
       }),
     }).catch(() => {});
@@ -2932,6 +3048,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: ["COACH_PENALTY"],
         reason: `Coach penalty: raw conf ${rawConf.toFixed(2)} × ${coachVerdict?.confidenceMultiplier.toFixed(2)} = ${conf.toFixed(2)} < MIN_CONFIDENCE(${MIN_CONFIDENCE})`,
+        tradeDecision: tradeDecisionReplay,
         meta: {
           side,
           rawConfidence: rawConf,
@@ -3011,6 +3128,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: clamp.clampedBy.map((r) => r.code),
         reason: refusal.message,
+        tradeDecision: tradeDecisionReplay,
         meta: { side, proposedSizeUsd: clamp.sizeUsd, clampedBy: clamp.clampedBy.map((r) => r.code) },
       }),
     }).catch(() => {});
@@ -3148,6 +3266,7 @@ async function runTickForUser(
         mode: isPaper ? "paper" : "live",
         blockerCodes: [edgeGate.code],
         reason: edgeGate.message,
+        tradeDecision: tradeDecisionReplay,
         meta: { side, edgeToTp1Pct, minEdgePctRequired, roundTripCostPct: ROUND_TRIP_COST_PCT, costSource },
       }),
     }).catch(() => {});
@@ -3224,6 +3343,7 @@ async function runTickForUser(
           mode: isPaper ? "paper" : "live",
           blockerCodes: [vetoGate.code],
           reason: `Risk Manager veto: ${riskVerdict.reason}`,
+          tradeDecision: tradeDecisionReplay,
           meta: { entry, stop, target, sizeUsd, side },
         }),
       }).catch(() => {});
@@ -3264,6 +3384,7 @@ async function runTickForUser(
           mode: isPaper ? "paper" : "live",
           blockerCodes: ["RISK_MANAGER_SKIP_TICK"],
           reason: riskVerdict.reason,
+          tradeDecision: tradeDecisionReplay,
           meta: { side },
         }),
       }).catch(() => {});
@@ -3380,6 +3501,7 @@ async function runTickForUser(
       anyRefusal: false, // winner passed all halting gates
       refusalCodes: [],
     },
+    tradeDecision: tradeDecisionReplay,
     decision: "approved",
     decisionReason: decision.reasoning ?? "AI proposed trade; all gates passed.",
   });
@@ -3437,6 +3559,11 @@ async function runTickForUser(
       lifecycle_transitions: [proposedTransition],
       paper_grade: isPaper,
       context_snapshot: {
+        tradeDecision,
+        tradeDecisionScore: tradeDecision.tradeScore,
+        tradeDecisionReasons: tradeDecision.topReasons,
+        tradeDecisionBlockers: tradeDecision.blockers,
+        tradeDecisionNextLikelyTrigger: tradeDecision.nextLikelyTrigger,
         regime: winner.regime,
         entryRegime: entryRegime.entryRegime,
         entryRegimeSource: entryRegime.entryRegimeSource,
