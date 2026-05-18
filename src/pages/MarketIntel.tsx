@@ -60,9 +60,16 @@ type Dot = "ok" | "neutral" | "bad";
 type Tone = "long" | "short" | "neutral" | "warn" | "good";
 
 function signalConditions(regime: ReturnType<typeof computeRegime>) {
-  const tradeableRegime = regime.regime === "trending_up" || regime.regime === "trending_down" || regime.regime === "breakout" || (regime.regime === "range" && (regime.rsiOverbought || regime.rsiOversold));
+  const tradeableRegime = regime.regime === "trending_up" || regime.regime === "trending_down" || regime.regime === "breakout" || (regime.regime === "range" && regime.rangeTradeEligible);
+  const rangeDetail = regime.rsiOverbought
+    ? `range · RSI ${regime.rsiNow.toFixed(0)} overbought → fade ↓`
+    : regime.rsiOversold
+      ? `range · RSI ${regime.rsiNow.toFixed(0)} oversold/recovering → fade ↑`
+      : regime.rangeTradeEligible
+        ? `range · RSI ${regime.rsiNow.toFixed(0)} recovery confirmed`
+        : `range · RSI ${regime.rsiNow.toFixed(0)} has not shown exhaustion/recovery yet`;
   return [
-    { label: "Regime", detail: regime.regime === "range" ? regime.rsiOverbought ? `range · RSI ${regime.rsiNow.toFixed(0)} overbought → fade ↓` : regime.rsiOversold ? `range · RSI ${regime.rsiNow.toFixed(0)} oversold → fade ↑` : `range · RSI ${regime.rsiNow.toFixed(0)} (need ≥70 or ≤30)` : regime.regime.replace(/_/g, " "), status: (tradeableRegime ? "ok" : regime.regime === "chop" ? "bad" : "neutral") as Dot },
+    { label: "Regime", detail: regime.regime === "range" ? rangeDetail : regime.regime.replace(/_/g, " "), status: (tradeableRegime ? "ok" : regime.regime === "chop" ? "bad" : "neutral") as Dot },
     { label: "Volatility", detail: `${regime.volatility} · ${regime.annualizedVolPct.toFixed(0)}% ann.`, status: (regime.volatility === "normal" || regime.volatility === "low" ? "ok" : regime.volatility === "extreme" ? "bad" : "neutral") as Dot },
     { label: `Setup ≥ ${MIN_SETUP_SCORE_LIVE}`, detail: `score ${regime.setupScore.toFixed(2)}`, status: (regime.setupScore >= MIN_SETUP_SCORE_LIVE ? "ok" : "bad") as Dot },
     { label: "Pullback", detail: regime.pullback ? "detected — buy-the-dip entry" : `no · RSI ${regime.rsiNow.toFixed(0)}`, status: (regime.pullback ? "ok" : "neutral") as Dot },
