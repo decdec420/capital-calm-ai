@@ -55,6 +55,8 @@ export type NonTradeReasonCode =
  *   - No raw candle arrays (summaries only).
  */
 export interface NonTradeReplayPacket {
+  /** Canonical trade-decision score/reasons captured at decision time. */
+  tradeDecision?: Record<string, unknown>;
   /** ISO timestamp when this decision was made. */
   ranAt: string;
   /** Symbol being evaluated (null for account-level halts). */
@@ -168,6 +170,7 @@ export function buildNonTradePacket(params: {
   blockerCodes: string[];
   reason: string;
   provenance?: NonTradeReplayPacket["provenance"];
+  tradeDecision?: NonTradeReplayPacket["tradeDecision"];
   meta?: Record<string, unknown>;
 }): NonTradeReplayPacket {
   return {
@@ -179,6 +182,7 @@ export function buildNonTradePacket(params: {
     mode: params.mode,
     blockerCodes: params.blockerCodes,
     reason: params.reason,
+    ...(params.tradeDecision ? { tradeDecision: params.tradeDecision } : {}),
     ...(params.provenance ? { provenance: params.provenance } : {}),
     ...(params.meta ? { meta: params.meta } : {}),
   };

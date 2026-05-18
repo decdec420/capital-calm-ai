@@ -54,6 +54,8 @@ export type DecisionMemoryMode = "paper" | "live" | "research";
  * Same security rules as DecisionReplayPacket in decision-replay.ts.
  */
 export interface NonTradeReplayPacket {
+  /** Canonical trade-decision score/reasons captured at decision time. */
+  tradeDecision?: Record<string, unknown>;
   ranAt: string;
   symbol: string | null;
   regime: string | null;
@@ -117,6 +119,7 @@ export const REASON_CODE_LABELS: Record<NonTradeReasonCode, string> = {
   MAX_TRADES_REACHED: "Daily trade cap reached",
   COOLDOWN_ACTIVE: "Cooldown active",
   DOCTRINE_BLOCK: "Doctrine block",
+  DEFAULT_LONG_FALLBACK_BLOCKED: "Default-long fallback blocked",
   BRAIN_TRUST_STALE: "Brain Trust stale / degraded",
   MARKET_DATA_STALE: "Market data stale",
   NO_APPROVED_STRATEGY: "No approved strategy for regime",

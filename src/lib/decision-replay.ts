@@ -126,6 +126,8 @@ export interface DecisionReplayPacket {
   doctrine: DoctrineReplaySlice;
   model: ModelReplaySlice;
   gates: GateReplaySlice;
+  /** Canonical trade-decision score/reasons captured at decision time. */
+  tradeDecision?: Record<string, unknown>;
 
   /** Final decision outcome. */
   decision: "approved" | "vetoed_by_risk_manager" | "skipped_no_signal" | "blocked_by_gate";
@@ -152,6 +154,7 @@ export function buildDecisionReplayPacket(params: {
   doctrine: DoctrineReplaySlice;
   model: ModelReplaySlice;
   gates: GateReplaySlice;
+  tradeDecision?: DecisionReplayPacket["tradeDecision"];
   decision: DecisionReplayPacket["decision"];
   decisionReason: string;
 }): DecisionReplayPacket {
@@ -164,6 +167,7 @@ export function buildDecisionReplayPacket(params: {
     doctrine: params.doctrine,
     model: params.model,
     gates: params.gates,
+    ...(params.tradeDecision ? { tradeDecision: params.tradeDecision } : {}),
     decision: params.decision,
     decisionReason: params.decisionReason,
   };
