@@ -23,7 +23,8 @@ import { toast } from "sonner";
 import { useCandles } from "@/hooks/useCandles";
 import { useJournals } from "@/hooks/useJournals";
 import { useMarketIntelligence, type MarketIntelligence } from "@/hooks/useMarketIntelligence";
-import { computeRegime, MIN_SETUP_SCORE_LIVE } from "@/lib/regime";
+import { computeRegime } from "@/lib/regime";
+import { scoreTradeDecision, type TradeDecisionLabel } from "@/lib/trade-decision-score";
 import { cn } from "@/lib/utils";
 
 const SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD"] as const;
@@ -47,27 +48,24 @@ function isStaleIntel(iso: string | null | undefined, maxMinutes = 10): boolean 
   return Date.now() - new Date(iso).getTime() > maxMinutes * 60_000;
 }
 
-function noTradeReasonLink(reason: string): { to: string; hint: string } {
-  const r = reason.toLowerCase();
-  if (/setup|score/.test(r)) return { to: "/risk", hint: "tune in Risk Center" };
-  if (/vol|volatility/.test(r)) return { to: "/risk", hint: "vol guardrail" };
-  if (/regime|chop|range/.test(r)) return { to: "/strategy", hint: "regime params" };
-  if (/tod|time|liquidity/.test(r)) return { to: "/settings", hint: "time-of-day window" };
-  return { to: "/risk", hint: "see guardrails" };
-}
-
 type Dot = "ok" | "neutral" | "bad";
 type Tone = "long" | "short" | "neutral" | "warn" | "good";
 
-function signalConditions(regime: ReturnType<typeof computeRegime>) {
-  const tradeableRegime = regime.regime === "trending_up" || regime.regime === "trending_down" || regime.regime === "breakout" || (regime.regime === "range" && (regime.rsiOverbought || regime.rsiOversold));
-  return [
-    { label: "Regime", detail: regime.regime === "range" ? regime.rsiOverbought ? `range · RSI ${regime.rsiNow.toFixed(0)} overbought → fade ↓` : regime.rsiOversold ? `range · RSI ${regime.rsiNow.toFixed(0)} oversold → fade ↑` : `range · RSI ${regime.rsiNow.toFixed(0)} (need ≥70 or ≤30)` : regime.regime.replace(/_/g, " "), status: (tradeableRegime ? "ok" : regime.regime === "chop" ? "bad" : "neutral") as Dot },
-    { label: "Volatility", detail: `${regime.volatility} · ${regime.annualizedVolPct.toFixed(0)}% ann.`, status: (regime.volatility === "normal" || regime.volatility === "low" ? "ok" : regime.volatility === "extreme" ? "bad" : "neutral") as Dot },
-    { label: `Setup ≥ ${MIN_SETUP_SCORE_LIVE}`, detail: `score ${regime.setupScore.toFixed(2)}`, status: (regime.setupScore >= MIN_SETUP_SCORE_LIVE ? "ok" : "bad") as Dot },
-    { label: "Pullback", detail: regime.pullback ? "detected — buy-the-dip entry" : `no · RSI ${regime.rsiNow.toFixed(0)}`, status: (regime.pullback ? "ok" : "neutral") as Dot },
-    { label: "TOD window", detail: `score ${(regime.timeOfDayScore * 100).toFixed(0)}%`, status: (regime.timeOfDayScore >= 0.55 ? "ok" : regime.timeOfDayScore < 0.4 ? "bad" : "neutral") as Dot },
-  ];
+function decisionTone(decision: TradeDecisionLabel): NonNullable<React.ComponentProps<typeof StatusBadge>["tone"]> {
+  switch (decision) {
+    case "ENTRY CANDIDATE": return "candidate";
+    case "SETUP FORMING": return "accent";
+    case "RISK BLOCKED": return "blocked";
+    default: return "neutral";
+  }
+}
+
+function blockerLink(blocker: string): { to: string; hint: string } {
+  const b = blocker.toLowerCase();
+  if (/volatility|setup|risk|capital/.test(b)) return { to: "/risk", hint: "review risk guardrails" };
+  if (/chop|range|structure|mean-reversion|tradeable/.test(b)) return { to: "/strategy", hint: "review strategy rules" };
+  if (/liquidity|window|timing/.test(b)) return { to: "/settings", hint: "review trading window" };
+  return { to: "/risk", hint: "see guardrails" };
 }
 
 function toneClasses(tone: Tone) {
@@ -126,7 +124,7 @@ function IntelBadge({ tone, children }: { tone: Tone; children: React.ReactNode 
 function RegimePanel({ symbol }: { symbol: SymbolId }) {
   const { candles, loading } = useCandles(symbol);
   const regime = useMemo(() => computeRegime(symbol, candles), [symbol, candles]);
-  const conditions = useMemo(() => signalConditions(regime), [regime]);
+  const tradeDecision = useMemo(() => scoreTradeDecision(regime), [regime]);
 
   if (loading && candles.length === 0) {
     return <div className="panel p-12 text-center"><p className="text-sm text-muted-foreground italic">Pulling candles for {shortName(symbol)}…</p></div>;
@@ -147,6 +145,7 @@ function RegimePanel({ symbol }: { symbol: SymbolId }) {
           <RegimeBadge regime={regime.regime} confidence={regime.confidence} />
           <StatusBadge tone="neutral" size="sm">vol {regime.volatility}</StatusBadge>
           <StatusBadge tone="neutral" size="sm">spread {regime.spread}</StatusBadge>
+          <StatusBadge tone={decisionTone(tradeDecision.decision)} size="sm" dot>{tradeDecision.decision}</StatusBadge>
           {regime.pullback && <StatusBadge tone="safe" size="sm">pullback ✓</StatusBadge>}
           {regime.rsiOverbought && <StatusBadge tone="caution" size="sm">RSI overbought {regime.rsiNow.toFixed(0)}</StatusBadge>}
           {regime.rsiOversold  && <StatusBadge tone="caution" size="sm">RSI oversold {regime.rsiNow.toFixed(0)}</StatusBadge>}
@@ -154,28 +153,48 @@ function RegimePanel({ symbol }: { symbol: SymbolId }) {
         <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
           <Stat label="Confidence"  value={`${(regime.confidence * 100).toFixed(0)}%`} />
           <Stat label="TOD score"   value={`${(regime.timeOfDayScore * 100).toFixed(0)}%`} />
-          <Stat label="Setup score" value={regime.setupScore.toFixed(2)} />
-          <Stat label="Threshold"   value={String(MIN_SETUP_SCORE_LIVE)} />
+          <Stat label="Trade score" value={`${tradeDecision.tradeScore}/100`} />
+          <Stat label="Decision"    value={tradeDecision.decision} />
           <Stat label="RSI"         value={regime.rsiNow.toFixed(1)} />
           <Stat label="Slow EMA ↑"  value={regime.slowRising ? "yes" : "no"} />
           {regime.emaSlow > 0 && <Stat label="Slow EMA" value={`$${regime.emaSlow.toFixed(0)}`} />}
           {regime.emaFast > 0 && <Stat label="Fast EMA" value={`$${regime.emaFast.toFixed(0)}`} />}
         </div>
       </div>
-      {regime.noTradeReasons.length > 0 && (
-        <div className="panel p-4 space-y-2">
-          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">No-trade reasons</span>
-          <div className="flex flex-wrap gap-1.5">
-            {regime.noTradeReasons.map((r) => { const link = noTradeReasonLink(r); return <Link key={r} to={link.to} title={link.hint} className="hover:opacity-80 transition-opacity"><ReasonChip label={r} tone="caution" /></Link>; })}
+      <div className="panel p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Unified trade decision</span>
+          <div className="flex items-center gap-2">
+            <StatusBadge tone={decisionTone(tradeDecision.decision)} size="sm" dot>{tradeDecision.decision}</StatusBadge>
+            <span className="text-sm font-mono text-foreground">{tradeDecision.tradeScore}/100</span>
           </div>
-          <p className="text-[11px] text-muted-foreground italic pt-1">Click a reason to tune it.</p>
         </div>
-      )}
-      <div className="panel p-4 space-y-2">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Signal conditions</span>
-        <div className="space-y-1.5 pt-1">
-          {conditions.map((c) => <Cond key={c.label} label={c.label} detail={c.detail} status={c.status} />)}
+        {!tradeDecision.tradeAllowed && (
+          <p className="rounded-md border border-border/70 bg-muted/40 px-2.5 py-2 text-sm text-muted-foreground">
+            Waiting for high-quality entry.
+          </p>
+        )}
+        <div className="space-y-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80">Top reasons</span>
+          <div className="space-y-1.5">
+            {tradeDecision.topReasons.map((reason) => <Cond key={reason} label={reason} detail="" status="neutral" />)}
+          </div>
         </div>
+        <div className="space-y-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground/80">Active blockers</span>
+          {tradeDecision.activeBlockers.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {tradeDecision.activeBlockers.map((blocker) => { const link = blockerLink(blocker); return <Link key={blocker} to={link.to} title={link.hint} className="hover:opacity-80 transition-opacity"><ReasonChip label={blocker} tone={tradeDecision.decision === "RISK BLOCKED" ? "blocked" : "caution"} /></Link>; })}
+            </div>
+          ) : (
+            <p className="text-sm text-status-safe">No active blockers.</p>
+          )}
+        </div>
+        <div className="rounded-md border border-border/70 bg-muted/40 px-2.5 py-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">Next likely trigger</div>
+          <p className="mt-1 text-sm text-foreground">{tradeDecision.nextLikelyTrigger}</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground">Raw RSI context: <span className="font-mono text-foreground">{regime.rsiNow.toFixed(1)}</span>. RSI supports the read but is not the primary trigger.</p>
       </div>
     </div>
   );
