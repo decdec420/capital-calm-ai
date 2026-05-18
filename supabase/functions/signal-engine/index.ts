@@ -100,6 +100,10 @@ import {
   selectSignalEvaluationCandidates,
 } from "../_shared/signal-evaluation.ts";
 import { evaluateQuietMode, shouldEmitQuietModeEvent } from "../_shared/quiet-mode.ts";
+import {
+  computeTradeDecisionScore,
+  type TradeDecisionScoreResult,
+} from "../_shared/trade-decision-score.ts";
 
 
 // deno-lint-ignore no-explicit-any
@@ -1861,6 +1865,7 @@ async function runTickForUser(
     regime: RegimeResult;
     lockGate?: GateReason;
     riskGates: GateReason[];
+    tradeDecision: TradeDecisionScoreResult;
   }> = [];
 
   for (const symbol of SYMBOLS) {
@@ -2025,6 +2030,39 @@ async function runTickForUser(
           (r) => r.severity === "halt" || r.severity === "block",
         );
 
+    const tradeDecision = computeTradeDecisionScore({
+      regime,
+      rsi: { now: regime.rsiNow, previous: regime.rsiPrev },
+      ema: {
+        fast: regime.emaFast,
+        slow: regime.emaSlow,
+        slowRising: regime.slowRising,
+        pullback: regime.pullback,
+      },
+      marketIntelligence: {
+        momentum1h,
+        momentum4h,
+        momentumAgeMinutes: Number.isFinite(momentumAgeMin) ? momentumAgeMin : null,
+        maxAgeMinutes: freshness.maxAgeMin,
+        stale: momentumStale,
+      },
+      volatility: regime.volatility,
+      riskGates: lockGate ? [...riskGates, lockGate] : riskGates,
+      openPosition: {
+        hasOpenPosition: symbolsWithOpen.has(symbol),
+        hasPendingSignal: symbolsWithPending.has(symbol),
+        openPositionCount: (openTrades ?? []).length,
+      },
+      portfolio: {
+        equityUsd: equity,
+        dailyRealizedPnlUsd,
+        dailyTradeCount: dailyTradeCount ?? 0,
+        bookExposureUsd: bookNotional,
+        killSwitchEngaged: !!sys.kill_switch_engaged,
+        botStatus: sys.bot ?? "paused",
+      },
+    });
+
     // No-candles gate is additive (surfaced regardless of risk gates)
     if (!candles || candles.length === 0) {
       // P6-I: this was a silent skip. Surface it in logs and agent_health
@@ -2063,11 +2101,12 @@ async function runTickForUser(
           { symbol },
         ),
         riskGates,
+        tradeDecision,
       });
       continue;
     }
 
-    candidates.push({ symbol, lastPrice, regime, lockGate, riskGates });
+    candidates.push({ symbol, lastPrice, regime, lockGate, riskGates, tradeDecision });
   }
 
   // ── Account-level halts bubble up from any symbol's risk gates ──
@@ -2134,7 +2173,7 @@ async function runTickForUser(
     (c) =>
       !c.lockGate &&
       TRADEABLE_REGIMES.has(c.regime.regime) &&
-      c.regime.setupScore >= MIN_SETUP_SCORE,
+      c.tradeDecision.state === "TRADE_ALLOWED",
   );
   // Build per-symbol recency: how many of the last 20 ticks chose this symbol.
   // Lower = staler = preferred when scores are close.
@@ -2262,25 +2301,25 @@ async function runTickForUser(
           ),
         ];
       }
-      if (c.regime.regime === "range" && c.regime.setupScore < MIN_SETUP_SCORE) {
+      if (c.regime.regime === "range" && c.tradeDecision.state !== "TRADE_ALLOWED" && c.regime.rsiNow > 30 && c.regime.rsiNow < 70) {
         // Range is tradeable but only at RSI extremes (≥70 overbought / ≤30 oversold).
-        // setupScore < MIN_SETUP_SCORE here means rangeReversionBoost wasn't earned.
+        // Decision score below TRADE_ALLOWED here usually means rangeReversionBoost wasn't earned.
         return [
           gate(
             GATE_CODES.RANGE_REGIME,
             "skip",
-            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion fade). setupScore ${c.regime.setupScore.toFixed(2)}.`,
-            { symbol: c.symbol, rsiNow: c.regime.rsiNow, setupScore: c.regime.setupScore },
+            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion fade). decision ${c.tradeDecision.score}.`,
+            { symbol: c.symbol, rsiNow: c.regime.rsiNow, tradeDecision: c.tradeDecision },
           ),
         ];
       }
-      if (c.regime.setupScore < MIN_SETUP_SCORE) {
+      if (c.tradeDecision.state !== "TRADE_ALLOWED") {
         return [
           gate(
             GATE_CODES.LOW_SETUP_SCORE,
             "skip",
-            `${c.symbol}: setup ${c.regime.setupScore.toFixed(2)} below ${MIN_SETUP_SCORE.toFixed(2)}.`,
-            { symbol: c.symbol, setupScore: c.regime.setupScore },
+            `${c.symbol}: trade decision ${c.tradeDecision.state} (score ${c.tradeDecision.score}) below TRADE_ALLOWED.`,
+            { symbol: c.symbol, tradeDecision: c.tradeDecision },
           ),
         ];
       }
@@ -2313,7 +2352,7 @@ async function runTickForUser(
         if (code === GATE_CODES.NO_CANDLES || code === GATE_CODES.STALE_DATA) return "MARKET_DATA_STALE" as const;
         if (code === GATE_CODES.REENTRY_COOLDOWN || code === GATE_CODES.ANTI_TILT_COOLDOWN) return "COOLDOWN_ACTIVE" as const;
         if (code === GATE_CODES.NEWS_FLAG_CRITICAL) return "DOCTRINE_BLOCK" as const;
-        if (c.regime.setupScore < MIN_SETUP_SCORE) return "LOW_SETUP_SCORE" as const;
+        if (c.tradeDecision.state !== "TRADE_ALLOWED") return "LOW_SETUP_SCORE" as const;
         return "NO_TRADE_REGIME" as const;
       })();
       recordNonTrade(admin, {
