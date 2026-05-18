@@ -106,11 +106,36 @@ export interface SnapshotPerSymbol {
   lockGate: GateReason | null;
 }
 
+
+export interface EngineSnapshotBlocker {
+  code: string;
+  severity: "critical" | "high" | "medium" | "low";
+  message: string;
+  source: "gate" | "portfolio" | "position" | "account" | "doctrine" | "market" | "system";
+  owner?: string;
+  nextSafeAction?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface EngineSnapshotTradeDecision {
+  status: "CLEAR" | "WARN" | "BLOCKED" | "RISK_BLOCKED" | "NO_TRADE";
+  canTradeNow: boolean;
+  riskBlocked: boolean;
+  blockers: EngineSnapshotBlocker[];
+  scoreAdjustment: number;
+  requiredScoreBump: number;
+  reasonCodes: string[];
+}
+
 export interface EngineSnapshot {
   ranAt: string;
   gateReasons: GateReason[];
   perSymbol: SnapshotPerSymbol[];
   chosenSymbol: string | null;
+  /** Normalized concise reasons emitted by signal-engine for "why not trading" UI. */
+  blockers?: EngineSnapshotBlocker[];
+  /** Unified trade-decision output emitted by signal-engine. */
+  tradeDecision?: EngineSnapshotTradeDecision;
   /** Legacy/test snapshots may include aggregate signal metadata. */
   setupScore?: number;
   proposedTrades?: unknown[];

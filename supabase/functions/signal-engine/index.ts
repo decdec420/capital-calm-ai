@@ -70,7 +70,9 @@ import {
 import { buildPatternMemory } from "../_shared/trade-stats.ts";
 import {
   persistSnapshot,
+  type NormalizedBlocker,
   type PerSymbolSnapshot,
+  type UnifiedTradeDecisionSnapshot,
 } from "../_shared/snapshot.ts";
 import {
   getBrokerCredentials,
@@ -92,7 +94,9 @@ import {
 } from "../_shared/decision-memory.ts";
 import {
   computePortfolioRisk,
+  PORTFOLIO_RISK_CODES,
   safePortfolioRiskSummary,
+  type PortfolioRiskSummary,
 } from "../_shared/portfolio-risk.ts";
 import {
   SIGNAL_EVALUATION_SYMBOLS,
@@ -390,6 +394,222 @@ export function computeCoachVerdict(
 export interface NewsFlagSummary {
   active: Array<{ label: string; severity: string; note?: string; until?: string }>;
   hasCritical: boolean;
+}
+
+
+type TradeDecisionStatus = UnifiedTradeDecisionSnapshot["status"];
+
+type OpenTradeState = {
+  symbol: string;
+  side?: string | null;
+  entry_price?: number | string | null;
+  size?: number | string | null;
+  unrealized_pnl?: number | string | null;
+};
+
+interface TradeDecisionMapperInput {
+  gateReasons: GateReason[];
+  portfolioRisk: PortfolioRiskSummary | null;
+  openTrades: OpenTradeState[];
+  symbol?: string | null;
+  side?: "long" | "short" | null;
+  mode: "paper" | "live";
+  setupScore?: number | null;
+  maxCorrelatedPositions: number;
+  doctrineMode?: string | null;
+}
+
+const RISK_BLOCK_GATE_CODES = new Set<string>([
+  GATE_CODES.DAILY_LOSS_CAP,
+  GATE_CODES.BALANCE_FLOOR,
+  GATE_CODES.DOCTRINE_KILL_SWITCH_FLOOR,
+  GATE_CODES.KILL_SWITCH,
+  GATE_CODES.STALE_DATA,
+  GATE_CODES.STALE_ENGINE_SNAPSHOT,
+  GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE,
+  GATE_CODES.BRAIN_TRUST_REFRESH_FAILED,
+  GATE_CODES.MISSING_MARKET_INTELLIGENCE,
+  GATE_CODES.OPEN_POSITION,
+  GATE_CODES.PORTFOLIO_UNKNOWN_EXPOSURE_LIVE_BLOCK,
+  GATE_CODES.STALE_EXPOSURE,
+  GATE_CODES.STALE_MARKET_DATA,
+  GATE_CODES.STALE_ACCOUNT_STATE,
+]);
+
+const POSITION_GATE_CODES = new Set<string>([GATE_CODES.OPEN_POSITION, GATE_CODES.PENDING_SIGNAL]);
+const ACCOUNT_GATE_CODES = new Set<string>([
+  GATE_CODES.KILL_SWITCH,
+  GATE_CODES.DAILY_LOSS_CAP,
+  GATE_CODES.BALANCE_FLOOR,
+  GATE_CODES.TRADE_COUNT_CAP,
+]);
+
+const RISK_BLOCK_PORTFOLIO_CODES = new Set<string>([
+  PORTFOLIO_RISK_CODES.TOTAL_EXPOSURE_BLOCK,
+  PORTFOLIO_RISK_CODES.SYMBOL_EXPOSURE_BLOCK,
+  PORTFOLIO_RISK_CODES.CORRELATED_EXPOSURE_BLOCK,
+  PORTFOLIO_RISK_CODES.OPEN_POSITIONS_BLOCK,
+  PORTFOLIO_RISK_CODES.UNKNOWN_EXPOSURE_LIVE_BLOCK,
+  PORTFOLIO_RISK_CODES.STALE_EXPOSURE,
+  PORTFOLIO_RISK_CODES.STALE_MARKET_DATA,
+  PORTFOLIO_RISK_CODES.STALE_ACCOUNT_STATE,
+]);
+
+function normalizedSeverityFromGate(gateReason: GateReason): NormalizedBlocker["severity"] {
+  if (gateReason.severity === "halt") return "critical";
+  if (gateReason.severity === "block") return "high";
+  if (gateReason.severity === "skip") return "medium";
+  return "low";
+}
+
+function blockerSourceForGate(gateReason: GateReason): NormalizedBlocker["source"] {
+  if (gateReason.code.startsWith("PORTFOLIO_")) return "portfolio";
+  if (POSITION_GATE_CODES.has(gateReason.code)) return "position";
+  if (ACCOUNT_GATE_CODES.has(gateReason.code)) return "account";
+  if (gateReason.code.includes("DOCTRINE") || gateReason.code.includes("CORRELATION")) return "doctrine";
+  if (gateReason.code.includes("STALE") || gateReason.code === GATE_CODES.NO_CANDLES) return "market";
+  return "gate";
+}
+
+function nextSafeActionForCode(code: string): string {
+  switch (code) {
+    case GATE_CODES.KILL_SWITCH:
+      return "Disarm the kill switch only after confirming the account is safe.";
+    case GATE_CODES.DAILY_LOSS_CAP:
+      return "Wait for the UTC daily reset or review the doctrine daily-loss cap.";
+    case GATE_CODES.BALANCE_FLOOR:
+    case GATE_CODES.DOCTRINE_KILL_SWITCH_FLOOR:
+      return "Top up the account or lower the doctrine floor after manual review.";
+    case GATE_CODES.OPEN_POSITION:
+      return "Wait for the existing same-symbol position to close before re-entering.";
+    case GATE_CODES.BRAIN_TRUST_MOMENTUM_STALE:
+    case GATE_CODES.BRAIN_TRUST_REFRESH_FAILED:
+    case GATE_CODES.MISSING_MARKET_INTELLIGENCE:
+    case GATE_CODES.STALE_DATA:
+    case GATE_CODES.STALE_MARKET_DATA:
+      return "Refresh market intelligence and confirm the candle feed is current.";
+    case PORTFOLIO_RISK_CODES.CORRELATED_EXPOSURE_WARN:
+      return "Require stronger symbol-specific edge or reduce correlated exposure.";
+    default:
+      return "Review this blocker in the Risk Center before enabling a new entry.";
+  }
+}
+
+function addNormalizedBlocker(blockers: NormalizedBlocker[], blocker: NormalizedBlocker): void {
+  const duplicate = blockers.some((b) => b.code === blocker.code && b.message === blocker.message);
+  if (!duplicate) blockers.push(blocker);
+}
+
+function mapToUnifiedTradeDecision(input: TradeDecisionMapperInput): UnifiedTradeDecisionSnapshot {
+  const blockers: NormalizedBlocker[] = [];
+  let scoreAdjustment = 0;
+  let requiredScoreBump = 0;
+
+  for (const reason of input.gateReasons) {
+    if (reason.severity === "info") continue;
+    addNormalizedBlocker(blockers, {
+      code: reason.code,
+      severity: normalizedSeverityFromGate(reason),
+      message: reason.message,
+      source: blockerSourceForGate(reason),
+      nextSafeAction: nextSafeActionForCode(reason.code),
+      meta: reason.meta,
+    });
+    if (reason.severity === "warn") scoreAdjustment -= 0.03;
+  }
+
+  if (input.portfolioRisk) {
+    for (const code of input.portfolioRisk.blockCodes) {
+      addNormalizedBlocker(blockers, {
+        code,
+        severity: RISK_BLOCK_PORTFOLIO_CODES.has(code) ? "high" : "medium",
+        message: `Portfolio risk block: ${code}`,
+        source: "portfolio",
+        nextSafeAction: "Reduce or close portfolio exposure before opening a new position.",
+        meta: { portfolioRisk: safePortfolioRiskSummary(input.portfolioRisk), mode: input.mode },
+      });
+    }
+    for (const code of input.portfolioRisk.warningCodes) {
+      addNormalizedBlocker(blockers, {
+        code,
+        severity: "low",
+        message: `Portfolio risk warning: ${code}`,
+        source: "portfolio",
+        nextSafeAction: nextSafeActionForCode(code),
+        meta: { portfolioRisk: safePortfolioRiskSummary(input.portfolioRisk), mode: input.mode },
+      });
+      scoreAdjustment -= code === PORTFOLIO_RISK_CODES.CORRELATED_EXPOSURE_WARN ? 0.08 : 0.03;
+    }
+  }
+
+  if (input.symbol && input.side) {
+    const duplicate = input.openTrades.find((t) =>
+      t.symbol === input.symbol && (t.side ?? "").toLowerCase() === input.side
+    );
+    if (duplicate) {
+      addNormalizedBlocker(blockers, {
+        code: GATE_CODES.OPEN_POSITION,
+        severity: "high",
+        message: `${input.symbol}: duplicate ${input.side.toUpperCase()} entry blocked because an open position already exists in the same direction.`,
+        source: "position",
+        nextSafeAction: "Close or manage the existing position before entering the same symbol and direction again.",
+        meta: { symbol: input.symbol, side: input.side, existingPosition: duplicate },
+      });
+    }
+  }
+
+  const correlatedOpenCount = input.openTrades.filter((t) =>
+    t.symbol === "BTC-USD" || t.symbol === "ETH-USD" || t.symbol === "SOL-USD"
+  ).length;
+  const hasCorrelatedExposure = correlatedOpenCount > 0 && (!input.symbol || ["BTC-USD", "ETH-USD", "SOL-USD"].includes(input.symbol));
+  if (hasCorrelatedExposure && correlatedOpenCount < input.maxCorrelatedPositions) {
+    const strictDoctrine = input.maxCorrelatedPositions <= 1 || input.doctrineMode === "lockout";
+    if (strictDoctrine) {
+      requiredScoreBump += 0.10;
+    } else {
+      scoreAdjustment -= 0.05;
+    }
+    addNormalizedBlocker(blockers, {
+      code: PORTFOLIO_RISK_CODES.CORRELATED_EXPOSURE_WARN,
+      severity: "low",
+      message: strictDoctrine
+        ? `Open correlated crypto exposure requires +${requiredScoreBump.toFixed(2)} setup score before adding risk.`
+        : "Open correlated crypto exposure reduces candidate score before selection.",
+      source: "portfolio",
+      nextSafeAction: "Only add correlated exposure when the setup clears the stricter doctrine threshold.",
+      meta: {
+        correlatedOpenCount,
+        maxCorrelatedPositions: input.maxCorrelatedPositions,
+        doctrineMode: input.doctrineMode ?? null,
+        scoreAdjustment,
+        requiredScoreBump,
+      },
+    });
+  }
+
+  const riskBlocked = blockers.some((b) =>
+    b.severity === "critical" ||
+    RISK_BLOCK_GATE_CODES.has(b.code) ||
+    RISK_BLOCK_PORTFOLIO_CODES.has(b.code)
+  );
+  const hasHighBlocker = blockers.some((b) => b.severity === "high" || b.severity === "medium");
+  const status: TradeDecisionStatus = riskBlocked
+    ? "RISK_BLOCKED"
+    : hasHighBlocker
+      ? "BLOCKED"
+      : blockers.length > 0
+        ? "WARN"
+        : "CLEAR";
+
+  return {
+    status,
+    canTradeNow: status === "CLEAR" || status === "WARN",
+    riskBlocked,
+    blockers,
+    scoreAdjustment,
+    requiredScoreBump,
+    reasonCodes: blockers.map((b) => b.code),
+  };
 }
 
 export function summarizeNewsFlags(rawFlags: unknown): NewsFlagSummary {
@@ -1462,10 +1682,22 @@ async function runTickForUser(
   if (portfolioRisk.verdict === "block") {
     const primaryCode = portfolioRisk.blockCodes[0];
     const safeSummary = safePortfolioRiskSummary(portfolioRisk);
+    const portfolioBlockDecision = mapToUnifiedTradeDecision({
+      gateReasons: portfolioBlockGates,
+      portfolioRisk,
+      openTrades: openTrades ?? [],
+      symbol: null,
+      side: null,
+      mode: isPaper ? "paper" : "live",
+      maxCorrelatedPositions: MAX_CORRELATED_POSITIONS,
+      doctrineMode: null,
+    });
     await persistSnapshot(admin, userId, {
       gateReasons: portfolioBlockGates,
       perSymbol: [],
       chosenSymbol: null,
+      blockers: portfolioBlockDecision.blockers,
+      tradeDecision: portfolioBlockDecision,
     });
     recordNonTrade(admin, {
       userId,
@@ -1886,6 +2118,9 @@ async function runTickForUser(
     regime: RegimeResult;
     lockGate?: GateReason;
     riskGates: GateReason[];
+    tradeDecision?: UnifiedTradeDecisionSnapshot;
+    adjustedSetupScore?: number;
+    requiredSetupScore?: number;
   }> = [];
 
   for (const symbol of SYMBOLS) {
@@ -2095,6 +2330,34 @@ async function runTickForUser(
     candidates.push({ symbol, lastPrice, regime, lockGate, riskGates });
   }
 
+  // ── Unified trade-decision mapper ─────────────────────────────
+  // Normalize unrelated gate arrays + portfolio risk + open-position state
+  // into the concise contract consumed by UI "why not trading" surfaces.
+  // This also applies soft portfolio/correlation warnings before candidate
+  // selection so warnings reduce score or raise the required score without
+  // pretending they are hard risk blocks.
+  for (const c of candidates) {
+    const decisionGateReasons = [
+      ...portfolioWarnGates,
+      ...(c.lockGate ? [c.lockGate] : []),
+      ...c.riskGates,
+    ];
+    const decisionOutput = mapToUnifiedTradeDecision({
+      gateReasons: decisionGateReasons,
+      portfolioRisk,
+      openTrades: openTrades ?? [],
+      symbol: c.symbol,
+      side: null,
+      mode: isPaper ? "paper" : "live",
+      setupScore: c.regime.setupScore,
+      maxCorrelatedPositions: MAX_CORRELATED_POSITIONS,
+      doctrineMode: doctrineOverlay.mode,
+    });
+    c.tradeDecision = decisionOutput;
+    c.adjustedSetupScore = Math.max(0, c.regime.setupScore + decisionOutput.scoreAdjustment);
+    c.requiredSetupScore = MIN_SETUP_SCORE + decisionOutput.requiredScoreBump;
+  }
+
   // ── Account-level halts bubble up from any symbol's risk gates ──
   const accountHalt = candidates
     .flatMap((c) => c.riskGates)
@@ -2112,10 +2375,22 @@ async function runTickForUser(
       lockGate: c.lockGate ?? null,
       chosen: false,
     }));
+    const haltTradeDecision = mapToUnifiedTradeDecision({
+      gateReasons: [accountHalt],
+      portfolioRisk,
+      openTrades: openTrades ?? [],
+      symbol: null,
+      side: null,
+      mode: isPaper ? "paper" : "live",
+      maxCorrelatedPositions: MAX_CORRELATED_POSITIONS,
+      doctrineMode: doctrineOverlay.mode,
+    });
     await persistSnapshot(admin, userId, {
       gateReasons: [accountHalt],
       perSymbol: perSymbolSnap,
       chosenSymbol: null,
+      blockers: haltTradeDecision.blockers,
+      tradeDecision: haltTradeDecision,
     });
     // Map the gate code to a canonical NonTradeReasonCode for learning queries.
     const haltReasonCode = (() => {
@@ -2159,7 +2434,7 @@ async function runTickForUser(
     (c) =>
       !c.lockGate &&
       TRADEABLE_REGIMES.has(c.regime.regime) &&
-      c.regime.setupScore >= MIN_SETUP_SCORE,
+      (c.adjustedSetupScore ?? c.regime.setupScore) >= (c.requiredSetupScore ?? MIN_SETUP_SCORE),
   );
   // Build per-symbol recency: how many of the last 20 ticks chose this symbol.
   // Lower = staler = preferred when scores are close.
@@ -2175,18 +2450,20 @@ async function runTickForUser(
     // Rotation tiebreaker: when setupScores are within 0.10 of each other,
     // prefer the symbol that's been evaluated less often recently. Stops
     // the engine from getting tunnel-vision on one ticker.
-    const scoreDelta = Math.abs(b.regime.setupScore - a.regime.setupScore);
+    const scoreA = a.adjustedSetupScore ?? a.regime.setupScore;
+    const scoreB = b.adjustedSetupScore ?? b.regime.setupScore;
+    const scoreDelta = Math.abs(scoreB - scoreA);
     if (scoreDelta < 0.10) {
       const ca = recentCounts[a.symbol] ?? 0;
       const cb = recentCounts[b.symbol] ?? 0;
       if (ca !== cb) return ca - cb;
     }
-    return b.regime.setupScore - a.regime.setupScore;
+    return scoreB - scoreA;
   });
   const multiSymbolSelection = selectSignalEvaluationCandidates(
     tradable.map((c) => ({
       symbol: c.symbol,
-      setupScore: c.regime.setupScore,
+      setupScore: c.adjustedSetupScore ?? c.regime.setupScore,
       confidence: c.regime.confidence,
       pullback: c.regime.pullback,
       momentumAgeMin: (() => {
@@ -2301,37 +2578,51 @@ async function runTickForUser(
           ),
         ];
       }
-      if (c.regime.regime === "range" && c.regime.setupScore < MIN_SETUP_SCORE) {
+      const effectiveSetupScore = c.adjustedSetupScore ?? c.regime.setupScore;
+      const requiredSetupScore = c.requiredSetupScore ?? MIN_SETUP_SCORE;
+      if (c.regime.regime === "range" && effectiveSetupScore < requiredSetupScore) {
         // Range is tradeable but only at RSI extremes (≥70 overbought / ≤30 oversold).
-        // setupScore < MIN_SETUP_SCORE here means rangeReversionBoost wasn't earned.
+        // effectiveSetupScore < requiredSetupScore here means rangeReversionBoost or doctrine-adjusted score was insufficient.
         return [
           gate(
             GATE_CODES.RANGE_REGIME,
             "skip",
-            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion fade). setupScore ${c.regime.setupScore.toFixed(2)}.`,
-            { symbol: c.symbol, rsiNow: c.regime.rsiNow, setupScore: c.regime.setupScore },
+            `${c.symbol}: range — RSI ${c.regime.rsiNow.toFixed(0)} not at extreme (need ≥70 or ≤30 for mean-reversion fade). setupScore ${effectiveSetupScore.toFixed(2)} below ${requiredSetupScore.toFixed(2)}.`,
+            { symbol: c.symbol, rsiNow: c.regime.rsiNow, setupScore: effectiveSetupScore, requiredSetupScore },
           ),
         ];
       }
-      if (c.regime.setupScore < MIN_SETUP_SCORE) {
+      if (effectiveSetupScore < requiredSetupScore) {
         return [
           gate(
             GATE_CODES.LOW_SETUP_SCORE,
             "skip",
-            `${c.symbol}: setup ${c.regime.setupScore.toFixed(2)} below ${MIN_SETUP_SCORE.toFixed(2)}.`,
-            { symbol: c.symbol, setupScore: c.regime.setupScore },
+            `${c.symbol}: setup ${effectiveSetupScore.toFixed(2)} below ${requiredSetupScore.toFixed(2)}.`,
+            { symbol: c.symbol, setupScore: effectiveSetupScore, requiredSetupScore },
           ),
         ];
       }
       return [];
     });
 
+    const skipTradeDecision = mapToUnifiedTradeDecision({
+      gateReasons: [...portfolioWarnGates, ...gateReasons],
+      portfolioRisk,
+      openTrades: openTrades ?? [],
+      symbol: null,
+      side: null,
+      mode: isPaper ? "paper" : "live",
+      maxCorrelatedPositions: MAX_CORRELATED_POSITIONS,
+      doctrineMode: doctrineOverlay.mode,
+    });
     await persistSnapshot(admin, userId, {
       // Include portfolio warn gates so the snapshot shows any portfolio
       // warnings that were active even when all symbols were individually skipped.
       gateReasons: [...portfolioWarnGates, ...gateReasons],
       perSymbol,
       chosenSymbol: null,
+      blockers: skipTradeDecision.blockers,
+      tradeDecision: skipTradeDecision,
     });
 
     await admin.from("journal_entries").insert({
@@ -2865,6 +3156,70 @@ async function runTickForUser(
       tick: "default_long_fallback_blocked",
       symbol: winner.symbol,
       gateReasons: [fallbackGate],
+      expiredCount,
+      perSymbol,
+    };
+  }
+
+  const directionalTradeDecision = mapToUnifiedTradeDecision({
+    gateReasons: winner.tradeDecision?.blockers.map((b) => gate(
+      b.code as Parameters<typeof gate>[0],
+      b.severity === "critical" ? "halt" : b.severity === "high" ? "block" : b.severity === "medium" ? "skip" : "warn",
+      b.message,
+      b.meta,
+    )) ?? [],
+    portfolioRisk,
+    openTrades: openTrades ?? [],
+    symbol: winner.symbol,
+    side,
+    mode: isPaper ? "paper" : "live",
+    setupScore: winner.regime.setupScore,
+    maxCorrelatedPositions: MAX_CORRELATED_POSITIONS,
+    doctrineMode: doctrineOverlay.mode,
+  });
+  const duplicateDirectionBlocker = directionalTradeDecision.blockers.find((b) =>
+    b.code === GATE_CODES.OPEN_POSITION && b.source === "position"
+  );
+  if (duplicateDirectionBlocker && directionalTradeDecision.riskBlocked) {
+    const duplicateGate = gate(
+      GATE_CODES.OPEN_POSITION,
+      "block",
+      duplicateDirectionBlocker.message,
+      duplicateDirectionBlocker.meta,
+    );
+    await persistSnapshot(admin, userId, {
+      gateReasons: [duplicateGate],
+      perSymbol,
+      chosenSymbol: winner.symbol,
+      blockers: directionalTradeDecision.blockers,
+      tradeDecision: directionalTradeDecision,
+    });
+    recordNonTrade(admin, {
+      userId,
+      symbol: winner.symbol,
+      reasonCode: "RISK_GATE_BLOCK",
+      severity: "block",
+      mode: isPaper ? "paper" : "live",
+      marketRegime: winner.regime.regime,
+      setupScore: winner.regime.setupScore,
+      confidence: winner.regime.confidence,
+      blockerCodes: [duplicateGate.code],
+      replayPacket: buildNonTradePacket({
+        symbol: winner.symbol,
+        regime: winner.regime.regime,
+        setupScore: winner.regime.setupScore,
+        confidence: winner.regime.confidence,
+        mode: isPaper ? "paper" : "live",
+        blockerCodes: [duplicateGate.code],
+        reason: duplicateGate.message,
+        meta: duplicateGate.meta,
+      }),
+    }).catch(() => {});
+    return {
+      userId,
+      tick: "duplicate_open_position",
+      symbol: winner.symbol,
+      gateReasons: [duplicateGate],
       expiredCount,
       perSymbol,
     };
@@ -4152,10 +4507,23 @@ async function runTickForUser(
     ]
     : [];
 
+  const finalTradeDecision = mapToUnifiedTradeDecision({
+    gateReasons: softGates,
+    portfolioRisk,
+    openTrades: openTrades ?? [],
+    symbol: winner.symbol,
+    side,
+    mode: isPaper ? "paper" : "live",
+    setupScore: winner.regime.setupScore,
+    maxCorrelatedPositions: MAX_CORRELATED_POSITIONS,
+    doctrineMode: doctrineOverlay.mode,
+  });
   await persistSnapshot(admin, userId, {
     gateReasons: softGates,
     perSymbol,
     chosenSymbol: winner.symbol,
+    blockers: finalTradeDecision.blockers,
+    tradeDecision: finalTradeDecision,
   });
 
   return {
