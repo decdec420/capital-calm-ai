@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -26,7 +26,6 @@ export function useBrokerHealth() {
   const { user } = useAuth();
   const [health, setHealth] = useState<BrokerHealth>(EMPTY);
   const [loading, setLoading] = useState(true);
-  const channelSuffixRef = useRef(crypto.randomUUID());
 
   const refetch = useCallback(async () => {
     if (!user) {
@@ -57,8 +56,9 @@ export function useBrokerHealth() {
   useEffect(() => {
     refetch();
     if (!user) return;
+    const channelName = `broker-health-${user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
-      .channel(`broker-health-${user.id}-${channelSuffixRef.current}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "broker_health", filter: `user_id=eq.${user.id}` },
